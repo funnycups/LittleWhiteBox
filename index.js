@@ -3,7 +3,7 @@ import { saveSettingsDebounced } from "../../../../script.js";
 import { statsTracker } from "./statsTracker.js";
 import { initTasks } from "./scheduledTasks.js";
 import { initScriptAssistant } from "./scriptAssistant.js";
-import { initMessagePreview } from "./message-preview.js";
+import { initMessagePreview, addHistoryButtonsDebounced } from "./message-preview.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
@@ -354,6 +354,9 @@ function toggleAllFeatures(enabled) {
             setTimeout(() => {
                 document.querySelectorAll('#message_preview_btn').forEach(btn => btn.style.display = '');
             }, 400);
+        }
+        if (extension_settings[EXT_ID].recorded?.enabled) {
+            setTimeout(() => addHistoryButtonsDebounced(), 500);
         }
     } else {
         saveCurrentSettings();

@@ -671,4 +671,4 @@ function initMessagePreview() {
 
 window.addEventListener('beforeunload', cleanup);
 
-export { initMessagePreview };
+export { initMessagePreview, addHistoryButtonsDebounced };
