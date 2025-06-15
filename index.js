@@ -41,7 +41,7 @@ function generateUniqueId() {
 
 function shouldRenderContent(content) {
     if (!content || typeof content !== 'string') return false;
-    const htmlTags = ['<html', '<!DOCTYPE', '<body', '<head', '<script', '<div', '<style'];
+    const htmlTags = ['<html', '<!DOCTYPE', '<script'];
     return htmlTags.some(tag => content.includes(tag));
 }
 
@@ -234,7 +234,7 @@ function prepareHtmlContent(htmlContent) {
     return baseTemplate + `<body>${htmlContent}</body></html>`;
 }
 
-function renderHtmlInIframe(htmlContent, container, codeBlock) {
+function renderHtmlInIframe(htmlContent, container, preElement) {  
     try {
         const iframe = document.createElement('iframe');
         iframe.id = generateUniqueId();
@@ -250,16 +250,25 @@ function renderHtmlInIframe(htmlContent, container, codeBlock) {
             iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
         }
         
-        container.appendChild(iframe);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'xiaobaix-iframe-wrapper';
+        wrapper.style.cssText = 'margin: 10px 0;';  
+        
+
+        preElement.parentNode.insertBefore(wrapper, preElement);
+        
+        wrapper.appendChild(iframe);
+        
+        preElement.style.display = 'none';
         
         const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
         iframeDoc.open();
         iframeDoc.write(prepareHtmlContent(htmlContent));
         iframeDoc.close();
         
-        if (codeBlock) codeBlock.style.display = 'none';
         return iframe;
     } catch (err) {
+        console.error('[小白X] 渲染iframe失败:', err);
         return null;
     }
 }

@@ -86,7 +86,7 @@ async function injectScriptDocs() {
 关于小白X插件核心功能:
 1. 代码块渲染功能:
    - SillyTavern原生只支持显示静态代码块，无法执行JavaScript或渲染HTML
-   - 小白X将聊天中包含HTML标签(如<html>, <!DOCTYPE>, <body>, <head>, <script>, <div>, <style>等)的代码块自动转换为交互式iframe
+   - 小白X将聊天中包含HTML标签(完整的<html>, <!DOCTYPE>或单独的<script>)的代码块自动转换为交互式iframe
    - 小白X提供了特殊的桥接API: STscript()函数
      • 这是一个异步函数，接受斜杠命令字符串作为参数
      • 函数会将命令发送给SillyTavern执行，并返回执行结果
