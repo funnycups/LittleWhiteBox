@@ -185,7 +185,7 @@ async function handlePreviewInterception(url, options) {
     
         return new Response(JSON.stringify({
             choices: [{
-                message: { content: "预览模式：请求已拦截" },
+                message: { content: "预览模式" },
                 finish_reason: "stop"
             }]
         }), {
@@ -337,7 +337,7 @@ async function showMessagePreview() {
     
         if (result.success) {
             await displayPreviewResult(result.data, textareaText);
-            toastr.success('✓ 预览成功！消息未实际发送', '', { timeOut: 3000 });
+            toastr.success('预览成功！', '', { timeOut: 3000 });
         } else {
             toastr.error(`预览失败: ${result.error}`, '', { timeOut: 5000 });
         }
@@ -385,13 +385,13 @@ async function displayPreviewResult(data, userInput) {
         const formattedContent = formatPreviewContent(data, userInput, false);
         const popupContent = `<div class="message-preview-container"><div class="message-preview-content-box">${formattedContent}</div></div>`;
     
-        await callGenericPopup(popupContent, POPUP_TYPE.TEXT, '消息预览 - 内容未实际发送', { 
+        await callGenericPopup(popupContent, POPUP_TYPE.TEXT, '消息预览', { 
             wide: true, 
             large: true 
         });
     
     } catch (error) {
-        toastr.error('✘ 显示预览失败');
+        toastr.error('显示预览失败');
     }
 }
 
