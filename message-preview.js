@@ -451,10 +451,10 @@ function formatPreviewContent(data, userInput, isHistory = false) {
     content += `${'='.repeat(60)}\n`;
     content += isHistory ? 
         `消息历史预览 - 第 ${data.targetMessageId + 1} 条\n` : 
-        `● LLM API请求预览\n`;
+        `LLM API请求预览\n`;
     content += `${'='.repeat(60)}\n\n`;
 
-    content += `API信息:\n${'-'.repeat(30)}\n`;
+    content += `简要信息(非发送给api的日志):\n${'-'.repeat(30)}\n`;
     content += `URL: ${data.url}\nMethod: ${data.method || 'POST'}\n`;
     content += `Model: ${data.model || 'Unknown'}\nMessages: ${data.messages.length}\n`;
     content += `Time: ${new Date(data.timestamp).toLocaleString()}\n`;
@@ -473,7 +473,7 @@ function formatPreviewContent(data, userInput, isHistory = false) {
 }
 
 function formatMessagesArray(messages) {
-    let content = `💬 Messages (${messages.length}):\n${'-'.repeat(30)}\n`;
+    let content = `↓酒馆日志↓(已整理好json格式使其更具可读性) (${messages.length}):\n${'-'.repeat(30)}\n`;
 
     let processedMessages = [...messages];
 
@@ -493,7 +493,7 @@ function formatMessagesArray(messages) {
         content += `\n[${index + 1}] ${roleIcon} ${msg.role.toUpperCase()}\n`;
     
         if (/<[^>]+>/g.test(msgContent)) {
-            content += `【包含XML标记】\n`;
+            content += ``;
             content += `<pre style="white-space: pre-wrap;">${highlightXmlTags(msgContent)}</pre>\n`;
         } else {
             content += `${msgContent}\n`;
