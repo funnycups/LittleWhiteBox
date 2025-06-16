@@ -8,9 +8,10 @@ pre:has(+ .xiaobaix-iframe) {
 }
 
 .dark-number-input {
-    background-color: var(--SmartThemeShadowColor) !important;
-    color: var(--SmartThemeText) !important;
-    border-color: var(--SmartThemeBorderColor) !important;
+   background-color: #000000 !important;
+   color: #ffffff !important;
+   border-color: var(--SmartThemeBorderColor) !important;
+   width: 10% !important;
 }
 
 /* ===== 记忆按钮样式 ===== */
