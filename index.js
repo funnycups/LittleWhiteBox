@@ -1,6 +1,6 @@
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
-import { statsTracker } from "./statsTracker.js";
+import { statsTracker } from "./relationship-metrics.js";
 import { initTasks } from "./scheduledTasks.js";
 import { initScriptAssistant } from "./scriptAssistant.js";
 import { initMessagePreview, addHistoryButtonsDebounced } from "./message-preview.js";
