@@ -493,7 +493,6 @@ function formatMessagesArray(messages) {
         content += `\n[${index + 1}] ${roleIcon} ${msg.role.toUpperCase()}\n`;
     
         if (/<[^>]+>/g.test(msgContent)) {
-            content += ``;
             content += `<pre style="white-space: pre-wrap;">${highlightXmlTags(msgContent)}</pre>\n`;
         } else {
             content += `${msgContent}\n`;
