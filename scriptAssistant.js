@@ -152,6 +152,7 @@ async function injectScriptDocs() {
 \`\`\`
    这样设置后，每当AI输出包含[状态面板]时，SillyTavern会自动将其替换为HTML代码块，
    然后小白X会将其渲染为可交互的界面。
+4.以下是SillyTavern的官方STscript脚本文档，可结合小白X功能创作与SillyTavern深度交互的角色卡：
 ${docsContent}
 `;
         
