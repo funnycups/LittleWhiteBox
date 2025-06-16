@@ -8,8 +8,8 @@ pre:has(+ .xiaobaix-iframe) {
 }
 
 .dark-number-input {
-   background-color: #000000 !important;
-   color: #ffffff !important;
+   background-color: rgba(0, 0, 0, 0.3) !important;
+   color: color: var(--SmartThemeText) !important;
    border-color: var(--SmartThemeBorderColor) !important;
    width: 10% !important;
 }
