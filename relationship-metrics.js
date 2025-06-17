@@ -2583,4 +2583,43 @@ class StatsTracker {
 }
 
 const statsTracker = new StatsTracker();
+
+if (typeof jQuery !== 'undefined') {
+    $(document).ready(() => {
+        setTimeout(() => {
+            if (statsTracker.settings) {
+                $('#xiaobaix_memory_enabled').prop('checked', statsTracker.settings.memoryEnabled);
+                $('#xiaobaix_memory_inject').prop('checked', statsTracker.settings.memoryInjectEnabled);
+            }
+            
+            $('#xiaobaix_memory_enabled').on('change', function() {
+                if (statsTracker.settings) {
+                    statsTracker.settings.memoryEnabled = $(this).prop('checked');
+                    saveSettingsDebounced();
+                    
+                    if (!statsTracker.settings.memoryEnabled && statsTracker.removeMemoryPrompt) {
+                        statsTracker.removeMemoryPrompt();
+                    }
+                }
+            });
+            
+            $('#xiaobaix_memory_inject').on('change', function() {
+                if (statsTracker.settings) {
+                    statsTracker.settings.memoryInjectEnabled = $(this).prop('checked');
+                    saveSettingsDebounced();
+                    
+                    if (statsTracker.settings.memoryEnabled && statsTracker.updateMemoryPrompt && statsTracker.removeMemoryPrompt) {
+                        if (statsTracker.settings.memoryInjectEnabled) {
+                            statsTracker.updateMemoryPrompt();
+                        } else {
+                            statsTracker.removeMemoryPrompt();
+                        }
+                    }
+                }
+            });
+        }, 1000);
+    });
+}
+
 export { statsTracker };
+
