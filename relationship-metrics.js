@@ -182,8 +182,10 @@ class StatsTracker {
             this.characterSettings.set(newCharId, structuredClone(this.relationshipGuidelines));
         }
 
-        if (this.settings.memoryInjectEnabled) {
+        if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled) {
             await this.updateMemoryPrompt();
+        } else {
+            this.removeMemoryPrompt();
         }
 
         if ($('#behavior-modal').length) {
@@ -794,16 +796,17 @@ class StatsTracker {
     }
 
     async updateMemoryPrompt() {
-        if (!this.settings.memoryEnabled || !this.settings.memoryInjectEnabled) {
-            this.removeMemoryPrompt();
-            return;
-        }
+    // 先检查是否启用了两个设置
+    if (!this.settings.memoryEnabled || !this.settings.memoryInjectEnabled) {
+        this.removeMemoryPrompt();
+        return;
+    }
 
-        let stats = await this.executeCommand('/getvar xiaobaix_stats');
-        if (!stats || stats === "undefined") {
-            this.removeMemoryPrompt();
-            return;
-        }
+    let stats = await this.executeCommand('/getvar xiaobaix_stats');
+    if (!stats || stats === "undefined") {
+        this.removeMemoryPrompt();
+        return;
+    }
 
         try {
             stats = typeof stats === 'string' ? JSON.parse(stats) : stats;
@@ -970,16 +973,22 @@ class StatsTracker {
     }
 
     addMemoryButtonToMessage(messageId) {
-        if (!this.settings.memoryEnabled) return;
-
+        // 严格检查是否应该添加按钮
+        if (!this.settings.memoryEnabled || !this.isInitialized) return;
+  
         const messageBlock = $(`#chat .mes[mesid="${messageId}"]`);
         if (!messageBlock.length || messageBlock.find('.memory-button').length) return;
 
         const flexContainer = messageBlock.find('.flex-container.flex1.alignitemscenter');
         if (!flexContainer.length) return;
 
-        const buttonHtml = `<div class="mes_btn memory-button" title="查看历史数据统计 (长按分析本条消息)"><i class="fa-solid fa-brain"></i></div>`;
+        // 主记忆按钮
+        const buttonHtml = `<div class="mes_btn memory-button" title="查看历史数据统计"><i class="fa-solid fa-brain"></i></div>`;
         const memoryButton = $(buttonHtml);
+
+        // 新增调试按钮
+        const debugButtonHtml = `<div class="mes_btn debug-button" title="分析本条消息"><i class="fa-solid fa-bug"></i></div>`;
+        const debugButton = $(debugButtonHtml);
 
         this.executeCommand('/getvar xiaobaix_stats').then(result => {
             if (result && result !== "undefined") {
@@ -992,63 +1001,8 @@ class StatsTracker {
             }
         });
 
-        // 添加点击和长按事件
-        let longPressTimer;
-        let isLongPress = false;
-      
-        // 鼠标/触摸按下
-        memoryButton.on('mousedown touchstart', (event) => {
-            isLongPress = false;
-            longPressTimer = setTimeout(() => {
-                isLongPress = true;
-              
-                // 获取消息文本和角色名
-                const messageText = messageBlock.find('.mes_text').text().trim();
-                const characterName = messageBlock.find('.ch_name .name').text().trim();
-              
-                // 运行调试分析并显示结果
-                this.debugCalculation(messageText, characterName).then(debugLog => {
-                    this.showDebugLog(debugLog);
-                });
-              
-                // 防止触发正常点击事件
-                event.preventDefault();
-                event.stopPropagation();
-            }, 800); // 800毫秒长按
-        });
-      
-        // 鼠标/触摸释放
-        memoryButton.on('mouseup touchend', (event) => {
-            clearTimeout(longPressTimer);
-          
-            // 如果是长按，阻止进一步操作
-            if (isLongPress) {
-                event.preventDefault();
-                event.stopPropagation();
-                return false;
-            }
-        });
-      
-        // 普通点击
+        // 记忆按钮点击事件
         memoryButton.on('click', async (event) => {
-            // 如果是长按，不执行点击动作
-            if (isLongPress) {
-                return false;
-            }
-          
-            // 检查是否按住Shift键
-            if (event.shiftKey) {
-                // 获取消息文本和角色名
-                const messageText = messageBlock.find('.mes_text').text().trim();
-                const characterName = messageBlock.find('.ch_name .name').text().trim();
-              
-                // 运行调试分析并显示结果
-                const debugLog = await this.debugCalculation(messageText, characterName);
-                this.showDebugLog(debugLog);
-                return;
-            }
-          
-            // 原有的记忆统计显示代码...
             let stats = await this.executeCommand('/getvar xiaobaix_stats');
 
             if (!stats || stats === "undefined") {
@@ -1084,7 +1038,23 @@ class StatsTracker {
             }
         });
 
+// 调试按钮点击事件
+debugButton.on('click', async (event) => {
+    // 获取消息文本和角色名
+    const messageText = messageBlock.find('.mes_text').text().trim();
+    const characterName = messageBlock.find('.ch_name .name').text().trim();
+          
+    // 运行调试分析并显示结果
+    const debugLog = await statsTracker.debugCalculation(messageText, characterName);
+    statsTracker.showDebugLog(debugLog);
+});
+
+        // 添加按钮到消息
         flexContainer.append(memoryButton);
+        flexContainer.append(debugButton);
+        
+        // 添加样式以便按钮看起来是一组
+        debugButton.css('margin-left', '2px');
     }
 
     async debugCalculation(text, characterName) {
@@ -2583,43 +2553,4 @@ class StatsTracker {
 }
 
 const statsTracker = new StatsTracker();
-
-if (typeof jQuery !== 'undefined') {
-    $(document).ready(() => {
-        setTimeout(() => {
-            if (statsTracker.settings) {
-                $('#xiaobaix_memory_enabled').prop('checked', statsTracker.settings.memoryEnabled);
-                $('#xiaobaix_memory_inject').prop('checked', statsTracker.settings.memoryInjectEnabled);
-            }
-            
-            $('#xiaobaix_memory_enabled').on('change', function() {
-                if (statsTracker.settings) {
-                    statsTracker.settings.memoryEnabled = $(this).prop('checked');
-                    saveSettingsDebounced();
-                    
-                    if (!statsTracker.settings.memoryEnabled && statsTracker.removeMemoryPrompt) {
-                        statsTracker.removeMemoryPrompt();
-                    }
-                }
-            });
-            
-            $('#xiaobaix_memory_inject').on('change', function() {
-                if (statsTracker.settings) {
-                    statsTracker.settings.memoryInjectEnabled = $(this).prop('checked');
-                    saveSettingsDebounced();
-                    
-                    if (statsTracker.settings.memoryEnabled && statsTracker.updateMemoryPrompt && statsTracker.removeMemoryPrompt) {
-                        if (statsTracker.settings.memoryInjectEnabled) {
-                            statsTracker.updateMemoryPrompt();
-                        } else {
-                            statsTracker.removeMemoryPrompt();
-                        }
-                    }
-                }
-            });
-        }, 1000);
-    });
-}
-
 export { statsTracker };
-

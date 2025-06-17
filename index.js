@@ -464,11 +464,11 @@ async function setupSettings() {
             if (!isXiaobaixEnabled) return;
             settings.memoryEnabled = $(this).prop("checked");
             saveSettingsDebounced();
-
-            if (settings.memoryEnabled && settings.memoryInjectEnabled) {
-                statsTracker.updateMemoryPrompt();
-            } else if (!settings.memoryEnabled) {
+            if (!settings.memoryEnabled) {
+                $('.memory-button').remove();
                 statsTracker.removeMemoryPrompt();
+            } else if (settings.memoryEnabled && settings.memoryInjectEnabled) {
+                statsTracker.updateMemoryPrompt();
             }
         });
 
@@ -477,10 +477,11 @@ async function setupSettings() {
             settings.memoryInjectEnabled = $(this).prop("checked");
             saveSettingsDebounced();
 
+            statsTracker.removeMemoryPrompt();
+            
             if (settings.memoryEnabled && settings.memoryInjectEnabled) {
+
                 statsTracker.updateMemoryPrompt();
-            } else {
-                statsTracker.removeMemoryPrompt();
             }
         });
 
