@@ -447,28 +447,7 @@ async function showMessageHistoryPreview(messageId) {
 
 function formatPreviewContent(data, userInput, isHistory = false) {
     let content = '';
-
-    content += `${'='.repeat(60)}\n`;
-    content += isHistory ? 
-        `消息历史预览 - 第 ${data.targetMessageId + 1} 条\n` : 
-        `LLM API请求预览\n`;
-    content += `${'='.repeat(60)}\n\n`;
-
-    content += `简要信息(非发送给api的日志):\n${'-'.repeat(30)}\n`;
-    content += `URL: ${data.url}\nMethod: ${data.method || 'POST'}\n`;
-    content += `Model: ${data.model || 'Unknown'}\nMessages: ${data.messages.length}\n`;
-    content += `Time: ${new Date(data.timestamp).toLocaleString()}\n`;
-
-    if (data.characterName) content += `Character: ${data.characterName}\n`;
-    if (userInput) {
-        const displayInput = userInput.length > 100 ? userInput.substring(0, 100) + '...' : userInput;
-        content += `✎ 用户输入: "${displayInput}"\n`;
-    }
-
-    content += `\n${'─'.repeat(50)}\n\n`;
     content += formatMessagesArray(data.messages);
-    content += `\n${'='.repeat(60)}`;
-
     return content;
 }
 
@@ -477,32 +456,38 @@ function formatMessagesArray(messages) {
 
     let processedMessages = [...messages];
 
-    if (processedMessages.length >= 2) {
-        const [lastMsg, secondLastMsg] = processedMessages.slice(-2);
-        if (lastMsg.role === 'user' && secondLastMsg.role === 'user' && 
-            lastMsg.content === secondLastMsg.content) {
-            processedMessages.pop();
-        }
-    }
-
     processedMessages.forEach((msg, index) => {
         const msgContent = msg.content || '';
-        const roleIcon = msg.role === 'system' ? '☼' : 
-                         msg.role === 'user' ? '✎' : '♪';
-    
-        content += `\n[${index + 1}] ${roleIcon} ${msg.role.toUpperCase()}\n`;
-    
-        if (/<[^>]+>/g.test(msgContent)) {
-            content += `<pre style="white-space: pre-wrap;">${highlightXmlTags(msgContent)}</pre>`;
-        } else {
-            content += `${msgContent}\n`;
+        
+        let roleLabel = '';
+        let roleColor = '';
+        
+        switch (msg.role) {
+            case 'system':
+                roleLabel = 'SYSTEM:';
+                roleColor = '#F7E3DA';
+                break;
+            case 'user':
+                roleLabel = 'USER:';
+                roleColor = '#F0ADA7';
+                break;
+            case 'assistant':
+                roleLabel = 'ASSISTANT:';
+                roleColor = '#6BB2CC';
+                break;
+            default:
+                roleLabel = `${msg.role.toUpperCase()}:`;
+                roleColor = '#FFF';
         }
     
-        if (index < processedMessages.length - 1) {
-            content += `${'-'.repeat(20)}\n`;
+        content += `<div style="color: ${roleColor}; font-weight: bold; margin-top: ${index > 0 ? '15px' : '0'};">${roleLabel}</div>`;
+        
+        if (/<[^>]+>/g.test(msgContent)) {
+            content += `<pre style="white-space: pre-wrap; margin: 5px 0; color: ${roleColor};">${highlightXmlTags(msgContent)}</pre>`;
+        } else {
+            content += `<div style="margin: 5px 0; color: ${roleColor}; white-space: pre-wrap;">${msgContent}</div>`;
         }
     });
-
     return content;
 }
 
