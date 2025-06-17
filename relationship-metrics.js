@@ -42,8 +42,8 @@ class StatsTracker {
             praise:       { regex: /赞美|夸赞|称赞|表扬|好棒|真棒|厉害|了不起|优秀|出色|完美|很棒|真行|很厉害|太棒了|棒极了|真不错|佩服|赞赏|欣赏/g, score: 0.5, stats_event: 'positiveEmotions' },
             care:         { regex: /关心|关怀|体贴|照顾|呵护|保护|心疼|疼爱|爱护|牵挂|挂念|在乎|惦记|温柔|细心|体恤|体谅|关爱|爱怜|宠爱/g, score: 0.5, stats_event: 'positiveEmotions' },
             hit:          { regex: /打|揍|踢|掌掴|拳头|殴打|击打|重击|鞭打|挨打|扇耳光|暴揍|暴打|痛击|摔打|撞击|殴斗/g, score: -2, stats_event: 'hitEvents' },
-            weapon:       { regex: /刀|剑|枪|弓箭|武器|兵器|匕首|射击|开枪|砍|斩|刺/g, score: -0.2, stats_event: 'weaponUse' },
-            death:        { regex: /死|死了|死亡|丧命|毙命|牺牲|身亡|丧生|亡故|逝世/g, score: -0.2, stats_event: 'deathEvents' },
+            weapon:       { regex: /刀|剑|枪|弓箭|武器|兵器|匕首|射击|开枪|砍|斩|刺/g, score: -0.1, stats_event: 'weaponUse' },
+            death:        { regex: /死了|死亡|丧命|毙命|牺牲|身亡|丧生|亡故|逝世/g, score: -0.2, stats_event: 'deathEvents' },
             sad:          { regex: /悲伤|难过|伤心|痛苦|心痛|愤怒|生气|恐惧|害怕|抑郁|沮丧|郁闷|忧伤|失落|苦涩|心碎|悲哀|伤感|绝望|哀伤|酸楚|郁结|失意|黯然|悲凉/g, score: -1, stats_event: 'negativeEmotions' },
             disgust:      { regex: /厌恶|嫌弃|恶心|反感|不耐烦|讨厌|失望|绝望|不屑|厌烦|鄙视|看不起|嫌恶|嗤之以鼻|反胃|抵触|排斥|嫌弃|唾弃|嫌恶/g, score: -1, stats_event: 'negativeEmotions' },
             cold:         { regex: /冷笑|冷淡|冰冷|寒气|讽刺|嘲讽|挖苦|刀一样|冷眼|冷漠|漠然|不理不睬|冷酷|无情|冷若冰霜|漠不关心|嗤笑|冷哼|冷言冷语|阴阳怪气/g, score: -1, stats_event: 'negativeEmotions' }
@@ -655,10 +655,21 @@ class StatsTracker {
         return stats;
     }
 
-    async updateStatisticsForNewMessage(messageText, characterName) {
-        if (!messageText || !this.settings.memoryEnabled) return false;
+    async updateStatisticsForNewMessage() {
+        if (!this.settings.memoryEnabled) return false;
 
         try {
+            const lastMessage = await this.executeCommand('/messages names=on {{lastMessageId}}');
+            if (!lastMessage) return false;
+            
+            const colonIndex = lastMessage.indexOf(':');
+            if (colonIndex === -1) return false;
+            
+            const extractedName = lastMessage.substring(0, colonIndex).trim();
+            const extractedText = lastMessage.substring(colonIndex + 1).trim();
+            
+            if (!extractedText) return false;
+            
             let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
             if (!currentStats || currentStats === "undefined") {
                 currentStats = this.createEmptyStats();
@@ -672,7 +683,7 @@ class StatsTracker {
 
             const oldStats = JSON.parse(JSON.stringify(currentStats));
 
-            this.updateStatsFromText(currentStats, messageText, characterName);
+            this.updateStatsFromText(currentStats, extractedText, extractedName);
 
             currentStats.lastChanges = {
                 dialogueCount: currentStats.dialogueCount - oldStats.dialogueCount,
@@ -704,6 +715,7 @@ class StatsTracker {
 
             return true;
         } catch (error) {
+            console.error('[小白X] 更新统计数据出错:', error);
             return false;
         }
     }
@@ -723,7 +735,7 @@ class StatsTracker {
         } else {
             userVisibleStats += `• 暂无关系记录\n`;
         }
-        userVisibleStats += `\n📊 整体状态：\n• 情绪变化: ${this.formatEmotionalChange(stats.relationshipStats?.emotionalChange || 0)}\n\n`;
+        userVisibleStats += `\n📊 剧情风格：\n• 情绪变化: ${this.formatEmotionalChange(stats.relationshipStats?.emotionalChange || 0)}\n\n`;
         
         userVisibleStats += `🔞 亲密互动：\n`;
         userVisibleStats += `• 接吻次数: ${stats.intimacyStats?.kissingEvents || 0}次${formatChange(changes.intimacyStats?.kissingEvents || 0)}\n`;
@@ -752,20 +764,24 @@ class StatsTracker {
         userVisibleStats += `💰 物品交换：\n`;
         userVisibleStats += `• 礼物交换: ${stats.exchangeStats?.giftGiving || 0}次${formatChange(changes.exchangeStats?.giftGiving || 0)}\n`;
         userVisibleStats += `• 金钱交易: ${stats.exchangeStats?.moneyTransfer || 0}次${formatChange(changes.exchangeStats?.moneyTransfer || 0)}`;
-        let aiGuidance = `\n\n【角色行为指导】\n`;
+        
+        let behaviorGuidance = `\n\n【角色行为指导】\n`;
 
         if (relationships.length > 0) {
             const currentGuidelines = this.getCurrentCharacterGuidelines();
             relationships.forEach(([name, data]) => {
                 const stage = data.stage;
                 const guidelines = currentGuidelines[stage] || this.relationshipGuidelines[stage];
-                aiGuidance += `\n${name}当前关系阶段: ${stage}\n• 核心态度: ${guidelines.attitude}\n• 允许行为: ${guidelines.allowed}\n• 底线/拒绝行为: ${guidelines.limits}\n`;
+                behaviorGuidance += `\n${name}当前关系阶段: ${stage}\n• 核心态度: ${guidelines.attitude}\n• 允许行为: ${guidelines.allowed}\n• 底线/拒绝行为: ${guidelines.limits}\n`;
             });
         }
 
-        aiGuidance += `\n💡 指令: 请严格根据上述关系阶段和行为准则，结合角色设定，调整你的回应，确保你的反应符合当前关系发展阶段。请注意行为准则仅作用于关系网络中指定的NPC。`;
+        let aiGuidance = behaviorGuidance + `\n💡 指令: 请严格根据上述关系阶段和行为准则，结合角色设定，调整你的回应，确保你的反应符合当前关系发展阶段。请注意行为指导仅作用于指定的NPC对用户的行为指导，不涉及他人。`;
 
-        return { userVisibleStats, fullStatsWithGuidance: userVisibleStats + aiGuidance };
+        return { 
+            userVisibleStats: userVisibleStats + behaviorGuidance, 
+            fullStatsWithGuidance: userVisibleStats + aiGuidance 
+        };
     }
 
     formatEmotionalChange(value) {
@@ -953,67 +969,443 @@ class StatsTracker {
         }
     }
 
-addMemoryButtonToMessage(messageId) {
-    if (!this.settings.memoryEnabled) return;
+    addMemoryButtonToMessage(messageId) {
+        if (!this.settings.memoryEnabled) return;
 
-    const messageBlock = $(`#chat .mes[mesid="${messageId}"]`);
-    if (!messageBlock.length || messageBlock.find('.memory-button').length) return;
+        const messageBlock = $(`#chat .mes[mesid="${messageId}"]`);
+        if (!messageBlock.length || messageBlock.find('.memory-button').length) return;
 
-    const flexContainer = messageBlock.find('.flex-container.flex1.alignitemscenter');
-    if (!flexContainer.length) return;
+        const flexContainer = messageBlock.find('.flex-container.flex1.alignitemscenter');
+        if (!flexContainer.length) return;
 
-    const buttonHtml = `<div class="mes_btn memory-button" title="查看历史数据统计"><i class="fa-solid fa-brain"></i></div>`;
-    const memoryButton = $(buttonHtml);
+        const buttonHtml = `<div class="mes_btn memory-button" title="查看历史数据统计 (Shift+点击分析本条消息)"><i class="fa-solid fa-brain"></i></div>`;
+        const memoryButton = $(buttonHtml);
 
-    this.executeCommand('/getvar xiaobaix_stats').then(result => {
-        if (result && result !== "undefined") {
-            try {
-                const stats = typeof result === 'string' ? JSON.parse(result) : result;
-                if (stats && Object.keys(stats).length > 0) {
-                    memoryButton.addClass('has-memory');
-                }
-            } catch (e) { }
-        }
-    });
+        this.executeCommand('/getvar xiaobaix_stats').then(result => {
+            if (result && result !== "undefined") {
+                try {
+                    const stats = typeof result === 'string' ? JSON.parse(result) : result;
+                    if (stats && Object.keys(stats).length > 0) {
+                        memoryButton.addClass('has-memory');
+                    }
+                } catch (e) { }
+            }
+        });
 
-    memoryButton.on('click', async () => {
-        let stats = await this.executeCommand('/getvar xiaobaix_stats');
+        memoryButton.on('click', async (event) => {
+            if (event.shiftKey) {
+                const messageText = messageBlock.find('.mes_text').text().trim();
+                const characterName = messageBlock.find('.ch_name .name').text().trim();
+                
+                const debugLog = await this.debugCalculation(messageText, characterName);
+                this.showDebugLog(debugLog);
+                return;
+            }
+            
+            let stats = await this.executeCommand('/getvar xiaobaix_stats');
 
-        if (!stats || stats === "undefined") {
-            const emptyStats = this.createEmptyStats();
-            const messages = await this.processMessageHistory();
+            if (!stats || stats === "undefined") {
+                const emptyStats = this.createEmptyStats();
+                const messages = await this.processMessageHistory();
 
-            if (messages && messages.length > 0) {
-                for (const message of messages) {
-                    this.updateStatsFromText(emptyStats, message.content, message.name);
-                }
+                if (messages && messages.length > 0) {
+                    for (const message of messages) {
+                        this.updateStatsFromText(emptyStats, message.content, message.name);
+                    }
 
-                await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(emptyStats)}`);
-                const formattedStats = this.formatHistoryStatistics(emptyStats);
-                this.showMemoryModal(formattedStats.userVisibleStats);
+                    await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(emptyStats)}`);
+                    const formattedStats = this.formatHistoryStatistics(emptyStats);
+                    this.showMemoryModal(formattedStats.userVisibleStats);
 
-                if (this.settings.memoryInjectEnabled) {
-                    this.updateMemoryPrompt();
+                    if (this.settings.memoryInjectEnabled) {
+                        this.updateMemoryPrompt();
+                    }
+                } else {
+                    const formattedStats = this.formatHistoryStatistics(emptyStats);
+                    this.showMemoryModal(formattedStats.userVisibleStats);
                 }
             } else {
-                const formattedStats = this.formatHistoryStatistics(emptyStats);
-                this.showMemoryModal(formattedStats.userVisibleStats);
+                try {
+                    stats = typeof stats === 'string' ? JSON.parse(stats) : stats;
+                    const formattedStats = this.formatHistoryStatistics(stats);
+                    this.showMemoryModal(formattedStats.userVisibleStats);
+                } catch (e) {
+                    const emptyStats = this.createEmptyStats();
+                    const formattedStats = this.formatHistoryStatistics(emptyStats);
+                    this.showMemoryModal(formattedStats.userVisibleStats);
+                }
             }
-        } else {
-            try {
-                stats = typeof stats === 'string' ? JSON.parse(stats) : stats;
-                const formattedStats = this.formatHistoryStatistics(stats);
-                this.showMemoryModal(formattedStats.userVisibleStats);
-            } catch (e) {
-                const emptyStats = this.createEmptyStats();
-                const formattedStats = this.formatHistoryStatistics(emptyStats);
-                this.showMemoryModal(formattedStats.userVisibleStats);
-            }
-        }
-    });
+        });
 
-    flexContainer.append(memoryButton);
-}
+        flexContainer.append(memoryButton);
+    }
+
+    async debugCalculation(text, characterName) {
+        const logs = [];
+        
+        let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
+        try {
+            currentStats = typeof currentStats === 'string' ? JSON.parse(currentStats) : currentStats;
+            if (!currentStats || typeof currentStats !== 'object') {
+                currentStats = this.createEmptyStats();
+            }
+        } catch (e) {
+            currentStats = this.createEmptyStats();
+        }
+        
+        const beforeStats = JSON.parse(JSON.stringify(currentStats));
+        const afterStats = JSON.parse(JSON.stringify(currentStats));
+        
+        this.pronounMapping.clear();
+        if (characterName) {
+            this.pronounMapping.set('她', characterName);
+            this.pronounMapping.set('他', characterName);
+        }
+        
+        logs.push(`===== 好感度计算详情 =====`);
+        logs.push(`分析文本: "${text}"`);
+        logs.push(`角色名称: ${characterName || '未指定'}`);
+        
+        const trackedNames = Object.keys(currentStats.relationships || {});
+        logs.push(`\n== 初始状态 ==`);
+        logs.push(`追踪的人物: ${trackedNames.join(', ') || '无'}`);
+        
+        if (trackedNames.length > 0) {
+            logs.push(`\n初始好感度状态:`);
+            trackedNames.forEach(name => {
+                const rel = currentStats.relationships[name];
+                logs.push(`  ${name}: ${rel.intimacyLevel} (${rel.stage})`);
+            });
+        }
+        
+        logs.push(`全局好感度: ${currentStats.relationshipStats?.intimacyLevel || 0}`);
+        logs.push(`全局情感变化: ${currentStats.relationshipStats?.emotionalChange || 0}`);
+        
+        const dialogueChanges = this.analyzeDialoguesAndSpeakers(text, afterStats, characterName);
+        logs.push(`\n== 对话分析 ==`);
+        if (Object.keys(dialogueChanges).length > 0) {
+            Object.entries(dialogueChanges).forEach(([name, change]) => {
+                logs.push(`  ${name}: 对话情感变化 ${change.toFixed(2)}`);
+            });
+        } else {
+            logs.push(`  未检测到对话分析结果`);
+        }
+        
+        const relationshipChanges = {};
+        trackedNames.forEach(name => {
+            relationshipChanges[name] = dialogueChanges[name] || 0;
+        });
+        
+        const rawSentences = this.splitIntoSentences(text);
+        logs.push(`\n== 句子分析 ==`);
+        logs.push(`拆分为 ${rawSentences.length} 个句子:`);
+        
+        const processedSentences = this.resolvePronounsInSentences(rawSentences, trackedNames);
+        
+        let globalSentiment = 0;
+        let lastSubjects = [];
+        
+        processedSentences.forEach((sentenceData, index) => {
+            const sentence = sentenceData.originalSentence;
+            const impliedPerson = sentenceData.impliedPerson;
+            const mentionedPersons = sentenceData.mentionedPersons || [];
+            
+            logs.push(`\n句子 ${index + 1}: "${sentence}"`);
+            
+            if (impliedPerson) {
+                logs.push(`  隐含主语: ${impliedPerson}`);
+            }
+            
+            if (mentionedPersons.length > 0) {
+                logs.push(`  提及人物: ${mentionedPersons.join(', ')}`);
+            }
+            
+            if (sentence.match(new RegExp(`[${this.quoteChars.join('')}].*[${this.quoteChars.join('')}]`, 'g'))) {
+                logs.push(`  [跳过] 这是引用语句，不计算情感值`);
+                return;
+            }
+            
+            const sentenceSentiment = this.calculateSentimentScore(sentence);
+            logs.push(`  情感值: ${sentenceSentiment.toFixed(2)}`);
+            
+            logs.push(`  匹配情感词汇:`);
+            let hasMatches = false;
+            Object.entries(this.SENTIMENT_LEXICON).forEach(([key, lexiconItem]) => {
+                const matches = sentence.match(lexiconItem.regex);
+                if (matches) {
+                    if (lexiconItem.requires && !lexiconItem.requires.test(sentence)) {
+                        return;
+                    }
+                    hasMatches = true;
+                    logs.push(`    - ${key}: 匹配词 "${matches.join('", "')}" (得分 ${lexiconItem.score})`);
+                    
+                    if (lexiconItem.stats_event) {
+                        let categoryName = "";
+                        let statObj = null;
+                        
+                        if (afterStats.intimacyStats[lexiconItem.stats_event] !== undefined) {
+                            categoryName = "亲密统计";
+                            statObj = afterStats.intimacyStats;
+                        } else if (afterStats.emotionStats[lexiconItem.stats_event] !== undefined) {
+                            categoryName = "情感统计";
+                            statObj = afterStats.emotionStats;
+                        } else if (afterStats.violenceStats[lexiconItem.stats_event] !== undefined) {
+                            categoryName = "暴力统计";
+                            statObj = afterStats.violenceStats;
+                        }
+                        
+                        if (statObj) {
+                            statObj[lexiconItem.stats_event] += matches.length;
+                            logs.push(`    > ${categoryName} ${lexiconItem.stats_event} +${matches.length} = ${statObj[lexiconItem.stats_event]}`);
+                        }
+                    }
+                }
+            });
+            
+            if (!hasMatches) {
+                logs.push(`    无匹配情感词汇`);
+            }
+            
+            const subjects = this.identifySubjectsInSentence(sentence, [...trackedNames, impliedPerson].filter(Boolean));
+            
+            if (subjects.length > 0) {
+                logs.push(`  识别主语:`);
+                subjects.forEach(subject => {
+                    logs.push(`    - ${subject.name}: 角色 ${subject.role}, 权重 ${subject.weight.toFixed(2)}, 模式 ${subject.pattern}`);
+                    
+                    if (!subject.name) return;
+                    if (subject.role === 'mentioned') return;
+                    if (subject.role === 'patient' && sentenceSentiment <= 0) return;
+                    
+                    const weight = subject.weight;
+                    const change = sentenceSentiment * weight;
+                    
+                    if (Math.abs(change) > 0.1) {
+                        relationshipChanges[subject.name] = (relationshipChanges[subject.name] || 0) + change;
+                        logs.push(`      对好感度影响: ${change.toFixed(2)} (累计: ${relationshipChanges[subject.name].toFixed(2)})`);
+                    } else {
+                        logs.push(`      对好感度影响过小，忽略`);
+                    }
+                });
+                
+                lastSubjects = subjects.filter(s => s.role === 'agent');
+                
+            } else if (mentionedPersons.length > 0) {
+                logs.push(`  未识别明确主语，但提及了人物:`);
+                mentionedPersons.forEach(name => {
+                    const change = sentenceSentiment * 0.4;
+                    if (Math.abs(change) > 0.1) {
+                        relationshipChanges[name] = (relationshipChanges[name] || 0) + change;
+                        logs.push(`    - ${name}: 影响好感度 ${change.toFixed(2)} (累计: ${relationshipChanges[name].toFixed(2)})`);
+                    } else {
+                        logs.push(`    - ${name}: 影响过小，忽略`);
+                    }
+                });
+                
+                lastSubjects = [];
+                
+            } else {
+                globalSentiment += sentenceSentiment;
+                logs.push(`  未识别特定人物，情感值 ${sentenceSentiment.toFixed(2)} 计入全局情感`);
+                lastSubjects = [];
+            }
+        });
+        
+        logs.push(`\n== 好感度变化详情 ==`);
+        logs.push(`全局情感值: ${globalSentiment.toFixed(2)}`);
+        logs.push(`全局情感变化: ${Math.round(Math.min(3, Math.max(-3, globalSentiment)))}`);
+        
+        Object.entries(relationshipChanges).forEach(([name, change]) => {
+            const finalChange = Math.round(Math.min(3, Math.max(-3, change)));
+            if (finalChange !== 0) {
+                afterStats.relationships[name].interactions++;
+                afterStats.relationships[name].intimacyLevel += finalChange;
+                afterStats.relationships[name].intimacyLevel = Math.min(100, Math.max(-100, afterStats.relationships[name].intimacyLevel));
+                afterStats.relationships[name].stage = this.getRelationshipStage(afterStats.relationships[name].intimacyLevel);
+                
+                logs.push(`\n${name} 好感度变化:`);
+                logs.push(`  原始计算值: ${change.toFixed(2)}`);
+                logs.push(`  最终变化值: ${finalChange} (限制为-3到+3)`);
+                logs.push(`  变化前: ${beforeStats.relationships[name].intimacyLevel} (${beforeStats.relationships[name].stage})`);
+                logs.push(`  变化后: ${afterStats.relationships[name].intimacyLevel} (${afterStats.relationships[name].stage})`);
+            } else if (Math.abs(change) > 0) {
+                logs.push(`\n${name} 好感度变化不足以改变数值: ${change.toFixed(2)} -> ${finalChange}`);
+            }
+        });
+        
+        const finalGlobalChange = Math.round(Math.min(3, Math.max(-3, globalSentiment)));
+        afterStats.relationshipStats.intimacyLevel += finalGlobalChange;
+        afterStats.relationshipStats.emotionalChange += finalGlobalChange;
+        afterStats.relationshipStats.intimacyLevel = Math.min(100, Math.max(-100, afterStats.relationshipStats.intimacyLevel));
+        afterStats.relationshipStats.emotionalChange = Math.min(100, Math.max(-100, afterStats.relationshipStats.emotionalChange));
+        
+        logs.push(`\n全局关系状态变化:`);
+        logs.push(`  变化前: ${beforeStats.relationshipStats.intimacyLevel} / 情感变化: ${beforeStats.relationshipStats.emotionalChange}`);
+        logs.push(`  变化后: ${afterStats.relationshipStats.intimacyLevel} / 情感变化: ${afterStats.relationshipStats.emotionalChange}`);
+        
+        logs.push(`\n== 统计数据变化汇总 ==`);
+        
+        logs.push(`\n对话统计:`);
+        logs.push(`  对话次数: ${beforeStats.dialogueCount} -> ${afterStats.dialogueCount} (${afterStats.dialogueCount - beforeStats.dialogueCount > 0 ? '+' : ''}${afterStats.dialogueCount - beforeStats.dialogueCount})`);
+        logs.push(`  地点变化: ${beforeStats.locationChanges} -> ${afterStats.locationChanges} (${afterStats.locationChanges - beforeStats.locationChanges > 0 ? '+' : ''}${afterStats.locationChanges - beforeStats.locationChanges})`);
+        
+        logs.push(`\n亲密统计:`);
+        Object.keys(afterStats.intimacyStats).forEach(key => {
+            const before = beforeStats.intimacyStats[key] || 0;
+            const after = afterStats.intimacyStats[key] || 0;
+            const change = after - before;
+            if (change !== 0) {
+                logs.push(`  ${key}: ${before} -> ${after} (${change > 0 ? '+' : ''}${change})`);
+            }
+        });
+        
+        logs.push(`\n情感统计:`);
+        Object.keys(afterStats.emotionStats).forEach(key => {
+            const before = beforeStats.emotionStats[key] || 0;
+            const after = afterStats.emotionStats[key] || 0;
+            const change = after - before;
+            if (change !== 0) {
+                logs.push(`  ${key}: ${before} -> ${after} (${change > 0 ? '+' : ''}${change})`);
+            }
+        });
+        
+        logs.push(`\n暴力统计:`);
+        Object.keys(afterStats.violenceStats).forEach(key => {
+            const before = beforeStats.violenceStats[key] || 0;
+            const after = afterStats.violenceStats[key] || 0;
+            const change = after - before;
+            if (change !== 0) {
+                logs.push(`  ${key}: ${before} -> ${after} (${change > 0 ? '+' : ''}${change})`);
+            }
+        });
+        
+        return logs.join('\n');
+    }
+
+    showDebugLog(log) {
+        $('#debug-log-modal').remove();
+        
+        const modalHtml = `
+        <div id="debug-log-modal" class="debug-log-modal">
+            <div class="debug-log-content">
+                <div class="debug-log-header">
+                    <div class="debug-log-title">🐞 好感度计算调试</div>
+                    <div class="debug-log-close">&times;</div>
+                </div>
+                <pre class="debug-log-text">${log}</pre>
+                <div class="debug-log-footer">
+                    <button id="copy-debug-log" class="debug-log-button">复制日志</button>
+                    <button id="close-debug-log" class="debug-log-button">关闭</button>
+                </div>
+            </div>
+        </div>`;
+        
+        $('body').append(modalHtml);
+        
+        $('#debug-log-modal .debug-log-close, #close-debug-log').on('click', function() {
+            $('#debug-log-modal').remove();
+        });
+        
+        $('#copy-debug-log').on('click', function() {
+            const logText = $('.debug-log-text').text();
+            navigator.clipboard.writeText(logText)
+                .then(() => {
+                    toastr.success('日志已复制到剪贴板');
+                })
+                .catch(err => {
+                    console.error('复制失败:', err);
+                    toastr.error('复制失败');
+                });
+        });
+        
+        const debugLogStyles = `
+        <style>
+            .debug-log-modal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.7);
+                z-index: 1000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .debug-log-content {
+                background-color: #121212;
+                color: #ffffff;
+                border-radius: 10px;
+                width: 80%;
+                max-width: 900px;
+                max-height: 80%;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+            }
+
+            .debug-log-header {
+                padding: 15px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid #333;
+                background-color: #1e1e1e;
+            }
+
+            .debug-log-title {
+                font-size: 18px;
+                font-weight: bold;
+                color: #ffffff;
+            }
+
+            .debug-log-close {
+                cursor: pointer;
+                font-size: 24px;
+                color: #ffffff;
+            }
+
+            .debug-log-text {
+                padding: 15px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+                font-family: monospace;
+                flex: 1;
+                font-size: 14px;
+                line-height: 1.5;
+                background-color: #1a1a1a;
+                color: #e0e0e0;
+                margin: 0;
+                border-radius: 0;
+            }
+
+            .debug-log-footer {
+                padding: 15px;
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+                border-top: 1px solid #333;
+                background-color: #1e1e1e;
+            }
+
+            .debug-log-button {
+                padding: 8px 15px;
+                border-radius: 5px;
+                cursor: pointer;
+                border: none;
+                background-color: #3a3a3a;
+                color: #ffffff;
+            }
+
+            .debug-log-button:hover {
+                background-color: #4a4a4a;
+            }
+        </style>`;
+        
+        $('head').append(debugLogStyles);
+    }
 
     showMemoryModal(content, isEditing = false) {
         $('#memory-modal').remove();
@@ -1057,21 +1449,59 @@ addMemoryButtonToMessage(messageId) {
 
         $(document).off('click', '#memory-edit').on('click', '#memory-edit', async () => {
             const isCurrentlyEditing = $('#memory-edit').attr('data-editing') === 'true';
-
             if (isCurrentlyEditing) {
-                const updatedStats = this.collectStatsFromForm();
-                await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(updatedStats)}`);
-
+                let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
+                try {
+                    currentStats = typeof currentStats === 'string' ? JSON.parse(currentStats) : currentStats;
+                    if (!currentStats || typeof currentStats !== 'object') {
+                        currentStats = this.createEmptyStats();
+                    }
+                } catch (e) {
+                    currentStats = this.createEmptyStats();
+                }
+                const updatedStatsFromForm = this.collectStatsFromForm();
+                
+                const finalStats = {
+                    ...currentStats,  
+                    ...updatedStatsFromForm,
+                    relationships: { ...currentStats.relationships }
+                };
+                Object.entries(updatedStatsFromForm.relationships || {}).forEach(([name, data]) => {
+                    if (finalStats.relationships[name]) {
+                        finalStats.relationships[name].intimacyLevel = data.intimacyLevel;
+                        finalStats.relationships[name].stage = data.stage;
+                    } else {
+                        finalStats.relationships[name] = data;
+                    }
+                });
+                if (currentStats.intimacyStats) {
+                    finalStats.intimacyStats = { ...currentStats.intimacyStats, ...updatedStatsFromForm.intimacyStats };
+                }
+                if (currentStats.emotionStats) {
+                    finalStats.emotionStats = { ...currentStats.emotionStats, ...updatedStatsFromForm.emotionStats };
+                }
+                if (currentStats.violenceStats) {
+                    finalStats.violenceStats = { ...currentStats.violenceStats, ...updatedStatsFromForm.violenceStats };
+                }
+                if (currentStats.exchangeStats) {
+                    finalStats.exchangeStats = { ...currentStats.exchangeStats, ...updatedStatsFromForm.exchangeStats };
+                }
+                if (currentStats.relationshipStats) {
+                    finalStats.relationshipStats = { ...currentStats.relationshipStats, ...updatedStatsFromForm.relationshipStats };
+                }
+                if (currentStats.lastChanges) {
+                    finalStats.lastChanges = currentStats.lastChanges;
+                }
+                await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(finalStats)}`);
                 if (this.settings.memoryInjectEnabled) {
                     this.updateMemoryPrompt();
                 }
-
-                const formattedStats = this.formatHistoryStatistics(updatedStats);
+                const formattedStats = this.formatHistoryStatistics(finalStats);
                 $('#memory-modal .memory-tab-content').html(formattedStats.userVisibleStats);
-
                 $('#memory-edit').text('✏️ 编辑数据').attr('data-editing', 'false');
                 this.executeCommand('/echo 数据已更新');
             } else {
+
                 let stats = await this.executeCommand('/getvar xiaobaix_stats');
 
                 try {
@@ -1108,12 +1538,19 @@ addMemoryButtonToMessage(messageId) {
     }
 
     createEditableStatsForm(stats) {
+        const relationships = Object.entries(stats.relationships || {}).sort((a, b) => b[1].interactions - a[1].interactions);
+        
         const sections = [
             {
                 title: '💬 基础数据', fields: [
                     { label: '对话次数', path: 'dialogueCount', value: stats.dialogueCount || 0 },
                     { label: '地点变化', path: 'locationChanges', value: stats.locationChanges || 0 }
                 ]
+            },
+            {
+                title: '💞 关系网络', 
+                isRelationships: true,
+                relationships: relationships
             },
             {
                 title: '🔞 亲密互动', fields: [
@@ -1156,38 +1593,73 @@ addMemoryButtonToMessage(messageId) {
         let html = '<div class="stats-editor">';
         sections.forEach(section => {
             html += `<div class="stats-section"><h3>${section.title}</h3>`;
-            section.fields.forEach(field => {
-                html += `<div class="stats-field"><label>${field.label}:</label><input type="number" data-path="${field.path}" value="${field.value}" min="0" /></div>`;
-            });
+            
+            if (section.isRelationships) {
+                if (section.relationships && section.relationships.length > 0) {
+                    section.relationships.forEach(([name, data]) => {
+                        const intimacyLevel = data.intimacyLevel || 0;
+                        const stage = data.stage || this.getRelationshipStage(intimacyLevel);
+                        html += `<div class="stats-field">
+                            <label>${name}:</label>
+                            <input type="number" data-path="relationships.${name}.intimacyLevel" value="${intimacyLevel}" min="-100" max="100" />
+                            <span class="relationship-stage">${stage}</span>
+                        </div>`;
+                    });
+                } else {
+                    html += `<div class="stats-empty-message">暂无关系记录</div>`;
+                }
+            } else {
+                section.fields.forEach(field => {
+                    html += `<div class="stats-field"><label>${field.label}:</label><input type="number" data-path="${field.path}" value="${field.value}" min="0" /></div>`;
+                });
+            }
+            
             html += '</div>';
         });
         html += '</div>';
-
         return html;
     }
 
     collectStatsFromForm() {
+        const self = this;
         const stats = this.createEmptyStats();
 
         $('.stats-field input').each(function () {
             const path = $(this).data('path');
+            if (!path) return;
+            
             const value = parseInt($(this).val()) || 0;
-
-            if (path) {
-                const pathParts = path.split('.');
-                if (pathParts.length === 1) {
-                    stats[pathParts[0]] = value;
-                } else if (pathParts.length === 2) {
-                    if (!stats[pathParts[0]]) {
-                        stats[pathParts[0]] = {};
-                    }
-                    stats[pathParts[0]][pathParts[1]] = value;
+            const pathParts = path.split('.');
+            
+            if (pathParts.length === 1) {
+                stats[pathParts[0]] = value;
+            } else if (pathParts.length === 2) {
+                if (!stats[pathParts[0]]) {
+                    stats[pathParts[0]] = {};
+                }
+                stats[pathParts[0]][pathParts[1]] = value;
+            } else if (pathParts.length === 3 && pathParts[0] === 'relationships') {
+                const name = pathParts[1];
+                const field = pathParts[2];
+                
+                if (!stats.relationships[name]) {
+                    stats.relationships[name] = {
+                        interactions: 0,
+                        initialIntimacy: 0
+                    };
+                }
+                
+                stats.relationships[name][field] = value;
+                
+                if (field === 'intimacyLevel') {
+                    stats.relationships[name].stage = self.getRelationshipStage(value);
                 }
             }
         });
 
         return stats;
     }
+
 
     async exportBehaviorSettings() {
         try {
@@ -1685,6 +2157,20 @@ addMemoryButtonToMessage(messageId) {
     }
 
     createBehaviorSettingsForm(behaviors) {
+        const stageRanges = {
+            "厌恶": "-100~-1",
+            "无视": "0~9",
+            "礼貌": "10~19",
+            "熟悉": "20~29",
+            "友善": "30~39", 
+            "好感": "40~49",
+            "暧昧": "50~59",
+            "恋人初期": "60~69",
+            "热恋": "70~79",
+            "深爱": "80~89",
+            "唯一": "90~99",
+            "命运": "100"
+        };    	
         let html = `
         <div class="behavior-settings-form">
             <div class="behavior-intro">
@@ -1713,9 +2199,10 @@ addMemoryButtonToMessage(messageId) {
 
         stages.forEach((stage, index) => {
             const behavior = behaviors[stage];
+            const range = stageRanges[stage] || "未知";
             html += `
             <div class="behavior-stage-form" data-stage="${stage}" ${index === 0 ? '' : 'style="display:none;"'}>
-                <h3>${stage} 阶段行为设定</h3>
+                <h3>${stage} 阶段行为设定 <span class="stage-range">【${range}】</span></h3>
                 <div class="behavior-field">
                     <label>核心态度:</label>
                     <textarea class="behavior-textarea" data-stage="${stage}" data-field="attitude">${behavior.attitude}</textarea>

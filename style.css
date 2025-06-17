@@ -1072,3 +1072,11 @@ input.disable_task {
 .disable_task:not(:checked) ~ .task-toggle-on {
     display: block;
 }
+/* 关系网络编辑区域样式 */
+.stats-field .relationship-stage {
+    margin-left: 10px;
+    font-size: calc(var(--mainFontSize) * 0.85);
+    color: var(--SmartThemeBodyColor);
+    opacity: 0.7;
+    white-space: nowrap;
+}

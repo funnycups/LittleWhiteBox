@@ -532,9 +532,7 @@ function setupEventListeners() {
                 statsTracker.addMemoryButtonToMessage(messageId);
                 
                 if (isReceived) {
-                    const messageText = messageElement.textContent || '';
-                    const characterName = statsTracker.getCharacterFromMessage(messageElement);
-                    await statsTracker.updateStatisticsForNewMessage(messageText, characterName);
+                    await statsTracker.updateStatisticsForNewMessage();
                     $(`.mes[mesid="${messageId}"] .memory-button`).addClass('has-memory');
                 }
             }
@@ -553,12 +551,22 @@ function setupEventListeners() {
                 let stats = await executeSlashCommand('/getvar xiaobaix_stats');
                 
                 if (!stats || stats === "undefined") {
-                    const messages = await statsTracker.processMessageHistory();
-                    if (messages?.length > 0) {
+                    const messagesText = await executeSlashCommand('/messages names=on');
+                    if (messagesText) {
                         const newStats = statsTracker.createEmptyStats();
-                        messages.forEach(message => {
-                            statsTracker.updateStatsFromText(newStats, message.content, message.name);
-                        });
+                        
+                        const messageBlocks = messagesText.split('\n\n');
+                        for (const block of messageBlocks) {
+                            const colonIndex = block.indexOf(':');
+                            if (colonIndex !== -1) {
+                                const name = block.substring(0, colonIndex).trim();
+                                const content = block.substring(colonIndex + 1).trim();
+                                
+                                if (name !== getContext().name1 && content) {
+                                    statsTracker.updateStatsFromText(newStats, content, name);
+                                }
+                            }
+                        }
                         
                         await executeSlashCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(newStats)}`);
                         if (settings.memoryInjectEnabled) statsTracker.updateMemoryPrompt();
@@ -566,7 +574,9 @@ function setupEventListeners() {
                 } else if (settings.memoryInjectEnabled) {
                     statsTracker.updateMemoryPrompt();
                 }
-            } catch (error) {}
+            } catch (error) {
+                console.error('[小白X] 处理聊天历史出错:', error);
+            }
         }, 500);
     });
     
