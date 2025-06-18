@@ -94,6 +94,10 @@ class StatsTracker {
         this.quoteChars = ['\u0022', '\u201C', '\u201D', '\u2018', '\u2019', '\u300C', '\u300D', '\u300E', '\u300F', '\u301D', '\u301E', '\u301F', '\uFF02', '\u2033', '\u2036'];
     }
 
+    isGloballyEnabled() {
+        return window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
+    }
+
     init(extId, moduleName, settings, executeCommand) {
         this.EXT_ID = extId;
         this.MODULE_NAME = moduleName;
@@ -133,6 +137,10 @@ class StatsTracker {
         this.pronounMapping.clear();
         const newCharId = this_chid;
 
+        const userMemoryEnabled = this.settings.memoryEnabled;
+        const userMemoryInjectEnabled = this.settings.memoryInjectEnabled;
+        const userGlobalEnabled = this.isGloballyEnabled();
+
         if (this.currentCharacterId && this.currentCharacterId !== newCharId && extension_settings[this.EXT_ID].relationshipGuidelines) {
             this.characterSettings.set(this.currentCharacterId, structuredClone(extension_settings[this.EXT_ID].relationshipGuidelines));
         }
@@ -148,19 +156,16 @@ class StatsTracker {
 
         if (savedData?.relationshipGuidelines) {
             extension_settings[this.EXT_ID].relationshipGuidelines = structuredClone(savedData.relationshipGuidelines);
-  
             this.characterSettings.set(newCharId, structuredClone(savedData.relationshipGuidelines));
-  
-            if (savedData.settings) {
-                this.settings.memoryEnabled = savedData.settings.memoryEnabled ?? this.settings.memoryEnabled;
-                this.settings.memoryInjectEnabled = savedData.settings.memoryInjectEnabled ?? this.settings.memoryInjectEnabled;
+
+            if (userGlobalEnabled && userMemoryEnabled && savedData.settings) {
                 this.settings.memoryInjectDepth = savedData.settings.memoryInjectDepth ?? this.settings.memoryInjectDepth;
             }
-  
+
             let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
             if (!currentStats || currentStats === "undefined") {
                 const newStats = this.createEmptyStats();
-      
+                
                 if (savedData.trackedRelationships) {
                     Object.entries(savedData.trackedRelationships).forEach(([name, data]) => {
                         const initialIntimacy = data.initialIntimacy !== undefined ? data.initialIntimacy : 0;
@@ -172,7 +177,7 @@ class StatsTracker {
                         };
                     });
                 }
-      
+                
                 await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(newStats)}`);
             }
         } else if (this.characterSettings.has(newCharId)) {
@@ -182,7 +187,7 @@ class StatsTracker {
             this.characterSettings.set(newCharId, structuredClone(this.relationshipGuidelines));
         }
 
-        if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled) {
+        if (userMemoryEnabled && this.settings.memoryInjectEnabled && userGlobalEnabled) {
             await this.updateMemoryPrompt();
         } else {
             this.removeMemoryPrompt();
@@ -658,7 +663,7 @@ class StatsTracker {
     }
 
     async updateStatisticsForNewMessage() {
-        if (!this.settings.memoryEnabled) return false;
+        if (!this.settings.memoryEnabled || !this.isGloballyEnabled()) return false;
 
         try {
             const lastMessage = await this.executeCommand('/messages names=on {{lastMessageId}}');
@@ -796,8 +801,7 @@ class StatsTracker {
     }
 
     async updateMemoryPrompt() {
-    // 先检查是否启用了两个设置
-    if (!this.settings.memoryEnabled || !this.settings.memoryInjectEnabled) {
+    if (!this.settings.memoryEnabled || !this.settings.memoryInjectEnabled || !this.isGloballyEnabled()) {
         this.removeMemoryPrompt();
         return;
     }
@@ -973,8 +977,7 @@ class StatsTracker {
     }
 
     addMemoryButtonToMessage(messageId) {
-        // 严格检查是否应该添加按钮
-        if (!this.settings.memoryEnabled || !this.isInitialized) return;
+        if (!this.settings.memoryEnabled || !this.isInitialized || !this.isGloballyEnabled()) return;
   
         const messageBlock = $(`#chat .mes[mesid="${messageId}"]`);
         if (!messageBlock.length || messageBlock.find('.memory-button').length) return;
@@ -982,13 +985,8 @@ class StatsTracker {
         const flexContainer = messageBlock.find('.flex-container.flex1.alignitemscenter');
         if (!flexContainer.length) return;
 
-        // 主记忆按钮
-        const buttonHtml = `<div class="mes_btn memory-button" title="查看历史数据统计"><i class="fa-solid fa-brain"></i></div>`;
+        const buttonHtml = `<div class="mes_btn memory-button" title="查看历史数据统计\n\nPC端: Shift+点击调试分析\n移动端: 长按调试分析"><i class="fa-solid fa-brain"></i></div>`;
         const memoryButton = $(buttonHtml);
-
-        // 新增调试按钮
-        const debugButtonHtml = `<div class="mes_btn debug-button" title="分析本条消息"><i class="fa-solid fa-bug"></i></div>`;
-        const debugButton = $(debugButtonHtml);
 
         this.executeCommand('/getvar xiaobaix_stats').then(result => {
             if (result && result !== "undefined") {
@@ -1001,8 +999,37 @@ class StatsTracker {
             }
         });
 
-        // 记忆按钮点击事件
+        let pressTimer = null;
+        let isLongPress = false;
+
+        memoryButton.on('mousedown touchstart', (event) => {
+            isLongPress = false;
+            pressTimer = setTimeout(() => {
+                isLongPress = true;
+                triggerDebugAnalysis();
+            }, 800);
+        });
+
+        memoryButton.on('mouseup touchend mouseleave', (event) => {
+            if (pressTimer) {
+                clearTimeout(pressTimer);
+                pressTimer = null;
+            }
+        });
+
         memoryButton.on('click', async (event) => {
+            event.preventDefault();
+            
+            if (isLongPress) {
+                isLongPress = false;
+                return;
+            }
+
+            if (event.shiftKey) {
+                triggerDebugAnalysis();
+                return;
+            }
+
             let stats = await this.executeCommand('/getvar xiaobaix_stats');
 
             if (!stats || stats === "undefined") {
@@ -1038,30 +1065,20 @@ class StatsTracker {
             }
         });
 
-// 调试按钮点击事件
-debugButton.on('click', async (event) => {
-    // 获取消息文本和角色名
-    const messageText = messageBlock.find('.mes_text').text().trim();
-    const characterName = messageBlock.find('.ch_name .name').text().trim();
-          
-    // 运行调试分析并显示结果
-    const debugLog = await statsTracker.debugCalculation(messageText, characterName);
-    statsTracker.showDebugLog(debugLog);
-});
+        const triggerDebugAnalysis = async () => {
+            const messageText = messageBlock.find('.mes_text').text().trim();
+            const characterName = messageBlock.find('.ch_name .name').text().trim();
+                  
+            const debugLog = await this.debugCalculation(messageText, characterName);
+            this.showDebugLog(debugLog);
+        };
 
-        // 添加按钮到消息
         flexContainer.append(memoryButton);
-        flexContainer.append(debugButton);
-        
-        // 添加样式以便按钮看起来是一组
-        debugButton.css('margin-left', '2px');
     }
 
     async debugCalculation(text, characterName) {
-        // 创建一个日志收集器
         const logs = [];
-      
-        // 获取当前实际统计数据
+        
         let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
         try {
             currentStats = typeof currentStats === 'string' ? JSON.parse(currentStats) : currentStats;
@@ -1071,41 +1088,46 @@ debugButton.on('click', async (event) => {
         } catch (e) {
             currentStats = this.createEmptyStats();
         }
-      
-        // 复制一份用于模拟计算
-        const beforeStats = JSON.parse(JSON.stringify(currentStats));
-        const afterStats = JSON.parse(JSON.stringify(currentStats));
-      
-        // 重置代理映射
+        
+        const debugStats = this.createEmptyStats();
+        const trackedNames = Object.keys(currentStats.relationships || {});
+        
+        trackedNames.forEach(name => {
+            const initialIntimacy = currentStats.relationships[name].initialIntimacy || 0;
+            debugStats.relationships[name] = {
+                intimacyLevel: initialIntimacy,
+                stage: this.getRelationshipStage(initialIntimacy),
+                interactions: 0,
+                initialIntimacy: initialIntimacy
+            };
+        });
+        
+        const beforeStats = JSON.parse(JSON.stringify(debugStats));
+        
         this.pronounMapping.clear();
         if (characterName) {
             this.pronounMapping.set('她', characterName);
             this.pronounMapping.set('他', characterName);
         }
-      
-        // 记录基本信息
+        
         logs.push(`===== 好感度计算详情 =====`);
         logs.push(`分析文本: "${text}"`);
-        logs.push(`消息发送者: ${characterName || '未知'}`);
-      
-        // 显示追踪的人物和初始状态
-        const trackedNames = Object.keys(currentStats.relationships || {});
-        logs.push(`\n== 初始状态 ==`);
+        
+        logs.push(`\n== 分析环境初始状态 ==`);
         logs.push(`追踪的人物: ${trackedNames.join(', ') || '无'}`);
-      
+        
         if (trackedNames.length > 0) {
             logs.push(`\n初始好感度状态:`);
             trackedNames.forEach(name => {
-                const rel = currentStats.relationships[name];
+                const rel = debugStats.relationships[name];
                 logs.push(`  ${name}: ${rel.intimacyLevel} (${rel.stage})`);
             });
         }
-      
-        logs.push(`全局好感度: ${currentStats.relationshipStats?.intimacyLevel || 0}`);
-        logs.push(`全局情感变化: ${currentStats.relationshipStats?.emotionalChange || 0}`);
-      
-        // 分析对话和说话者
-        const dialogueChanges = this.analyzeDialoguesAndSpeakers(text, afterStats, characterName);
+        
+        logs.push(`全局好感度: ${debugStats.relationshipStats?.intimacyLevel || 0}`);
+        logs.push(`全局情感变化: ${debugStats.relationshipStats?.emotionalChange || 0}`);
+        
+        const dialogueChanges = this.analyzeDialoguesAndSpeakers(text, debugStats, characterName);
         logs.push(`\n== 对话情绪分析 ==`);
         if (Object.keys(dialogueChanges).length > 0) {
             Object.entries(dialogueChanges).forEach(([name, change]) => {
@@ -1115,50 +1137,44 @@ debugButton.on('click', async (event) => {
             logs.push(`  未检测到引号内的对话或对话主体不明确`);
             logs.push(`  注：此部分仅分析引号内的对话，详细分析请看下方句子分析`);
         }
-      
-        // 初始化关系变化跟踪
+        
         const relationshipChanges = {};
         trackedNames.forEach(name => {
             relationshipChanges[name] = dialogueChanges[name] || 0;
         });
-      
-        // 分析句子结构
+        
         const rawSentences = this.splitIntoSentences(text);
         logs.push(`\n== 句子分析 ==`);
         logs.push(`拆分为 ${rawSentences.length} 个句子:`);
-      
+        
         const processedSentences = this.resolvePronounsInSentences(rawSentences, trackedNames);
-      
+        
         let globalSentiment = 0;
         let lastSubjects = [];
-      
-        // 逐句分析
+        
         processedSentences.forEach((sentenceData, index) => {
             const sentence = sentenceData.originalSentence;
             const impliedPerson = sentenceData.impliedPerson;
             const mentionedPersons = sentenceData.mentionedPersons || [];
-          
+            
             logs.push(`\n句子 ${index + 1}: "${sentence}"`);
-          
+            
             if (impliedPerson) {
                 logs.push(`  隐含主语: ${impliedPerson}`);
             }
-          
+            
             if (mentionedPersons.length > 0) {
                 logs.push(`  提及人物: ${mentionedPersons.join(', ')}`);
             }
-          
-            // 检查是否是引用
+            
             if (sentence.match(new RegExp(`[${this.quoteChars.join('')}].*[${this.quoteChars.join('')}]`, 'g'))) {
                 logs.push(`  [跳过] 这是引用语句，不计算情感值`);
                 return;
             }
-          
-            // 计算句子情感值
+            
             const sentenceSentiment = this.calculateSentimentScore(sentence);
             logs.push(`  情感值: ${sentenceSentiment.toFixed(2)}`);
-          
-            // 匹配情感词汇
+            
             logs.push(`  匹配情感词汇:`);
             let hasMatches = false;
             Object.entries(this.SENTIMENT_LEXICON).forEach(([key, lexiconItem]) => {
@@ -1168,8 +1184,7 @@ debugButton.on('click', async (event) => {
                         return;
                     }
                     hasMatches = true;
-                  
-                    // 映射英文类型到中文
+                    
                     const typeNameMap = {
                         'kiss': '接吻',
                         'embrace': '拥抱',
@@ -1190,73 +1205,28 @@ debugButton.on('click', async (event) => {
                         'disgust': '厌恶',
                         'cold': '冷漠'
                     };
-                  
+                    
                     const typeName = typeNameMap[key] || key;
-                  
+                    
                     logs.push(`    - ${typeName}: 匹配词 "${matches.join('", "')}" (得分 ${lexiconItem.score})`);
-                  
-                    // 跟踪统计数据变化
-                    if (lexiconItem.stats_event) {
-                        let categoryName = "";
-                        let statObj = null;
-                      
-                        // 统计类别中文化
-                        if (afterStats.intimacyStats[lexiconItem.stats_event] !== undefined) {
-                            categoryName = "亲密统计";
-                            statObj = afterStats.intimacyStats;
-                        } else if (afterStats.emotionStats[lexiconItem.stats_event] !== undefined) {
-                            categoryName = "情感统计";
-                            statObj = afterStats.emotionStats;
-                        } else if (afterStats.violenceStats[lexiconItem.stats_event] !== undefined) {
-                            categoryName = "暴力统计";
-                            statObj = afterStats.violenceStats;
-                        }
-                      
-                        // 统计项目中文化
-                        const statEventMap = {
-                            'kissingEvents': '接吻次数',
-                            'embraceEvents': '拥抱次数',
-                            'sexualEncounters': '性爱次数',
-                            'maleOrgasms': '男性高潮',
-                            'femaleOrgasms': '女性高潮',
-                            'oralCompletions': '口交完成',
-                            'internalCompletions': '内射完成',
-                            'positiveEmotions': '积极情绪',
-                            'negativeEmotions': '消极情绪',
-                            'loveExpressions': '爱意表达',
-                            'hitEvents': '打击事件',
-                            'weaponUse': '武器使用',
-                            'deathEvents': '死亡事件'
-                        };
-                      
-                        const statEventName = statEventMap[lexiconItem.stats_event] || lexiconItem.stats_event;
-                      
-                        if (statObj) {
-                            statObj[lexiconItem.stats_event] += matches.length;
-                            logs.push(`    > ${categoryName} ${statEventName} +${matches.length} = ${statObj[lexiconItem.stats_event]}`);
-                        }
-                    }
                 }
             });
-          
+            
             if (!hasMatches) {
                 logs.push(`    无匹配情感词汇`);
             }
-          
-            // 句子主语分析
+            
             const subjects = this.identifySubjectsInSentence(sentence, [...trackedNames, impliedPerson].filter(Boolean));
-          
+            
             if (subjects.length > 0) {
                 logs.push(`  识别主语:`);
-              
-                // 角色中文映射
+                
                 const roleMap = {
                     'agent': '主动者',
                     'patient': '被动者',
                     'mentioned': '被提及'
                 };
-              
-                // 模式中文映射
+                
                 const patternMap = {
                     'passive': '被动句',
                     'pivotal': '致使句',
@@ -1267,20 +1237,20 @@ debugButton.on('click', async (event) => {
                     'inherited': '继承上文',
                     'fallback': '兜底分析'
                 };
-              
+                
                 subjects.forEach(subject => {
                     const roleName = roleMap[subject.role] || subject.role;
                     const patternName = patternMap[subject.pattern] || subject.pattern;
-                  
+                    
                     logs.push(`    - ${subject.name}: 角色 ${roleName}, 权重 ${subject.weight.toFixed(2)}, 模式 ${patternName}`);
-                  
+                    
                     if (!subject.name) return;
                     if (subject.role === 'mentioned') return;
                     if (subject.role === 'patient' && sentenceSentiment <= 0) return;
-                  
+                    
                     const weight = subject.weight;
                     const change = sentenceSentiment * weight;
-                  
+                    
                     if (Math.abs(change) > 0.1) {
                         relationshipChanges[subject.name] = (relationshipChanges[subject.name] || 0) + change;
                         logs.push(`      对好感度影响: ${change.toFixed(2)} (累计: ${relationshipChanges[subject.name].toFixed(2)})`);
@@ -1288,9 +1258,9 @@ debugButton.on('click', async (event) => {
                         logs.push(`      对好感度影响过小，忽略`);
                     }
                 });
-              
+                
                 lastSubjects = subjects.filter(s => s.role === 'agent');
-              
+                
             } else if (mentionedPersons.length > 0) {
                 logs.push(`  未识别明确主语，但提及了人物:`);
                 mentionedPersons.forEach(name => {
@@ -1302,83 +1272,123 @@ debugButton.on('click', async (event) => {
                         logs.push(`    - ${name}: 影响过小，忽略: ${change.toFixed(2)}`);
                     }
                 });
-              
+                
                 lastSubjects = [];
-              
+                
             } else {
                 globalSentiment += sentenceSentiment;
                 logs.push(`  未识别特定人物，情感值 ${sentenceSentiment.toFixed(2)} 计入全局情感`);
                 lastSubjects = [];
             }
         });
-      
-        // 最终的关系变化
+        
         logs.push(`\n== 好感度变化详情 ==`);
         logs.push(`全局情感值: ${globalSentiment.toFixed(2)}`);
         logs.push(`全局情感变化: ${Math.round(Math.min(3, Math.max(-3, globalSentiment)))}`);
-      
+        
         Object.entries(relationshipChanges).forEach(([name, change]) => {
             const finalChange = Math.round(Math.min(3, Math.max(-3, change)));
             if (finalChange !== 0) {
-                afterStats.relationships[name].interactions++;
-                afterStats.relationships[name].intimacyLevel += finalChange;
-                afterStats.relationships[name].intimacyLevel = Math.min(100, Math.max(-100, afterStats.relationships[name].intimacyLevel));
-                afterStats.relationships[name].stage = this.getRelationshipStage(afterStats.relationships[name].intimacyLevel);
-              
+                debugStats.relationships[name].interactions++;
+                debugStats.relationships[name].intimacyLevel += finalChange;
+                debugStats.relationships[name].intimacyLevel = Math.min(100, Math.max(-100, debugStats.relationships[name].intimacyLevel));
+                debugStats.relationships[name].stage = this.getRelationshipStage(debugStats.relationships[name].intimacyLevel);
+                
                 logs.push(`\n${name} 好感度变化:`);
                 logs.push(`  原始计算值: ${change.toFixed(2)}`);
                 logs.push(`  最终变化值: ${finalChange} (限制为-3到+3)`);
                 logs.push(`  变化前: ${beforeStats.relationships[name].intimacyLevel} (${beforeStats.relationships[name].stage})`);
-                logs.push(`  变化后: ${afterStats.relationships[name].intimacyLevel} (${afterStats.relationships[name].stage})`);
+                logs.push(`  变化后: ${debugStats.relationships[name].intimacyLevel} (${debugStats.relationships[name].stage})`);
             } else if (Math.abs(change) > 0) {
                 logs.push(`\n${name} 好感度变化不足以改变数值: ${change.toFixed(2)} -> ${finalChange}`);
             }
         });
-      
-        // 全局关系状态变化
+        
+        const finalDebugStats = JSON.parse(JSON.stringify(beforeStats));
+        this.updateStatsFromText(finalDebugStats, text, characterName);
+        
+        const statChanges = this.calculateStatChanges(beforeStats, finalDebugStats);
+        
         const finalGlobalChange = Math.round(Math.min(3, Math.max(-3, globalSentiment)));
-        afterStats.relationshipStats.intimacyLevel += finalGlobalChange;
-        afterStats.relationshipStats.emotionalChange += finalGlobalChange;
-        afterStats.relationshipStats.intimacyLevel = Math.min(100, Math.max(-100, afterStats.relationshipStats.intimacyLevel));
-        afterStats.relationshipStats.emotionalChange = Math.min(100, Math.max(-100, afterStats.relationshipStats.emotionalChange));
-      
         logs.push(`\n全局关系状态变化:`);
-        logs.push(`  变化前: ${beforeStats.relationshipStats.intimacyLevel} / 情感变化: ${beforeStats.relationshipStats.emotionalChange}`);
-        logs.push(`  变化后: ${afterStats.relationshipStats.intimacyLevel} / 情感变化: ${afterStats.relationshipStats.emotionalChange}`);
-      
-        // 统计数据变化汇总
-        logs.push(`\n== 统计数据变化汇总 ==`);
-      
-        // 对话统计
-        logs.push(`\n对话统计:`);
-        logs.push(`  对话次数: ${beforeStats.dialogueCount} -> ${afterStats.dialogueCount} (${afterStats.dialogueCount - beforeStats.dialogueCount > 0 ? '+' : ''}${afterStats.dialogueCount - beforeStats.dialogueCount})`);
-        logs.push(`  地点变化: ${beforeStats.locationChanges} -> ${afterStats.locationChanges} (${afterStats.locationChanges - beforeStats.locationChanges > 0 ? '+' : ''}${afterStats.locationChanges - beforeStats.locationChanges})`);
-      
-        // 亲密统计
-        logs.push(`\n亲密统计:`);
-        const intimacyMap = {
+        logs.push(`  变化值: ${finalGlobalChange}`);
+        
+        logs.push(`\n== 本条消息增加的统计 ==`);
+        
+        if (statChanges.dialogueCount > 0 || statChanges.locationChanges > 0) {
+            logs.push(`\n对话统计:`);
+            if (statChanges.dialogueCount > 0) {
+                logs.push(`  对话次数: +${statChanges.dialogueCount}`);
+            }
+            if (statChanges.locationChanges > 0) {
+                logs.push(`  地点变化: +${statChanges.locationChanges}`);
+            }
+        }
+        
+        const intimacyChanges = Object.entries(statChanges.intimacyStats).filter(([_, change]) => change > 0);
+        if (intimacyChanges.length > 0) {
+            logs.push(`\n亲密统计:`);
+            intimacyChanges.forEach(([key, change]) => {
+                const keyName = this.getStatKeyName(key);
+                logs.push(`  ${keyName}: +${change}`);
+            });
+        }
+        
+        const emotionChanges = Object.entries(statChanges.emotionStats).filter(([_, change]) => change > 0);
+        if (emotionChanges.length > 0) {
+            logs.push(`\n情感统计:`);
+            emotionChanges.forEach(([key, change]) => {
+                const keyName = this.getStatKeyName(key);
+                logs.push(`  ${keyName}: +${change}`);
+            });
+        }
+        
+        const violenceChanges = Object.entries(statChanges.violenceStats).filter(([_, change]) => change > 0);
+        if (violenceChanges.length > 0) {
+            logs.push(`\n暴力统计:`);
+            violenceChanges.forEach(([key, change]) => {
+                const keyName = this.getStatKeyName(key);
+                logs.push(`  ${keyName}: +${change}`);
+            });
+        }
+        
+        return logs.join('\n');
+    }
+
+    calculateStatChanges(beforeStats, afterStats) {
+        const changes = {
+            dialogueCount: (afterStats.dialogueCount || 0) - (beforeStats.dialogueCount || 0),
+            locationChanges: (afterStats.locationChanges || 0) - (beforeStats.locationChanges || 0),
+            intimacyStats: {},
+            emotionStats: {},
+            violenceStats: {},
+            exchangeStats: {}
+        };
+        
+        Object.keys(afterStats.intimacyStats || {}).forEach(key => {
+            changes.intimacyStats[key] = (afterStats.intimacyStats[key] || 0) - (beforeStats.intimacyStats[key] || 0);
+        });
+        
+        Object.keys(afterStats.emotionStats || {}).forEach(key => {
+            changes.emotionStats[key] = (afterStats.emotionStats[key] || 0) - (beforeStats.emotionStats[key] || 0);
+        });
+        
+        Object.keys(afterStats.violenceStats || {}).forEach(key => {
+            changes.violenceStats[key] = (afterStats.violenceStats[key] || 0) - (beforeStats.violenceStats[key] || 0);
+        });
+        
+        return changes;
+    }
+
+    getStatKeyName(key) {
+        const keyMap = {
             'kissingEvents': '接吻次数',
-            'embraceEvents': '拥抱次数',
+            'embraceEvents': '拥抱次数', 
             'sexualEncounters': '性爱次数',
             'maleOrgasms': '男性高潮',
             'femaleOrgasms': '女性高潮',
             'oralCompletions': '口交完成',
-            'internalCompletions': '内射完成'
-        };
-      
-        Object.keys(afterStats.intimacyStats).forEach(key => {
-            const before = beforeStats.intimacyStats[key] || 0;
-            const after = afterStats.intimacyStats[key] || 0;
-            const change = after - before;
-            if (change !== 0) {
-                const keyName = intimacyMap[key] || key;
-                logs.push(`  ${keyName}: ${before} -> ${after} (${change > 0 ? '+' : ''}${change})`);
-            }
-        });
-      
-        // 情感统计
-        logs.push(`\n情感统计:`);
-        const emotionMap = {
+            'internalCompletions': '内射完成',
             'positiveEmotions': '积极情绪',
             'negativeEmotions': '消极情绪',
             'loveExpressions': '爱意表达',
@@ -1386,193 +1396,38 @@ debugButton.on('click', async (event) => {
             'fearEvents': '恐惧事件',
             'sadnessEvents': '悲伤事件',
             'joyEvents': '喜悦事件',
-            'surpriseEvents': '惊讶事件'
-        };
-      
-        Object.keys(afterStats.emotionStats).forEach(key => {
-            const before = beforeStats.emotionStats[key] || 0;
-            const after = afterStats.emotionStats[key] || 0;
-            const change = after - before;
-            if (change !== 0) {
-                const keyName = emotionMap[key] || key;
-                logs.push(`  ${keyName}: ${before} -> ${after} (${change > 0 ? '+' : ''}${change})`);
-            }
-        });
-      
-        // 暴力统计
-        logs.push(`\n暴力统计:`);
-        const violenceMap = {
+            'surpriseEvents': '惊讶事件',
             'hitEvents': '打击事件',
             'weaponUse': '武器使用',
             'deathEvents': '死亡事件'
         };
-      
-        Object.keys(afterStats.violenceStats).forEach(key => {
-            const before = beforeStats.violenceStats[key] || 0;
-            const after = afterStats.violenceStats[key] || 0;
-            const change = after - before;
-            if (change !== 0) {
-                const keyName = violenceMap[key] || key;
-                logs.push(`  ${keyName}: ${before} -> ${after} (${change > 0 ? '+' : ''}${change})`);
-            }
-        });
-      
-        // 返回日志
-        return logs.join('\n');
+        return keyMap[key] || key;
     }
 
     showDebugLog(log) {
-        $('#debug-log-modal').remove();
-      
-        const modalHtml = `
-        <div id="debug-log-modal" class="debug-log-modal">
-            <div class="debug-log-content">
-                <div class="debug-log-header">
-                    <div class="debug-log-title">🐞 好感度计算调试</div>
-                    <div class="debug-log-close">&times;</div>
-                </div>
-                <pre class="debug-log-text">${log}</pre>
-                <div class="debug-log-footer">
-                    <button id="copy-debug-log" class="debug-log-button">复制日志</button>
-                    <button id="close-debug-log" class="debug-log-button">关闭</button>
-                </div>
+    $('#debug-log-modal').remove();
+  
+    const modalHtml = `
+    <div id="debug-log-modal" class="debug-log-modal">
+        <div class="debug-log-content">
+            <div class="debug-log-header">
+                <div class="debug-log-title">🐞 好感度计算过程</div>
+                <div class="debug-log-close">&times;</div>
             </div>
-        </div>`;
-      
-        $('body').append(modalHtml);
-      
-        $('#debug-log-modal .debug-log-close, #close-debug-log').on('click', function() {
-            $('#debug-log-modal').remove();
-        });
-      
-        $('#copy-debug-log').on('click', function() {
-            const logText = $('.debug-log-text').text();
-            navigator.clipboard.writeText(logText)
-                .then(() => {
-                    toastr.success('日志已复制到剪贴板');
-                })
-                .catch(err => {
-                    console.error('复制失败:', err);
-                    toastr.error('复制失败');
-                });
-        });
-      
-        // 使用黑底白字的样式，并优化移动端显示
-        const debugLogStyles = `
-        <style>
-            .debug-log-modal {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background-color: rgba(0, 0, 0, 0.7);
-                z-index: 9999;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                overflow: hidden;
-            }
-          
-            .debug-log-content {
-                background-color: #121212;
-                color: #ffffff;
-                border-radius: 10px;
-                width: 90%;
-                max-width: 900px;
-                height: 90%;
-                max-height: 90vh;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-                box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
-            }
-          
-            .debug-log-header {
-                padding: 12px 15px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                border-bottom: 1px solid #333;
-                background-color: #1e1e1e;
-            }
-          
-            .debug-log-title {
-                font-size: 16px;
-                font-weight: bold;
-                color: #ffffff;
-            }
-          
-            .debug-log-close {
-                cursor: pointer;
-                font-size: 22px;
-                color: #ffffff;
-                padding: 0 8px;
-            }
-          
-            .debug-log-text {
-                padding: 15px;
-                overflow-y: auto;
-                white-space: pre-wrap;
-                font-family: monospace;
-                flex: 1;
-                font-size: 14px;
-                line-height: 1.5;
-                background-color: #1a1a1a;
-                color: #e0e0e0;
-                margin: 0;
-                border-radius: 0;
-                -webkit-overflow-scrolling: touch;
-            }
-          
-            .debug-log-footer {
-                padding: 12px 15px;
-                display: flex;
-                justify-content: flex-end;
-                gap: 10px;
-                border-top: 1px solid #333;
-                background-color: #1e1e1e;
-            }
-          
-            .debug-log-button {
-                padding: 8px 15px;
-                border-radius: 5px;
-                cursor: pointer;
-                border: none;
-                background-color: #3a3a3a;
-                color: #ffffff;
-                font-size: 14px;
-            }
-          
-            .debug-log-button:hover {
-                background-color: #4a4a4a;
-            }
-          
-            /* 移动端优化 */
-            @media (max-width: 768px) {
-                .debug-log-content {
-                    width: 95%;
-                    height: 95%;
-                }
-              
-                .debug-log-text {
-                    font-size: 12px;
-                    padding: 10px;
-                }
-              
-                .debug-log-button {
-                    padding: 8px 12px;
-                    font-size: 12px;
-                }
-              
-                .debug-log-title {
-                    font-size: 14px;
-                }
-            }
-        </style>`;
-      
-        $('head').append(debugLogStyles);
-    }
+            <pre class="debug-log-text">${log}</pre>
+            <div class="debug-log-footer">
+                <button id="close-debug-log" class="debug-log-button">关闭</button>
+            </div>
+        </div>
+    </div>`;
+  
+    $('body').append(modalHtml);
+  
+    $('#debug-log-modal .debug-log-close, #close-debug-log').on('click', function() {
+        $('#debug-log-modal').remove();
+    });
+    
+}
 
     showMemoryModal(content, isEditing = false) {
         $('#memory-modal').remove();
@@ -2001,9 +1856,9 @@ debugButton.on('click', async (event) => {
                         await this.saveRelationshipSettingsToCharacter(true);
                     }
 
-                    if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled) {
-                        this.updateMemoryPrompt();
-                    }
+        if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled && this.isGloballyEnabled()) {
+            await this.updateMemoryPrompt();
+        }
           
                     if (isCharacterSpecific && isMatchingCharacter) {
                         await this.handleCharacterSwitch();
@@ -2135,9 +1990,9 @@ debugButton.on('click', async (event) => {
             $('#behavior-modal').remove();
             this.executeCommand('/echo 行为设定已保存');
 
-            if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled) {
-                this.updateMemoryPrompt();
-            }
+    if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled && this.isGloballyEnabled()) {
+        await this.updateMemoryPrompt();
+    }
         });
 
         $(document).off('keydown.behaviormodal').on('keydown.behaviormodal', function (e) {
@@ -2405,7 +2260,7 @@ debugButton.on('click', async (event) => {
     }
 
     async checkEmbeddedRelationshipSettingsAuto() {
-        if (!this_chid || !characters[this_chid]) return false;
+        if (!this_chid || !characters[this_chid] || !this.isGloballyEnabled()) return false;
 
         const character = characters[this_chid];
         const savedData = await this.loadRelationshipSettingsFromCharacter();
@@ -2466,7 +2321,7 @@ debugButton.on('click', async (event) => {
     }
 
     async checkEmbeddedRelationshipSettings() {
-        if (!this_chid || !characters[this_chid]) return;
+        if (!this_chid || !characters[this_chid] || !this.isGloballyEnabled()) return;
 
         const savedData = await this.loadRelationshipSettingsFromCharacter();
         if (!savedData) return;
