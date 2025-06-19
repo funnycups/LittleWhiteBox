@@ -29,42 +29,53 @@ class StatsTracker {
         };
 
         this.SENTIMENT_LEXICON = {
-            kiss:         { regex: /亲吻|吻|嘴唇|舌头交缠|深吻|热吻|轻啄|啄吻|吻上|吻住|亲了|亲住|亲上|嘴对嘴|嘴唇相触/g, score: 1,  stats_event: 'kissingEvents' },
-            embrace:      { regex: /拥抱|抱住|搂住|紧抱|依偎|相拥|抱紧|抱在怀里|抱在一起|搂在怀中|拥入怀中|相拥而泣|相拥而眠|相拥入睡|挽着|靠在肩上|靠在怀里|偎依|依靠|搂着|抱着|环抱|环住|相互依偎|相互依靠|被抱住|被拥入|揽入怀中|投入怀抱/g, score: 0.5,  stats_event: 'embraceEvents' },
-            sexual:       { regex: /(阳具|阴茎|肉棒|白浊|精液|精子|龟头|马眼).*?(射|喷|爆发|释放|射精|高潮|喷涌|激射|喷射|喷发|喷洒|迸发)/g, score: 1, stats_event: 'sexualEncounters' },
-            female_orgasm:{ regex: /(?<!射)(高潮|达到了.*高潮|颤抖.*高潮|痉挛|花心|蜜液|喷涌|抽搐|子宫)/g, score: 1, stats_event: 'femaleOrgasms' },
-            male_orgasm:  { regex: /(阳具|阴茎|肉棒|白浊|精液|精子|龟头|马眼).*?(射|喷|爆发|释放|射精|高潮|喷涌|激射|喷射|喷发|喷洒|迸发)/g, score: 1, stats_event: 'maleOrgasms' },
-            oral_comp:    { regex: /吞下|咽下|吞咽|喝下/g, score: 1, stats_event: 'oralCompletions', requires: /精液|精子|白浊/g },
-            internal_comp:{ regex: /射入|灌入|注入|流入|内射|灌满/g, score: 1, stats_event: 'internalCompletions', requires: /精液|精子|白浊|热流|种子|液体/g },
-            smile:        { regex: /微笑|笑容|笑着|开心|高兴|快乐|欣喜|兴奋|愉悦|喜悦|欢快|愉快|乐呵|眉开眼笑|喜笑颜开|乐滋滋|欢喜|雀跃/g, score: 0.5, stats_event: 'positiveEmotions' },
-            shy:          { regex: /羞涩|害羞|脸红|心动|期待|舒服|信任|依赖/g, score: 0.5, stats_event: 'positiveEmotions' },
-            love:         { regex: /我.*?爱你|我.*?喜欢你|爱上了你|迷上了你|深爱着你|钟情于你|倾心|倾慕|仰慕|臣服|迷恋|深情|挚爱|心仪|心悦|青睐|心生爱意|怦然心动/g, score: 1, stats_event: 'loveExpressions' },
-            praise:       { regex: /赞美|夸赞|称赞|表扬|好棒|真棒|厉害|了不起|优秀|出色|完美|很棒|真行|很厉害|太棒了|棒极了|真不错|佩服|赞赏|欣赏/g, score: 0.5, stats_event: 'positiveEmotions' },
-            care:         { regex: /关心|关怀|体贴|照顾|呵护|保护|心疼|疼爱|爱护|牵挂|挂念|在乎|惦记|温柔|细心|体恤|体谅|关爱|爱怜|宠爱/g, score: 0.5, stats_event: 'positiveEmotions' },
-            hit:          { regex: /打|揍|踢|掌掴|拳头|殴打|击打|重击|鞭打|挨打|扇耳光|暴揍|暴打|痛击|摔打|撞击|殴斗/g, score: -2, stats_event: 'hitEvents' },
-            weapon:       { regex: /刀|剑|枪|弓箭|武器|兵器|匕首|射击|开枪|砍|斩|刺/g, score: -0.1, stats_event: 'weaponUse' },
-            death:        { regex: /死了|死亡|丧命|毙命|牺牲|身亡|丧生|亡故|逝世/g, score: -0.2, stats_event: 'deathEvents' },
-            sad:          { regex: /悲伤|难过|伤心|痛苦|心痛|愤怒|生气|恐惧|害怕|抑郁|沮丧|郁闷|忧伤|失落|苦涩|心碎|悲哀|伤感|绝望|哀伤|酸楚|郁结|失意|黯然|悲凉/g, score: -1, stats_event: 'negativeEmotions' },
-            disgust:      { regex: /厌恶|嫌弃|恶心|反感|不耐烦|讨厌|失望|绝望|不屑|厌烦|鄙视|看不起|嫌恶|嗤之以鼻|反胃|抵触|排斥|嫌弃|唾弃|嫌恶/g, score: -1, stats_event: 'negativeEmotions' },
-            cold:         { regex: /冷笑|冷淡|冰冷|寒气|讽刺|嘲讽|挖苦|刀一样|冷眼|冷漠|漠然|不理不睬|冷酷|无情|冷若冰霜|漠不关心|嗤笑|冷哼|冷言冷语|阴阳怪气/g, score: -1, stats_event: 'negativeEmotions' }
+            kiss: { regex: /亲吻|吻|嘴唇|舌头交缠|深吻|热吻|轻啄|啄吻|吻上|吻住|亲了|亲住|亲上|嘴对嘴|嘴唇相触/g, score: 1, stats_event: 'kissingEvents' },
+            embrace: { regex: /拥抱|抱住|搂住|紧抱|依偎|相拥|抱紧|抱在怀里|抱在一起|搂在怀中|拥入怀中|相拥而泣|相拥而眠|相拥入睡|挽着|靠在肩上|靠在怀里|偎依|依靠|搂着|抱着|环抱|环住|相互依偎|相互依靠|被抱住|被拥入|揽入怀中|投入怀抱/g, score: 0.5, stats_event: 'embraceEvents' },
+            sexual: { regex: /(阳具|阴茎|肉棒|白浊|精液|精子|龟头|马眼).*?(射|喷|爆发|释放|射精|高潮|喷涌|激射|喷射|喷发|喷洒|迸发)/g, score: 1, stats_event: 'sexualEncounters' },
+            female_orgasm: { regex: /(?<!射)(高潮|达到了.*高潮|颤抖.*高潮|痉挛|花心|蜜液|喷涌|抽搐|子宫)/g, score: 1, stats_event: 'femaleOrgasms' },
+            male_orgasm: { regex: /(阳具|阴茎|肉棒|白浊|精液|精子|龟头|马眼).*?(射|喷|爆发|释放|射精|高潮|喷涌|激射|喷射|喷发|喷洒|迸发)/g, score: 1, stats_event: 'maleOrgasms' },
+            oral_comp: { regex: /吞下|咽下|吞咽|喝下/g, score: 1, stats_event: 'oralCompletions', requires: /精液|精子|白浊/g },
+            internal_comp: { regex: /射入|灌入|注入|流入|内射|灌满/g, score: 1, stats_event: 'internalCompletions', requires: /精液|精子|白浊|热流|种子|液体/g },
+            smile: { regex: /微笑|笑容|笑着|开心|高兴|快乐|欣喜|兴奋|愉悦|喜悦|欢快|愉快|乐呵|蹦蹦跳跳|一蹦一跳|眉开眼笑|喜笑颜开|乐滋滋|欢喜|雀跃/g, score: 0.5, stats_event: 'positiveEmotions' },
+            shy: { regex: /羞涩|害羞|脸红|心动|期待|舒服|信任|依赖/g, score: 0.5, stats_event: 'positiveEmotions' },
+            love: { regex: /我.*?爱你|我.*?喜欢你|爱上了你|迷上了你|深爱着你|钟情于你|倾心|倾慕|仰慕|臣服|迷恋|深情|挚爱|心仪|心悦|青睐|心生爱意|怦然心动/g, score: 1, stats_event: 'loveExpressions' },
+            praise: { regex: /赞美|夸赞|称赞|表扬|好棒|真棒|厉害|了不起|优秀|出色|完美|很棒|真行|很厉害|太棒了|棒极了|真不错|佩服|赞赏|欣赏/g, score: 0.5, stats_event: 'positiveEmotions' },
+            care: { regex: /关心|关怀|体贴|照顾|呵护|保护|心疼|疼爱|爱护|牵挂|挂念|在乎|惦记|温柔|细心|体恤|体谅|关爱|爱怜|宠爱/g, score: 0.5, stats_event: 'positiveEmotions' },
+            hit: { regex: /揍|踢|掌掴|拳头|殴打|击打|重击|鞭打|挨打|扇耳光|暴揍|暴打|痛击|摔打|撞击|殴斗/g, score: -2, stats_event: 'hitEvents' },
+            weapon: { regex: /刀|剑|枪|弓箭|匕首|射击|开枪|砍|斩/g, score: -0.1, stats_event: 'weaponUse' },
+            death: { regex: /死亡|丧命|毙命|牺牲|身亡|丧生|亡故|逝世/g, score: -0.2, stats_event: 'deathEvents' },
+            sad: { regex: /悲伤|难过|伤心|痛苦|心痛|愤怒|生气|恐惧|害怕|抑郁|沮丧|郁闷|忧伤|失落|苦涩|心碎|悲哀|伤感|绝望|哀伤|酸楚|郁结|失意|黯然|悲凉/g, score: -1, stats_event: 'negativeEmotions' },
+            disgust: { regex: /厌恶|恶心|反感|不耐烦|讨厌|失望|不屑|讽刺|嘲讽|挖苦|厌烦|鄙视|看不起|嫌恶|嗤之以鼻|反胃|抵触|排斥|嫌弃|唾弃|嫌恶|厌倦|反感|烦躁|烦闷|恼火/g, score: -1, stats_event: 'negativeEmotions' },
+            cold: { regex: /冷笑|冰冷|寒气|刀一样|冷眼|冷漠|漠然|不理不睬|冷酷|无情|冷若冰霜|漠不关心|嗤笑|冷哼|冷言冷语|阴阳怪气|冷冷地|冷淡地|冷漠地|疏离|疏远|敷衍|应付|敷衍了事/g, score: -0.6, stats_event: 'negativeEmotions' },
+            complex_positive: { regex: /欣慕|敬仰|崇拜|尊敬|仰慕|仰望|敬重|敬爱|尊崇|爱戴/g, score: 0.8, stats_event: 'positiveEmotions' },
+            complex_negative: { regex: /惋惜|遗憾|叹息|惆怅|懊悔|内疚|自责|自责|惭愧|歉疚/g, score: 0.4, stats_event: 'negativeEmotions' },
+            uncomfortable: { regex: /不自在|别扭|不舒服|不自然|不安|慌张|不悦|不喜|不爽|不适|不快/g, score: -0.5, stats_event: 'negativeEmotions' }
         };
 
         this.GRAMMAR_LEXICON = {
             physicalActions: /推|拉|打|踢|抓|握|摸|抚|摩|搂|抱|亲|吻|舔|咬|掐|挠|戳|碰|触|压|按|举|抬|放|扔|丢|递|给|送|接|拿|取|拽|扯|撕|划|切|刺|插|捅|顶|撞|踹|踩|蹬|跨|骑|爬|攀|抠|挖|刨|埋|盖|遮|挡|移|推开|拉开/g,
-        
+
             verbalActions: /说|讲|谈|聊|叫|喊|吼|骂|斥|责|问|询|答|回|告诉|通知|宣布|声明|承认|否认|解释|澄清|抱怨|抗议|请求|要求|命令|指示|建议|劝告|警告|提醒|威胁|恐吓|安慰|鼓励|夸|赞|批评|指责|嘲笑|讽刺|调侃|开玩笑/g,
-        
+
             mentalActions: /想|思考|考虑|琢磨|回忆|记起|忘记|意识到|察觉|发现|注意到|观察|分析|判断|决定|选择|相信|怀疑|担心|害怕|紧张|放松|集中|专注|走神|发呆|梦见|想象|幻想|期待|盼望|希望|失望|后悔|遗憾/g,
-        
+
             motionActions: /走|跑|来|去|进入|离开|站|坐|躺|转身|移动|飞|跳|游|滑|爬|行|退|前进|后退|旋转|旋身|扭|扭转|弯|弯曲|俯身|起身|抬头|低头|侧身|挪动|倾斜|侧倾/g,
-        
+
             expressionActions: /笑|哭|叹气|皱眉|瞪|看|盯|瞥|望|凝视|睁|眯|扫视|打量|张望|注视|咬唇|微笑|大笑|狂笑|咧嘴|龇牙|撇嘴|抿嘴|咬牙|咬嘴唇|挑眉|蹙眉|皱眉头|扬眉|眨眼|闭眼|流泪/g,
-        
+
             passiveMarkers: /被|遭到|受到|让|使|令/g,
-        
+
             pivotalMarkers: /让|使|叫|请|命令|要求.*?去|要求.*?做/g,
-        
+
             emotionVerbs: /感到|感觉|觉得|体验|经历|遭受|承受|享受|喜欢|爱|恨|厌恶|讨厌|害怕|担忧|困惑|迷惑|兴奋|激动|紧张|焦虑|冷静|平静|舒缓|惬意|满足|满意|不满|开心|快乐|高兴|悲伤|难过|伤心|愤怒|生气|恼怒|惊讶|吃惊|惊愕/g
+        };
+
+        this.CONTEXT_LEXICON = {
+            descriptive: /形容|描述|状态|样子|外表|外观|表面|看起来|感觉上|似乎|好像|仿佛/,
+            physical: /温度|气候|天气|冷|热|温暖|凉|冰|火|水|湿|干|触感|质地/,
+            factual: /事实|实际|确实|的确|客观|真相|真实|证明|表明|显示|数据|结果/,
+            past: /曾经|以前|过去|那时|当时|回忆|记得|想起|记忆中|往日/,
+            hypothetical: /如果|假如|假设|若是|倘若|设想|想象|可能|或许|也许|兴许/
         };
 
         this.sentencePatterns = {
@@ -90,12 +101,28 @@ class StatsTracker {
         };
 
         this.pronounMapping = new Map();
-    
+
         this.quoteChars = ['\u0022', '\u201C', '\u201D', '\u2018', '\u2019', '\u300C', '\u300D', '\u300E', '\u300F', '\u301D', '\u301E', '\u301F', '\uFF02', '\u2033', '\u2036'];
+
+        this.excludedXmlTags = ['thinking', 'think', 'cot', 'summary', 'details'];
     }
 
     isGloballyEnabled() {
         return window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
+    }
+
+    filterXmlTags(text) {
+        if (!text || typeof text !== 'string') return text;
+
+        let filteredText = text;
+
+        this.excludedXmlTags.forEach(tag => {
+
+            const regex = new RegExp(`<${tag}[^>]*>[\\s\\S]*?<\\/${tag}>`, 'gi');
+            filteredText = filteredText.replace(regex, '');
+        });
+
+        return filteredText.trim();
     }
 
     init(extId, moduleName, settings, executeCommand) {
@@ -165,7 +192,7 @@ class StatsTracker {
             let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
             if (!currentStats || currentStats === "undefined") {
                 const newStats = this.createEmptyStats();
-                
+
                 if (savedData.trackedRelationships) {
                     Object.entries(savedData.trackedRelationships).forEach(([name, data]) => {
                         const initialIntimacy = data.initialIntimacy !== undefined ? data.initialIntimacy : 0;
@@ -177,7 +204,7 @@ class StatsTracker {
                         };
                     });
                 }
-                
+
                 await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(newStats)}`);
             }
         } else if (this.characterSettings.has(newCharId)) {
@@ -225,6 +252,8 @@ class StatsTracker {
         const stages = ["厌恶", "无视", "礼貌", "熟悉", "友善", "好感", "暧昧", "恋人初期", "热恋", "深爱", "唯一", "命运"];
         const thresholds = [-100, 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 
+        if (intimacyLevel >= 100) return "命运";
+
         for (let i = thresholds.length - 1; i >= 0; i--) {
             if (intimacyLevel >= thresholds[i]) return stages[i];
         }
@@ -233,7 +262,7 @@ class StatsTracker {
 
     createEmptyStats() {
         return {
-            dialogueCount: 0, 
+            dialogueCount: 0,
             locationChanges: 0,
             intimacyStats: { kissingEvents: 0, embraceEvents: 0, sexualEncounters: 0, maleOrgasms: 0, femaleOrgasms: 0, oralCompletions: 0, internalCompletions: 0 },
             violenceStats: { hitEvents: 0, weaponUse: 0, deathEvents: 0 },
@@ -264,10 +293,10 @@ class StatsTracker {
                     current = '';
                 }
             } else if (char === '\n') {
-                 if (current.trim()) {
+                if (current.trim()) {
                     sentences.push(current.trim());
-                 }
-                 current = '';
+                }
+                current = '';
             }
         }
 
@@ -278,108 +307,221 @@ class StatsTracker {
         return sentences.filter(s => s.length > 0);
     }
 
-    findSpeakerInText(text, defaultSpeaker, trackedNames) {
-        if (!text) return defaultSpeaker;
-  
-        const colonMatch = text.match(/([^，。！？\s]+)[:：][\s]*$/);
-        if (colonMatch) {
-            const potentialSpeaker = colonMatch[1];
-            for (const name of trackedNames) {
-                if (potentialSpeaker.includes(name)) {
-                    return name;
+    parseCompoundSentence(sentence) {
+        const separators = /[，,。.、；;而且|但是|不过|然而|却|同时|并且|此外|而|与|和]/g;
+
+        let inQuote = false;
+        let quoteChar = '';
+        let subSentences = [];
+        let currentSubSentence = '';
+
+        for (let i = 0; i < sentence.length; i++) {
+            const char = sentence[i];
+
+            if (this.quoteChars.includes(char)) {
+                inQuote = !inQuote;
+                quoteChar = char;
+                currentSubSentence += char;
+                continue;
+            }
+
+            if (inQuote) {
+                currentSubSentence += char;
+                continue;
+            }
+
+            if (separators.test(char)) {
+                if (currentSubSentence.trim().length > 0) {
+                    subSentences.push(currentSubSentence.trim());
                 }
+                currentSubSentence = '';
+            } else {
+                currentSubSentence += char;
             }
         }
-  
-        const sentences = this.splitIntoSentences(text);
-        if (sentences.length > 0) {
-            const lastSentence = sentences[sentences.length - 1];
-      
-            const verbRegex = /(说|道|问|答|叹|笑|哭|喊|吼|呼|嚷|喃喃|叫|嘟囔|回应|回答)/;
-            if (verbRegex.test(lastSentence)) {
+
+        if (currentSubSentence.trim().length > 0) {
+            subSentences.push(currentSubSentence.trim());
+        }
+
+        return subSentences.filter(s => s.length > 0);
+    }
+
+    findSpeakerInText(text, defaultSpeaker, trackedNames) {
+        if (!text) return defaultSpeaker;
+
+        const speakerPatterns = [
+            /([^，。！？\s]+)(?:说道|说|问道|问|回答道|回答|喊道|叫道|答道|叹道|笑道|冷冷地说)[:：]?\s*["'""''「」『』]/,
+            /([^，。！？\s]+)[:：]\s*["'""''「」『』]/,
+            /["'""''「」『』](?:[^"'""''「」『』]+)["'""''「」『』](?:[，。！？\s]*)([^，。！？\s]+)(?:说道|说|表示|回应|道)/
+        ];
+
+        for (const pattern of speakerPatterns) {
+            const match = text.match(pattern);
+            if (match) {
+                const potentialSpeaker = match[1];
                 for (const name of trackedNames) {
-                    if (lastSentence.includes(name)) {
+                    if (potentialSpeaker.includes(name)) {
                         return name;
                     }
                 }
-          
-                if (/她|他/.test(lastSentence)) {
-                    const pronoun = lastSentence.match(/她|他/)[0];
-                    if (this.pronounMapping.has(pronoun)) {
-                        return this.pronounMapping.get(pronoun);
-                    }
-                }
             }
-      
-            for (const name of trackedNames) {
-                if (lastSentence.includes(name)) {
+        }
+
+        const speakingWords = ['说', '道', '问', '答', '叹', '笑', '喊', '回应', '表示', '冷冷地'];
+        for (const name of trackedNames) {
+            for (const word of speakingWords) {
+                if (text.includes(`${name}${word}`)) {
                     return name;
                 }
             }
         }
-  
+
+        const quoteIndex = text.search(/["'""''「」『』]/);
+        if (quoteIndex > 0) {
+            const textBeforeQuote = text.substring(0, quoteIndex);
+            for (const name of trackedNames) {
+                if (textBeforeQuote.includes(name)) {
+                    const nameIndex = textBeforeQuote.lastIndexOf(name);
+                    let isLastName = true;
+                    for (const otherName of trackedNames) {
+                        if (otherName !== name && textBeforeQuote.lastIndexOf(otherName) > nameIndex) {
+                            isLastName = false;
+                            break;
+                        }
+                    }
+                    if (isLastName) {
+                        return name;
+                    }
+                }
+            }
+        }
+
+        for (const name of trackedNames) {
+            if (text.startsWith(name)) {
+                return name;
+            }
+        }
+
+        if (/她|他/.test(text)) {
+            const pronoun = text.match(/她|他/)[0];
+            if (this.pronounMapping.has(pronoun)) {
+                return this.pronounMapping.get(pronoun);
+            }
+        }
+
         return defaultSpeaker;
     }
 
-    analyzeDialoguesAndSpeakers(text, stats, characterName) {
+    analyzeDialoguesEnhanced(text, stats, characterName) {
         const relationshipChanges = {};
         const trackedNames = Object.keys(stats.relationships);
-  
-        const quoteRegexStr = `[${this.quoteChars.join('')}]([^${this.quoteChars.join('')}]+)[${this.quoteChars.join('')}]`;
-        const dialogueRegex = new RegExp(quoteRegexStr, 'g');
-  
+
+        const dialogueMarkers = [
+            { regex: /(说道|说|说着|说了|回答|答道|回应|回复|问道|问|询问)[:：]?\s*$/, weight: 1.0 },
+            { regex: /(叹息|叹了口气|呢喃|喃喃|嘟囔|嘀咕|低语|感叹|惊呼)[:：]?\s*$/, weight: 0.8 },
+            { regex: /(喊道|叫道|呼喊|大叫|吼道|怒道|高声)[:：]?\s*$/, weight: 0.9 },
+            { regex: /(笑着|笑道|微笑着|轻笑|冷笑|嗤笑|咧嘴笑)[:：]?\s*$/, weight: 0.7 }
+        ];
+
+        const quoteRegexStr = `["'""''「」『』''\\u{201C}-\\u{201F}]([^"'""''「」『』''\\u{201C}-\\u{201F}]+)["'""''「」『』''\\u{201C}-\\u{201F}]`;
+        const dialogueRegex = new RegExp(quoteRegexStr, 'gu');
+
         let lastIndex = 0;
         let currentSpeaker = characterName;
         let match;
-  
-        while ((match = dialogueRegex.exec(text)) !== null) {
-            const dialogueContent = match[1];
-            const dialogueStartIndex = match.index;
-      
-            const textBeforeDialogue = text.substring(lastIndex, dialogueStartIndex);
-            const speaker = this.findSpeakerInText(textBeforeDialogue, currentSpeaker, trackedNames);
-      
-            if (speaker) {
-                currentSpeaker = speaker;
-          
-                this.pronounMapping.set('她', speaker);
-                this.pronounMapping.set('他', speaker);
-          
-                const sentimentScore = this.calculateSentimentScore(dialogueContent);
-          
-                if (sentimentScore !== 0 && trackedNames.includes(speaker)) {
-                    relationshipChanges[speaker] = (relationshipChanges[speaker] || 0) + sentimentScore;
-                }
-          
-                trackedNames.forEach(name => {
-                    if (name !== speaker && dialogueContent.includes(name)) {
-                        const mentionedScore = sentimentScore * 0.3;
-                        if (mentionedScore !== 0) {
-                            relationshipChanges[name] = (relationshipChanges[name] || 0) + mentionedScore;
-                        }
+
+        const allMatches = Array.from(text.matchAll(dialogueRegex));
+
+        if (allMatches.length > 0) {
+            for (let i = 0; i < allMatches.length; i++) {
+                match = allMatches[i];
+                const dialogueContent = match[1];
+                const dialogueStartIndex = match.index;
+
+                const textBeforeDialogue = text.substring(lastIndex, dialogueStartIndex);
+                const fullSentence = textBeforeDialogue + match[0];
+
+                let speaker = this.findSpeakerInText(textBeforeDialogue, currentSpeaker, trackedNames);
+                let speakerWeight = 1.0;
+
+                if (speaker) {
+                    currentSpeaker = speaker;
+
+                    if (speaker !== characterName) {
+                        this.pronounMapping.set('她', speaker);
+                        this.pronounMapping.set('他', speaker);
                     }
-                });
+
+                    const sentimentResult = this.calculateEnhancedSentimentScore(fullSentence);
+                    const sentimentScore = sentimentResult.score;
+
+                    const emotionTarget = this.identifyEmotionTarget(fullSentence, { name: speaker });
+
+                    if (emotionTarget === 'self') {
+                        continue;
+                    }
+
+                    if (sentimentScore !== 0 && trackedNames.includes(speaker)) {
+                        const adjustedScore = sentimentScore * speakerWeight;
+                        relationshipChanges[speaker] = (relationshipChanges[speaker] || 0) + adjustedScore;
+                    }
+
+                    trackedNames.forEach(name => {
+                        if (name !== speaker && dialogueContent.includes(name)) {
+                            const mentionedScore = sentimentScore * 0.3 * speakerWeight;
+                            if (mentionedScore !== 0) {
+                                relationshipChanges[name] = (relationshipChanges[name] || 0) + mentionedScore;
+                            }
+                        }
+                    });
+                }
+
+                lastIndex = dialogueStartIndex + match[0].length;
             }
-      
-            lastIndex = dialogueStartIndex + match[0].length;
         }
-  
+
         return relationshipChanges;
     }
 
     identifySubjectsInSentence(sentence, names) {
         let subjects = [];
-    
+
+        const negativeEmotionWords = /不悦|冷冷地|厌烦|冷淡|不屑|讽刺|嘲讽|反感|不耐烦|讨厌/g;
+        const negativeMatches = [...sentence.matchAll(negativeEmotionWords)];
+
+        if (negativeMatches.length > 0) {
+            for (const name of names) {
+                if (sentence.includes(name)) {
+                    const nameIndex = sentence.indexOf(name);
+                    for (const match of negativeMatches) {
+                        const emotionIndex = match.index;
+                        const distance = Math.abs(nameIndex - emotionIndex);
+
+                        if (distance < 15) {
+                            subjects.push({
+                                name: name,
+                                role: 'agent',
+                                weight: 0.9,
+                                pattern: 'emotion_proximity'
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         for (const [patternType, patterns] of Object.entries(this.sentencePatterns)) {
             for (const pattern of patterns) {
                 const regexString = pattern.regex.source;
-            
+
                 const dynamicRegexString = regexString
                     .replace('(动词)', `(${this.GRAMMAR_LEXICON.physicalActions.source}|${this.GRAMMAR_LEXICON.verbalActions.source}|${this.GRAMMAR_LEXICON.mentalActions.source}|${this.GRAMMAR_LEXICON.motionActions.source}|${this.GRAMMAR_LEXICON.expressionActions.source}|${this.GRAMMAR_LEXICON.emotionVerbs.source})`);
-            
+
                 const dynamicRegex = new RegExp(dynamicRegexString, 'g');
                 const match = dynamicRegex.exec(sentence);
-            
+
                 if (match) {
                     if (patternType === 'pronoun') {
                         const pronoun = match[pattern.subjectIndex];
@@ -396,9 +538,9 @@ class StatsTracker {
                         }
                         continue;
                     }
-                
+
                     const potentialSubject = match[pattern.subjectIndex];
-                
+
                     for (const name of names) {
                         if (potentialSubject.includes(name)) {
                             const subject = {
@@ -407,9 +549,9 @@ class StatsTracker {
                                 weight: patternType === 'direct' ? 1.0 : 0.9,
                                 pattern: patternType
                             };
-                        
+
                             subjects.push(subject);
-                        
+
                             if (pattern.objectIndex && match[pattern.objectIndex]) {
                                 const potentialObject = match[pattern.objectIndex];
                                 for (const objName of names) {
@@ -425,30 +567,63 @@ class StatsTracker {
                             }
                         }
                     }
-                
+
                     if (subjects.length > 0) {
                         break;
                     }
                 }
             }
-        
+
             if (subjects.length > 0) {
                 break;
             }
         }
-    
+
+        if (subjects.length === 0) {
+            for (const name of names) {
+                if (sentence.startsWith(name)) {
+                    subjects.push({
+                        name: name,
+                        role: 'agent',
+                        weight: 0.9,
+                        pattern: 'sentence_start'
+                    });
+                    break;
+                }
+            }
+        }
+
+        if (subjects.length === 0) {
+            const behaviorPattern = /([^，。！？\s]+)(看|听|说|想|感到|觉得|认为|发现)/;
+            const match = sentence.match(behaviorPattern);
+            if (match) {
+                const potentialSubject = match[1];
+                for (const name of names) {
+                    if (potentialSubject.includes(name)) {
+                        subjects.push({
+                            name: name,
+                            role: 'agent',
+                            weight: 0.8,
+                            pattern: 'behavior'
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+
         if (subjects.length === 0) {
             for (const name of names) {
                 if (sentence.includes(name)) {
                     const nameIndex = sentence.indexOf(name);
                     const nameEndIndex = nameIndex + name.length;
                     const afterName = sentence.substring(nameEndIndex, Math.min(nameEndIndex + 10, sentence.length));
-                
+
                     const hasVerb = new RegExp(`(${this.GRAMMAR_LEXICON.physicalActions.source}|${this.GRAMMAR_LEXICON.verbalActions.source}|${this.GRAMMAR_LEXICON.mentalActions.source}|${this.GRAMMAR_LEXICON.motionActions.source}|${this.GRAMMAR_LEXICON.expressionActions.source})`, 'g').test(afterName);
-                
+
                     const weight = hasVerb ? 0.8 : 0.5;
                     const role = hasVerb ? 'agent' : 'mentioned';
-                
+
                     subjects.push({
                         name: name,
                         role: role,
@@ -458,7 +633,7 @@ class StatsTracker {
                 }
             }
         }
-    
+
         if (subjects.length === 0) {
             const mentionedNames = names.filter(name => sentence.includes(name));
             if (mentionedNames.length > 0) {
@@ -470,8 +645,67 @@ class StatsTracker {
                 });
             }
         }
-    
+
+        subjects = subjects.filter(subject => subject.name && subject.name.trim() !== '');
+
+        if (subjects.length === 0) {
+            const isEnvironmentalDescription = /^(空气|气氛|环境|天空|大地|风|雨|雪)/.test(sentence);
+            if (isEnvironmentalDescription) {
+                return [];
+            }
+        }
+
         return subjects;
+    }
+
+    identifySubjectsEnhanced(sentence, names) {
+        const baseSubjects = this.identifySubjectsInSentence(sentence, names);
+
+        const enhancedSubjects = baseSubjects.map(subject => {
+            const emotionTarget = this.identifyEmotionTarget(sentence, subject);
+            return {
+                ...subject,
+                emotionTarget: emotionTarget
+            };
+        });
+
+        return enhancedSubjects;
+    }
+
+    identifyEmotionTarget(sentence, subject) {
+        if (!subject || !subject.name) return 'unknown';
+
+        const selfPatterns = [
+            new RegExp(`${subject.name}.*?(自己|本身|内心|自我|心中)`),
+            new RegExp(`(自己|本身|内心|自我|心中).*?${subject.name}`),
+            /对自己|向自己|自我|内心|心灵|心境|心情|内在|本性|性格|自尊|自信|自卑/,
+            /自我(厌恶|憎恨|否定|批判|谴责|鄙视|嫌弃|怀疑|批评)/,
+            /(厌恶|憎恨|否定|批判|谴责|鄙视|嫌弃).*?自己/,
+            /内心.*?(厌恶|憎恨|否定|批判|谴责|鄙视|嫌弃|痛苦|挣扎)/,
+            /(感到|觉得|认为).*?自己.*?(不好|糟糕|愚蠢|无用|失败)/,
+            /自己.*?(感到|觉得|认为).*?(不好|糟糕|愚蠢|无用|失败)/
+        ];
+
+        const userPatterns = [
+            /对你|向你|给你|为你|因你|你的|你让|你使|你令|因为你/,
+            /对方|他人|别人|旁人|外人|客人|来访者|来客|访客/,
+            /(觉得|感到|认为|以为).*?你.*?(讨厌|温柔|可爱|烦人|好|坏)/,
+            /你.*?(让|使|令).*?(感到|觉得|认为)/
+        ];
+
+        for (const pattern of selfPatterns) {
+            if (pattern.test(sentence)) {
+                return 'self';
+            }
+        }
+
+        for (const pattern of userPatterns) {
+            if (pattern.test(sentence)) {
+                return 'user';
+            }
+        }
+
+        return 'unknown';
     }
 
     resolvePronounsInSentences(sentences, trackedNames) {
@@ -481,13 +715,13 @@ class StatsTracker {
 
         return sentences.map(sentence => {
             const mentionedPersons = trackedNames.filter(name => sentence.includes(name));
-        
+
             if (mentionedPersons.length > 0) {
                 lastMentionedPerson = mentionedPersons[0];
-            
+
                 const isFemale = /女|妹|姐|妈|娘|婆|媳|嫂|姑|妮|娜|花|莉|美|芳|红|玲|珍/.test(lastMentionedPerson);
                 const isMale = /男|哥|弟|爸|父|公|叔|伯|爷|子|郎|峰|强|刚|伟|明|军|杰|宏/.test(lastMentionedPerson);
-            
+
                 if (isFemale) {
                     this.pronounMapping.set('她', lastMentionedPerson);
                     lastMentionedFemale = lastMentionedPerson;
@@ -499,9 +733,9 @@ class StatsTracker {
                     this.pronounMapping.set('他', lastMentionedPerson);
                 }
             }
-        
+
             let impliedPerson = null;
-        
+
             if (/^她/.test(sentence) && this.pronounMapping.has('她')) {
                 impliedPerson = this.pronounMapping.get('她');
             } else if (/^他/.test(sentence) && this.pronounMapping.has('他')) {
@@ -511,7 +745,7 @@ class StatsTracker {
             } else if (/^[^，。！？""'']*?，\s*他/.test(sentence) && lastMentionedMale) {
                 impliedPerson = lastMentionedMale;
             }
-  
+
             return {
                 originalSentence: sentence,
                 impliedPerson: impliedPerson,
@@ -520,10 +754,138 @@ class StatsTracker {
         });
     }
 
+    splitIntoSubClauses(sentence) {
+        const clauseSeparators = /[，,。！!？?；;]/g;
+        let subClauses = [];
+        let lastIndex = 0;
+        let match;
+
+        while ((match = clauseSeparators.exec(sentence)) !== null) {
+            const clause = sentence.substring(lastIndex, match.index + 1).trim();
+            if (clause) {
+                subClauses.push(clause);
+            }
+            lastIndex = match.index + 1;
+        }
+
+        if (lastIndex < sentence.length) {
+            const lastClause = sentence.substring(lastIndex).trim();
+            if (lastClause) {
+                subClauses.push(lastClause);
+            }
+        }
+
+        if (subClauses.length === 0) {
+            subClauses.push(sentence);
+        }
+
+        return subClauses;
+    }
+
+    isNegationAffectingMatch(clauseText, match) {
+        const matchIndex = clauseText.indexOf(match);
+        if (matchIndex === -1) return false;
+
+        const preText = clauseText.substring(0, matchIndex);
+
+        const negationWords = [
+            '不', '没', '未', '无', '非', '别', '勿', '莫', '决不', '绝不',
+            '绝非', '并非', '决非', '不是', '不会', '不能', '不可', '不必',
+            '不用', '不要', '不该', '没有', '毫不', '根本不', '完全不'
+        ];
+
+        for (const negWord of negationWords) {
+            const negIndex = preText.lastIndexOf(negWord);
+            if (negIndex !== -1) {
+                const distance = matchIndex - (negIndex + negWord.length);
+
+                if (distance >= 0 && distance <= 5) {
+                    return true;
+                }
+
+                const betweenText = preText.substring(negIndex + negWord.length);
+                if (betweenText.match(/的|地|得|很|那么|如此|这么/)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    handleNegationEnhanced(sentence, match, baseScore) {
+        const subClauses = this.splitIntoSubClauses(sentence);
+
+        let matchClause = '';
+        for (const clause of subClauses) {
+            if (clause.includes(match)) {
+                matchClause = clause;
+                break;
+            }
+        }
+
+        if (!matchClause) {
+            matchClause = sentence;
+        }
+
+        if (this.isNegationAffectingMatch(matchClause, match)) {
+            return -baseScore * 0.7;
+        }
+
+        return baseScore;
+    }
+
+    analyzeContextualMeaning(sentence, match, lexiconItem) {
+        const matchIndex = sentence.indexOf(match);
+        const preContext = sentence.substring(Math.max(0, matchIndex - 25), matchIndex);
+        const postContext = sentence.substring(matchIndex + match.length, Math.min(sentence.length, matchIndex + match.length + 25));
+        const fullContext = preContext + match + postContext;
+
+        const isInQuotes = this.quoteChars.some(char => {
+            const quotePattern = new RegExp(`${char}[^${char}]*${match}[^${char}]*${char}`);
+            return quotePattern.test(fullContext);
+        });
+
+        if (isInQuotes) {
+            return lexiconItem.score * 1.2;
+        }
+
+        const behaviorPatterns = [
+            /眼神|眼光|目光|视线|眉头|表情|脸色|面容|面色|神色|眼中|眼里|眼睛|嘴角|微微|动作|姿态|语气|声音|语调/
+        ];
+
+        for (const pattern of behaviorPatterns) {
+            if (pattern.test(preContext) || pattern.test(postContext)) {
+                return lexiconItem.score * 1.1;
+            }
+        }
+
+        for (const [contextType, pattern] of Object.entries(this.CONTEXT_LEXICON)) {
+            if (pattern.test(fullContext)) {
+                switch (contextType) {
+                    case 'descriptive':
+                        return lexiconItem.score * 0.4;
+                    case 'physical':
+                        return lexiconItem.score * 0.3;
+                    case 'factual':
+                        return lexiconItem.score * 0.2;
+                    case 'past':
+                        return lexiconItem.score * 0.6;
+                    case 'hypothetical':
+                        return lexiconItem.score * 0.4;
+                    default:
+                        return lexiconItem.score * 0.8;
+                }
+            }
+        }
+
+        return lexiconItem.score;
+    }
+
     calculateSentimentScore(sentence) {
         let sentenceSentiment = 0;
         let hasNegation = /不|没|没有|未|非|无/.test(sentence);
-    
+
         Object.values(this.SENTIMENT_LEXICON).forEach(lexiconItem => {
             const matches = sentence.match(lexiconItem.regex);
             if (matches) {
@@ -537,30 +899,93 @@ class StatsTracker {
                 sentenceSentiment += score * matches.length;
             }
         });
-    
+
         return sentenceSentiment;
+    }
+
+    calculateEnhancedSentimentScore(sentence) {
+        if (!sentence || typeof sentence !== 'string') return { score: 0, matches: [] };
+
+        let totalScore = 0;
+        let matchedItems = [];
+
+        Object.entries(this.SENTIMENT_LEXICON).forEach(([key, lexiconItem]) => {
+            const matches = sentence.match(lexiconItem.regex);
+            if (!matches) return;
+
+            if (lexiconItem.requires && !lexiconItem.requires.test(sentence)) {
+                return;
+            }
+
+            matches.forEach(match => {
+                const contextScore = this.analyzeContextualMeaning(sentence, match, lexiconItem);
+                const finalScore = this.handleNegationEnhanced(sentence, match, contextScore);
+
+                matchedItems.push({
+                    type: key,
+                    match: match,
+                    originalScore: lexiconItem.score,
+                    finalScore: finalScore
+                });
+
+                totalScore += finalScore;
+            });
+        });
+
+        return {
+            score: totalScore,
+            matches: matchedItems
+        };
+    }
+
+    getEmotionTypeName(type) {
+        const typeNameMap = {
+            'kiss': '接吻',
+            'embrace': '拥抱',
+            'sexual': '性行为',
+            'female_orgasm': '女性高潮',
+            'male_orgasm': '男性高潮',
+            'oral_comp': '口交完成',
+            'internal_comp': '内射完成',
+            'smile': '微笑',
+            'shy': '害羞',
+            'love': '爱意表达',
+            'praise': '赞美',
+            'care': '关心',
+            'hit': '打击',
+            'weapon': '武器使用',
+            'death': '死亡',
+            'sad': '悲伤',
+            'disgust': '厌恶',
+            'cold': '冷漠',
+            'complex_positive': '复杂积极情感',
+            'complex_negative': '复杂消极情感',
+            'uncomfortable': '不适/尴尬'
+        };
+        return typeNameMap[type] || type;
     }
 
     updateStatsFromText(stats, text, characterName) {
         if (!text) return stats;
         text = String(text);
-    
+
+        text = this.filterXmlTags(text);
+        if (!text.trim()) return stats;
+
         this.pronounMapping.clear();
         if (characterName) {
             this.pronounMapping.set('她', characterName);
             this.pronounMapping.set('他', characterName);
         }
-    
+
         stats.dialogueCount += (text.match(/[\u201C\u201D\u300C\u300D\u300E\u300F\u301D\u301E\u301F\uFF02\u2033\u2036""][^\u201C\u201D\u300C\u300D\u300E\u300F\u301D\u301E\u301F\uFF02\u2033\u2036""]{3,}[\u201C\u201D\u300C\u300D\u300E\u300F\u301D\u301E\u301F\uFF02\u2033\u2036""]/g) || []).length;
         stats.locationChanges += (text.match(/进入|走进|来到|到达|离开|前往|回到/g) || []).length > 0 ? 1 : 0;
 
         const trackedNames = Object.keys(stats.relationships);
-    
-        const dialogueRelationshipChanges = this.analyzeDialoguesAndSpeakers(text, stats, characterName);
-    
+
         const relationshipChanges = {};
         trackedNames.forEach(name => {
-            relationshipChanges[name] = dialogueRelationshipChanges[name] || 0;
+            relationshipChanges[name] = 0;
         });
 
         const rawSentences = this.splitIntoSentences(text);
@@ -573,55 +998,63 @@ class StatsTracker {
             const sentence = sentenceData.originalSentence;
             const impliedPerson = sentenceData.impliedPerson;
             const mentionedPersons = sentenceData.mentionedPersons || [];
-        
-            if (sentence.match(new RegExp(`[${this.quoteChars.join('')}].*[${this.quoteChars.join('')}]`, 'g'))) {
+
+            const dialogueMatch = sentence.match(new RegExp(`[${this.quoteChars.join('')}].*[${this.quoteChars.join('')}]`, 'g'));
+            if (dialogueMatch) {
+                const speaker = this.findSpeakerInText(sentence, characterName, trackedNames);
+                if (speaker) {
+                    this.pronounMapping.set('她', speaker);
+                    this.pronounMapping.set('他', speaker);
+
+                    const fullSentence = sentence;
+                    const sentimentResult = this.calculateEnhancedSentimentScore(fullSentence);
+
+                    const emotionTarget = this.identifyEmotionTarget(fullSentence, { name: speaker });
+
+                    if (emotionTarget === 'self') {
+                        return;
+                    }
+
+                    if (sentimentResult.score !== 0 && trackedNames.includes(speaker)) {
+                        relationshipChanges[speaker] = (relationshipChanges[speaker] || 0) + sentimentResult.score;
+                    }
+
+                    trackedNames.forEach(name => {
+                        if (name !== speaker && fullSentence.includes(name)) {
+                            const mentionedScore = sentimentResult.score * 0.3;
+                            if (mentionedScore !== 0) {
+                                relationshipChanges[name] = (relationshipChanges[name] || 0) + mentionedScore;
+                            }
+                        }
+                    });
+                }
                 return;
             }
-        
-            const sentenceSentiment = this.calculateSentimentScore(sentence);
-            const isPositive = sentenceSentiment > 0;
-        
-            let subjects = this.identifySubjectsInSentence(sentence, [...trackedNames, impliedPerson].filter(Boolean));
-        
-            if (subjects.length === 0 && lastSubjects.length > 0 && 
-                !/^[你我他她它]/.test(sentence) && 
-                !this.quoteChars.includes(sentence.charAt(0))) {
-            
-                subjects = lastSubjects.filter(subj => subj.role === 'agent').map(subj => ({
-                    ...subj,
-                    weight: subj.weight * 0.5, 
-                    pattern: 'inherited'
-                }));
-            }
-        
-            if (subjects.length > 0) {
-                subjects.forEach(subject => {
-                    if (!subject.name) return;
-                    if (subject.role === 'mentioned') return;
-                    if (subject.role === 'patient' && !isPositive) return;
-                    const weight = subject.weight;
-                    const change = sentenceSentiment * weight;
-                
-                    if (Math.abs(change) > 0.1) {
-                        relationshipChanges[subject.name] = (relationshipChanges[subject.name] || 0) + change;
-                    }
+
+            const subSentences = this.parseCompoundSentence(sentence);
+
+            if (subSentences.length > 1) {
+                subSentences.forEach(subSentence => {
+                    this.processSingleSentence(
+                        subSentence,
+                        impliedPerson,
+                        mentionedPersons,
+                        trackedNames,
+                        relationshipChanges,
+                        lastSubjects,
+                        globalSentiment
+                    );
                 });
-            
-                lastSubjects = subjects.filter(s => s.role === 'agent');
-            
-            } else if (mentionedPersons.length > 0) {
-                mentionedPersons.forEach(name => {
-                    const change = sentenceSentiment * 0.4;
-                    if (Math.abs(change) > 0.1) {
-                        relationshipChanges[name] = (relationshipChanges[name] || 0) + change;
-                    }
-                });
-            
-                lastSubjects = [];
-            
             } else {
-                globalSentiment += sentenceSentiment;
-                lastSubjects = [];
+                this.processSingleSentence(
+                    sentence,
+                    impliedPerson,
+                    mentionedPersons,
+                    trackedNames,
+                    relationshipChanges,
+                    lastSubjects,
+                    globalSentiment
+                );
             }
         });
 
@@ -630,7 +1063,7 @@ class StatsTracker {
             if (finalChange !== 0) {
                 stats.relationships[name].interactions++;
                 stats.relationships[name].intimacyLevel += finalChange;
-                stats.relationships[name].intimacyLevel = Math.min(100, Math.max(-100, stats.relationships[name].intimacyLevel));
+                stats.relationships[name].intimacyLevel = Math.max(-100, stats.relationships[name].intimacyLevel);
                 stats.relationships[name].stage = this.getRelationshipStage(stats.relationships[name].intimacyLevel);
             }
         });
@@ -638,8 +1071,8 @@ class StatsTracker {
         const finalGlobalChange = Math.round(Math.min(3, Math.max(-3, globalSentiment)));
         stats.relationshipStats.intimacyLevel += finalGlobalChange;
         stats.relationshipStats.emotionalChange += finalGlobalChange;
-        stats.relationshipStats.intimacyLevel = Math.min(100, Math.max(-100, stats.relationshipStats.intimacyLevel));
-        stats.relationshipStats.emotionalChange = Math.min(100, Math.max(-100, stats.relationshipStats.emotionalChange));
+        stats.relationshipStats.intimacyLevel = Math.max(-100, stats.relationshipStats.intimacyLevel);
+        stats.relationshipStats.emotionalChange = Math.max(-100, stats.relationshipStats.emotionalChange);
 
         Object.values(this.SENTIMENT_LEXICON).forEach(lexiconItem => {
             if (lexiconItem.stats_event) {
@@ -662,21 +1095,95 @@ class StatsTracker {
         return stats;
     }
 
+    processSingleSentence(sentence, impliedPerson, mentionedPersons, trackedNames, relationshipChanges, lastSubjects, globalSentiment) {
+        const sentimentResult = this.calculateEnhancedSentimentScore(sentence);
+        const sentenceSentiment = sentimentResult.score;
+        const isPositive = sentenceSentiment > 0;
+
+        let subjects = this.identifySubjectsEnhanced(sentence, [...trackedNames, impliedPerson].filter(Boolean));
+
+        if (subjects.length === 0 && lastSubjects.length > 0 &&
+            !/^[你我他她它]/.test(sentence) &&
+            !this.quoteChars.includes(sentence.charAt(0))) {
+
+            subjects = lastSubjects.filter(subj => subj.role === 'agent').map(subj => ({
+                ...subj,
+                weight: subj.weight * 0.5,
+                pattern: 'inherited'
+            }));
+        }
+
+        if (subjects.length > 0) {
+            subjects.forEach(subject => {
+                if (!subject.name) return;
+
+                if (subject.role === 'mentioned') return;
+
+                if (subject.role === 'patient' && !isPositive) return;
+
+                if (subject.emotionTarget === 'self') return;
+
+                const weight = subject.weight;
+                const change = sentenceSentiment * weight;
+
+                if (Math.abs(change) > 0.1) {
+                    relationshipChanges[subject.name] = (relationshipChanges[subject.name] || 0) + change;
+                }
+            });
+
+            lastSubjects = subjects.filter(s => s.role === 'agent');
+        }
+        else if (mentionedPersons.length > 0) {
+            mentionedPersons.forEach(name => {
+                const change = sentenceSentiment * 0.4;
+                if (Math.abs(change) > 0.1) {
+                    relationshipChanges[name] = (relationshipChanges[name] || 0) + change;
+                }
+            });
+
+            lastSubjects = [];
+        }
+        else {
+            globalSentiment += sentenceSentiment;
+            lastSubjects = [];
+        }
+    }
+
+    updateStatisticsEvents(stats, text) {
+        Object.values(this.SENTIMENT_LEXICON).forEach(lexiconItem => {
+            if (lexiconItem.stats_event) {
+                const matches = text.match(lexiconItem.regex) || [];
+                if (matches.length > 0) {
+                    if (lexiconItem.requires && !lexiconItem.requires.test(text)) {
+                        return;
+                    }
+                    if (stats.intimacyStats[lexiconItem.stats_event] !== undefined) {
+                        stats.intimacyStats[lexiconItem.stats_event] += matches.length;
+                    } else if (stats.emotionStats[lexiconItem.stats_event] !== undefined) {
+                        stats.emotionStats[lexiconItem.stats_event] += matches.length;
+                    } else if (stats.violenceStats[lexiconItem.stats_event] !== undefined) {
+                        stats.violenceStats[lexiconItem.stats_event] += matches.length;
+                    }
+                }
+            }
+        });
+    }
+
     async updateStatisticsForNewMessage() {
         if (!this.settings.memoryEnabled || !this.isGloballyEnabled()) return false;
 
         try {
             const lastMessage = await this.executeCommand('/messages names=on {{lastMessageId}}');
             if (!lastMessage) return false;
-            
+
             const colonIndex = lastMessage.indexOf(':');
             if (colonIndex === -1) return false;
-            
+
             const extractedName = lastMessage.substring(0, colonIndex).trim();
             const extractedText = lastMessage.substring(colonIndex + 1).trim();
-            
+
             if (!extractedText) return false;
-            
+
             let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
             if (!currentStats || currentStats === "undefined") {
                 currentStats = this.createEmptyStats();
@@ -737,13 +1244,14 @@ class StatsTracker {
         const relationships = Object.entries(stats.relationships || {}).sort((a, b) => b[1].interactions - a[1].interactions).slice(0, 8);
         if (relationships.length > 0) {
             relationships.forEach(([name, data]) => {
-                userVisibleStats += `• ${name}: ${data.stage} (${Math.round(data.intimacyLevel)}/100)\n`;
+                const intimacyLevel = Math.round(data.intimacyLevel);
+                userVisibleStats += `• ${name}: ${data.stage} (${intimacyLevel}${intimacyLevel < 100 ? "/100" : ""})\n`;
             });
         } else {
             userVisibleStats += `• 暂无关系记录\n`;
         }
         userVisibleStats += `\n📊 剧情风格：\n• 情绪变化: ${this.formatEmotionalChange(stats.relationshipStats?.emotionalChange || 0)}\n\n`;
-        
+
         userVisibleStats += `🔞 亲密互动：\n`;
         userVisibleStats += `• 接吻次数: ${stats.intimacyStats?.kissingEvents || 0}次${formatChange(changes.intimacyStats?.kissingEvents || 0)}\n`;
         userVisibleStats += `• 拥抱次数: ${stats.intimacyStats?.embraceEvents || 0}次${formatChange(changes.intimacyStats?.embraceEvents || 0)}\n`;
@@ -752,7 +1260,7 @@ class StatsTracker {
         userVisibleStats += `• 女性高潮: ${stats.intimacyStats?.femaleOrgasms || 0}次${formatChange(changes.intimacyStats?.femaleOrgasms || 0)}\n`;
         userVisibleStats += `• 吞精次数: ${stats.intimacyStats?.oralCompletions || 0}次${formatChange(changes.intimacyStats?.oralCompletions || 0)}\n`;
         userVisibleStats += `• 内射次数: ${stats.intimacyStats?.internalCompletions || 0}次${formatChange(changes.intimacyStats?.internalCompletions || 0)}\n\n`;
-        
+
         userVisibleStats += `😊 情感表达：\n`;
         userVisibleStats += `• 积极情绪: ${stats.emotionStats?.positiveEmotions || 0}次${formatChange(changes.emotionStats?.positiveEmotions || 0)}\n`;
         userVisibleStats += `• 消极情绪: ${stats.emotionStats?.negativeEmotions || 0}次${formatChange(changes.emotionStats?.negativeEmotions || 0)}\n`;
@@ -762,16 +1270,16 @@ class StatsTracker {
         userVisibleStats += `• 愤怒爆发: ${stats.emotionStats?.angerOutbursts || 0}次${formatChange(changes.emotionStats?.angerOutbursts || 0)}\n`;
         userVisibleStats += `• 恐惧表现: ${stats.emotionStats?.fearEvents || 0}次${formatChange(changes.emotionStats?.fearEvents || 0)}\n`;
         userVisibleStats += `• 惊讶反应: ${stats.emotionStats?.surpriseEvents || 0}次${formatChange(changes.emotionStats?.surpriseEvents || 0)}\n\n`;
-        
+
         userVisibleStats += `⚔️ 暴力冲突：\n`;
         userVisibleStats += `• 身体冲突: ${stats.violenceStats?.hitEvents || 0}次${formatChange(changes.violenceStats?.hitEvents || 0)}\n`;
         userVisibleStats += `• 武器使用: ${stats.violenceStats?.weaponUse || 0}次${formatChange(changes.violenceStats?.weaponUse || 0)}\n`;
         userVisibleStats += `• 死亡事件: ${stats.violenceStats?.deathEvents || 0}次${formatChange(changes.violenceStats?.deathEvents || 0)}\n\n`;
-        
+
         userVisibleStats += `💰 物品交换：\n`;
         userVisibleStats += `• 礼物交换: ${stats.exchangeStats?.giftGiving || 0}次${formatChange(changes.exchangeStats?.giftGiving || 0)}\n`;
         userVisibleStats += `• 金钱交易: ${stats.exchangeStats?.moneyTransfer || 0}次${formatChange(changes.exchangeStats?.moneyTransfer || 0)}`;
-        
+
         let behaviorGuidance = `\n\n【角色行为指导】\n`;
 
         if (relationships.length > 0) {
@@ -785,9 +1293,9 @@ class StatsTracker {
 
         let aiGuidance = behaviorGuidance + `\n💡 指令: 请严格根据上述关系阶段和行为准则，结合角色设定，调整你的回应，确保你的反应符合当前关系发展阶段。请注意行为指导仅作用于指定的NPC对用户的行为指导，不涉及他人。`;
 
-        return { 
-            userVisibleStats: userVisibleStats + behaviorGuidance, 
-            fullStatsWithGuidance: userVisibleStats + aiGuidance 
+        return {
+            userVisibleStats: userVisibleStats + behaviorGuidance,
+            fullStatsWithGuidance: userVisibleStats + aiGuidance
         };
     }
 
@@ -801,16 +1309,16 @@ class StatsTracker {
     }
 
     async updateMemoryPrompt() {
-    if (!this.settings.memoryEnabled || !this.settings.memoryInjectEnabled || !this.isGloballyEnabled()) {
-        this.removeMemoryPrompt();
-        return;
-    }
+        if (!this.settings.memoryEnabled || !this.settings.memoryInjectEnabled || !this.isGloballyEnabled()) {
+            this.removeMemoryPrompt();
+            return;
+        }
 
-    let stats = await this.executeCommand('/getvar xiaobaix_stats');
-    if (!stats || stats === "undefined") {
-        this.removeMemoryPrompt();
-        return;
-    }
+        let stats = await this.executeCommand('/getvar xiaobaix_stats');
+        if (!stats || stats === "undefined") {
+            this.removeMemoryPrompt();
+            return;
+        }
 
         try {
             stats = typeof stats === 'string' ? JSON.parse(stats) : stats;
@@ -897,13 +1405,13 @@ class StatsTracker {
             if (creatorMode) {
                 const currentStats = await this.getCurrentStats();
                 const trackedRelationships = {};
-      
+
                 Object.entries(currentStats.relationships || {}).forEach(([name, data]) => {
                     trackedRelationships[name] = {
                         initialIntimacy: data.initialIntimacy !== undefined ? data.initialIntimacy : data.intimacyLevel
                     };
                 });
-      
+
                 const behaviorSettings = this.getCurrentCharacterGuidelines();
 
                 const dataToSave = {
@@ -978,7 +1486,7 @@ class StatsTracker {
 
     addMemoryButtonToMessage(messageId) {
         if (!this.settings.memoryEnabled || !this.isInitialized || !this.isGloballyEnabled()) return;
-  
+
         const messageBlock = $(`#chat .mes[mesid="${messageId}"]`);
         if (!messageBlock.length || messageBlock.find('.memory-button').length) return;
 
@@ -1019,7 +1527,7 @@ class StatsTracker {
 
         memoryButton.on('click', async (event) => {
             event.preventDefault();
-            
+
             if (isLongPress) {
                 isLongPress = false;
                 return;
@@ -1066,19 +1574,80 @@ class StatsTracker {
         });
 
         const triggerDebugAnalysis = async () => {
-            const messageText = messageBlock.find('.mes_text').text().trim();
-            const characterName = messageBlock.find('.ch_name .name').text().trim();
-                  
-            const debugLog = await this.debugCalculation(messageText, characterName);
-            this.showDebugLog(debugLog);
+            try {
+                const messageIndex = parseInt(messageId);
+                let originalMessageText = null;
+                let characterName = null;
+
+                if (typeof window.chat !== 'undefined' && window.chat && Array.isArray(window.chat)) {
+                    const message = window.chat[messageIndex];
+                    if (message) {
+                        originalMessageText = message.mes || message.message || '';
+                        characterName = message.name || '';
+                    }
+                }
+
+                if (!originalMessageText) {
+                    const rawMessage = await this.executeCommand(`/messages names=on ${messageIndex}`);
+                    if (rawMessage) {
+                        const colonIndex = rawMessage.indexOf(':');
+                        if (colonIndex !== -1) {
+                            characterName = rawMessage.substring(0, colonIndex).trim();
+                            originalMessageText = rawMessage.substring(colonIndex + 1).trim();
+                        }
+                    }
+                }
+
+                if (!originalMessageText) {
+                    originalMessageText = messageBlock.find('.mes_text').text().trim();
+                    characterName = messageBlock.find('.ch_name .name').text().trim();
+                }
+
+                const debugLog = await this.debugCalculation(originalMessageText, characterName, messageIndex);
+                this.showDebugLog(debugLog);
+            } catch (error) {
+                const messageText = messageBlock.find('.mes_text').text().trim();
+                const characterName = messageBlock.find('.ch_name .name').text().trim();
+                const debugLog = await this.debugCalculation(messageText, characterName, messageId);
+                this.showDebugLog(debugLog);
+            }
         };
 
         flexContainer.append(memoryButton);
     }
 
-    async debugCalculation(text, characterName) {
+    async debugCalculation(text, characterName, messageIndex = null) {
         const logs = [];
-        
+
+        const escapeHtml = (unsafe) => {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        };
+
+        logs.push(`===== 消息信息 =====`);
+        if (messageIndex !== null) {
+            logs.push(`消息索引: ${messageIndex}`);
+        }
+        logs.push(`角色名称: ${characterName || '未知'}`);
+        logs.push(`文本长度: ${text.length}`);
+
+        const originalText = text;
+        text = this.filterXmlTags(text);
+
+        if (originalText !== text) {
+            logs.push(`⚠️ 检测到特定XML标签，将自动过滤标签: ${this.excludedXmlTags.join(', ')}`);
+            logs.push(`过滤后文本长度: ${text.length}`);
+
+            if (!text.trim()) {
+                logs.push(`⚠️ 过滤后文本为空，不进行好感度计算`);
+                return logs.join('\n');
+            }
+        }
+
         let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
         try {
             currentStats = typeof currentStats === 'string' ? JSON.parse(currentStats) : currentStats;
@@ -1088,10 +1657,10 @@ class StatsTracker {
         } catch (e) {
             currentStats = this.createEmptyStats();
         }
-        
+
         const debugStats = this.createEmptyStats();
         const trackedNames = Object.keys(currentStats.relationships || {});
-        
+
         trackedNames.forEach(name => {
             const initialIntimacy = currentStats.relationships[name].initialIntimacy || 0;
             debugStats.relationships[name] = {
@@ -1101,132 +1670,119 @@ class StatsTracker {
                 initialIntimacy: initialIntimacy
             };
         });
-        
+
         const beforeStats = JSON.parse(JSON.stringify(debugStats));
-        
+
         this.pronounMapping.clear();
         if (characterName) {
             this.pronounMapping.set('她', characterName);
             this.pronounMapping.set('他', characterName);
         }
-        
-        logs.push(`===== 好感度计算详情 =====`);
-        logs.push(`分析文本: "${text}"`);
-        
+
         logs.push(`\n== 分析环境初始状态 ==`);
         logs.push(`追踪的人物: ${trackedNames.join(', ') || '无'}`);
-        
-        if (trackedNames.length > 0) {
-            logs.push(`\n初始好感度状态:`);
-            trackedNames.forEach(name => {
-                const rel = debugStats.relationships[name];
-                logs.push(`  ${name}: ${rel.intimacyLevel} (${rel.stage})`);
-            });
-        }
-        
-        logs.push(`全局好感度: ${debugStats.relationshipStats?.intimacyLevel || 0}`);
-        logs.push(`全局情感变化: ${debugStats.relationshipStats?.emotionalChange || 0}`);
-        
-        const dialogueChanges = this.analyzeDialoguesAndSpeakers(text, debugStats, characterName);
-        logs.push(`\n== 对话情绪分析 ==`);
-        if (Object.keys(dialogueChanges).length > 0) {
-            Object.entries(dialogueChanges).forEach(([name, change]) => {
-                logs.push(`  ${name}: 对话情感变化 ${change.toFixed(2)}`);
-            });
-        } else {
-            logs.push(`  未检测到引号内的对话或对话主体不明确`);
-            logs.push(`  注：此部分仅分析引号内的对话，详细分析请看下方句子分析`);
-        }
-        
+
         const relationshipChanges = {};
         trackedNames.forEach(name => {
-            relationshipChanges[name] = dialogueChanges[name] || 0;
+            relationshipChanges[name] = 0;
         });
-        
+
         const rawSentences = this.splitIntoSentences(text);
         logs.push(`\n== 句子分析 ==`);
         logs.push(`拆分为 ${rawSentences.length} 个句子:`);
-        
+
         const processedSentences = this.resolvePronounsInSentences(rawSentences, trackedNames);
-        
         let globalSentiment = 0;
         let lastSubjects = [];
-        
+
         processedSentences.forEach((sentenceData, index) => {
             const sentence = sentenceData.originalSentence;
             const impliedPerson = sentenceData.impliedPerson;
             const mentionedPersons = sentenceData.mentionedPersons || [];
-            
-            logs.push(`\n句子 ${index + 1}: "${sentence}"`);
-            
+
+            logs.push(`\n句子 ${index + 1}: ${escapeHtml(sentence)}`);
+
             if (impliedPerson) {
                 logs.push(`  隐含主语: ${impliedPerson}`);
             }
-            
+
             if (mentionedPersons.length > 0) {
                 logs.push(`  提及人物: ${mentionedPersons.join(', ')}`);
             }
-            
-            if (sentence.match(new RegExp(`[${this.quoteChars.join('')}].*[${this.quoteChars.join('')}]`, 'g'))) {
-                logs.push(`  [跳过] 这是引用语句，不计算情感值`);
-                return;
-            }
-            
-            const sentenceSentiment = this.calculateSentimentScore(sentence);
-            logs.push(`  情感值: ${sentenceSentiment.toFixed(2)}`);
-            
-            logs.push(`  匹配情感词汇:`);
-            let hasMatches = false;
-            Object.entries(this.SENTIMENT_LEXICON).forEach(([key, lexiconItem]) => {
-                const matches = sentence.match(lexiconItem.regex);
-                if (matches) {
-                    if (lexiconItem.requires && !lexiconItem.requires.test(sentence)) {
+
+            const dialogueMatch = sentence.match(new RegExp(`[${this.quoteChars.join('')}].*[${this.quoteChars.join('')}]`, 'g'));
+            if (dialogueMatch) {
+                logs.push(`  对话分析:`);
+                const speaker = this.findSpeakerInText(sentence, characterName, trackedNames);
+                if (speaker) {
+                    logs.push(`    说话人: ${speaker}`);
+                    const fullSentence = sentence;
+                    const sentimentResult = this.calculateEnhancedSentimentScore(fullSentence);
+                    logs.push(`    对话情感值: ${sentimentResult.score.toFixed(2)}`);
+                    
+                    // 添加情感目标信息到UI调试日志
+                    const emotionTarget = this.identifyEmotionTarget(fullSentence, {name: speaker});
+                    const targetNames = {
+                        'self': '自我情感',
+                        'user': '对用户情感',
+                        'unknown': '未确定目标'
+                    };
+                    logs.push(`    情感目标: ${targetNames[emotionTarget] || emotionTarget}`);
+
+                    if (sentimentResult.matches.length > 0) {
+                        logs.push(`    对话情感词汇:`);
+                        sentimentResult.matches.forEach(item => {
+                            const typeName = this.getEmotionTypeName(item.type);
+                            logs.push(`      - ${typeName}: 匹配词 "${item.match}" (原始得分 ${item.originalScore}, 最终得分 ${item.finalScore.toFixed(2)})`);
+                        });
+                    } else {
+                        logs.push(`    无匹配情感词汇`);
+                    }
+
+                    // 如果是自我情感，跳过好感度影响
+                    if (emotionTarget === 'self') {
+                        logs.push(`    [跳过] 这是角色对自己的情感，不影响好感度`);
                         return;
                     }
-                    hasMatches = true;
-                    
-                    const typeNameMap = {
-                        'kiss': '接吻',
-                        'embrace': '拥抱',
-                        'sexual': '性行为',
-                        'female_orgasm': '女性高潮',
-                        'male_orgasm': '男性高潮',
-                        'oral_comp': '口交完成',
-                        'internal_comp': '内射完成',
-                        'smile': '微笑',
-                        'shy': '害羞',
-                        'love': '爱意表达',
-                        'praise': '赞美',
-                        'care': '关心',
-                        'hit': '打击',
-                        'weapon': '武器使用',
-                        'death': '死亡',
-                        'sad': '悲伤',
-                        'disgust': '厌恶',
-                        'cold': '冷漠'
-                    };
-                    
-                    const typeName = typeNameMap[key] || key;
-                    
-                    logs.push(`    - ${typeName}: 匹配词 "${matches.join('", "')}" (得分 ${lexiconItem.score})`);
+
+                    if (Math.abs(sentimentResult.score) > 0.1 && trackedNames.includes(speaker)) {
+                        const change = sentimentResult.score;
+                        logs.push(`    对${speaker}好感度影响: ${change.toFixed(2)}`);
+                        relationshipChanges[speaker] = (relationshipChanges[speaker] || 0) + change;
+                    }
+                } else {
+                    logs.push(`    无法确定说话人`);
                 }
+                return;
+            }
+
+            const sentimentResult = this.calculateEnhancedSentimentScore(sentence);
+            const sentenceSentiment = sentimentResult.score;
+            logs.push(`  情感值: ${sentenceSentiment.toFixed(2)}`);
+
+            logs.push(`  匹配情感词汇:`);
+            let hasMatches = false;
+            sentimentResult.matches.forEach(item => {
+                hasMatches = true;
+                const typeName = this.getEmotionTypeName(item.type);
+                logs.push(`    - ${typeName}: 匹配词 "${item.match}" (原始得分 ${item.originalScore}, 最终得分 ${item.finalScore.toFixed(2)})`);
             });
-            
+
             if (!hasMatches) {
                 logs.push(`    无匹配情感词汇`);
             }
-            
-            const subjects = this.identifySubjectsInSentence(sentence, [...trackedNames, impliedPerson].filter(Boolean));
-            
+
+            const subjects = this.identifySubjectsEnhanced(sentence, [...trackedNames, impliedPerson].filter(Boolean));
+
             if (subjects.length > 0) {
                 logs.push(`  识别主语:`);
-                
+
                 const roleMap = {
                     'agent': '主动者',
                     'patient': '被动者',
                     'mentioned': '被提及'
                 };
-                
+
                 const patternMap = {
                     'passive': '被动句',
                     'pivotal': '致使句',
@@ -1235,22 +1791,36 @@ class StatsTracker {
                     'pronoun': '代词主语',
                     'simple': '简单提及',
                     'inherited': '继承上文',
-                    'fallback': '兜底分析'
+                    'fallback': '兜底分析',
+                    'emotion_proximity': '情绪邻近',
+                    'sentence_start': '句首主语',
+                    'behavior': '行为主体'
                 };
-                
+
+                const targetMap = {
+                    'self': '自我情感',
+                    'user': '对用户情感',
+                    'unknown': '未确定目标'
+                };
+
                 subjects.forEach(subject => {
                     const roleName = roleMap[subject.role] || subject.role;
                     const patternName = patternMap[subject.pattern] || subject.pattern;
-                    
-                    logs.push(`    - ${subject.name}: 角色 ${roleName}, 权重 ${subject.weight.toFixed(2)}, 模式 ${patternName}`);
-                    
+                    const targetName = targetMap[subject.emotionTarget] || subject.emotionTarget;
+
+                    logs.push(`    - ${subject.name}: 角色 ${roleName}, 权重 ${subject.weight.toFixed(2)}, 模式 ${patternName}, 情感目标 ${targetName}`);
+
                     if (!subject.name) return;
                     if (subject.role === 'mentioned') return;
                     if (subject.role === 'patient' && sentenceSentiment <= 0) return;
-                    
+                    if (subject.emotionTarget === 'self') {
+                        logs.push(`      [跳过] 这是角色对自己的情感，不影响好感度`);
+                        return;
+                    }
+
                     const weight = subject.weight;
                     const change = sentenceSentiment * weight;
-                    
+
                     if (Math.abs(change) > 0.1) {
                         relationshipChanges[subject.name] = (relationshipChanges[subject.name] || 0) + change;
                         logs.push(`      对好感度影响: ${change.toFixed(2)} (累计: ${relationshipChanges[subject.name].toFixed(2)})`);
@@ -1258,63 +1828,54 @@ class StatsTracker {
                         logs.push(`      对好感度影响过小，忽略`);
                     }
                 });
-                
+
                 lastSubjects = subjects.filter(s => s.role === 'agent');
-                
-            } else if (mentionedPersons.length > 0) {
-                logs.push(`  未识别明确主语，但提及了人物:`);
-                mentionedPersons.forEach(name => {
-                    const change = sentenceSentiment * 0.4;
-                    if (Math.abs(change) > 0.1) {
-                        relationshipChanges[name] = (relationshipChanges[name] || 0) + change;
-                        logs.push(`    - ${name}: 影响好感度 ${change.toFixed(2)} (累计: ${relationshipChanges[name].toFixed(2)})`);
-                    } else {
-                        logs.push(`    - ${name}: 影响过小，忽略: ${change.toFixed(2)}`);
-                    }
-                });
-                
-                lastSubjects = [];
-                
+
             } else {
-                globalSentiment += sentenceSentiment;
-                logs.push(`  未识别特定人物，情感值 ${sentenceSentiment.toFixed(2)} 计入全局情感`);
+                if (mentionedPersons.length > 0) {
+                    logs.push(`  提及人物但未识别明确主语:`);
+                    mentionedPersons.forEach(name => {
+                        const change = sentenceSentiment * 0.4;
+                        if (Math.abs(change) > 0.1) {
+                            relationshipChanges[name] = (relationshipChanges[name] || 0) + change;
+                            logs.push(`    - ${name}: 影响好感度 ${change.toFixed(2)} (累计: ${relationshipChanges[name].toFixed(2)})`);
+                        } else {
+                            logs.push(`    - ${name}: 影响过小，忽略: ${change.toFixed(2)}`);
+                        }
+                    });
+                } else {
+                    logs.push(`  未检测到主语或提及的人物`);
+                }
+
                 lastSubjects = [];
             }
         });
-        
+
         logs.push(`\n== 好感度变化详情 ==`);
-        logs.push(`全局情感值: ${globalSentiment.toFixed(2)}`);
-        logs.push(`全局情感变化: ${Math.round(Math.min(3, Math.max(-3, globalSentiment)))}`);
-        
+
         Object.entries(relationshipChanges).forEach(([name, change]) => {
             const finalChange = Math.round(Math.min(3, Math.max(-3, change)));
             if (finalChange !== 0) {
                 debugStats.relationships[name].interactions++;
                 debugStats.relationships[name].intimacyLevel += finalChange;
-                debugStats.relationships[name].intimacyLevel = Math.min(100, Math.max(-100, debugStats.relationships[name].intimacyLevel));
+                debugStats.relationships[name].intimacyLevel = Math.max(-100, debugStats.relationships[name].intimacyLevel);
                 debugStats.relationships[name].stage = this.getRelationshipStage(debugStats.relationships[name].intimacyLevel);
-                
+
                 logs.push(`\n${name} 好感度变化:`);
                 logs.push(`  原始计算值: ${change.toFixed(2)}`);
                 logs.push(`  最终变化值: ${finalChange} (限制为-3到+3)`);
-                logs.push(`  变化前: ${beforeStats.relationships[name].intimacyLevel} (${beforeStats.relationships[name].stage})`);
-                logs.push(`  变化后: ${debugStats.relationships[name].intimacyLevel} (${debugStats.relationships[name].stage})`);
             } else if (Math.abs(change) > 0) {
                 logs.push(`\n${name} 好感度变化不足以改变数值: ${change.toFixed(2)} -> ${finalChange}`);
             }
         });
-        
+
         const finalDebugStats = JSON.parse(JSON.stringify(beforeStats));
         this.updateStatsFromText(finalDebugStats, text, characterName);
-        
+
         const statChanges = this.calculateStatChanges(beforeStats, finalDebugStats);
-        
-        const finalGlobalChange = Math.round(Math.min(3, Math.max(-3, globalSentiment)));
-        logs.push(`\n全局关系状态变化:`);
-        logs.push(`  变化值: ${finalGlobalChange}`);
-        
+
         logs.push(`\n== 本条消息增加的统计 ==`);
-        
+
         if (statChanges.dialogueCount > 0 || statChanges.locationChanges > 0) {
             logs.push(`\n对话统计:`);
             if (statChanges.dialogueCount > 0) {
@@ -1324,7 +1885,7 @@ class StatsTracker {
                 logs.push(`  地点变化: +${statChanges.locationChanges}`);
             }
         }
-        
+
         const intimacyChanges = Object.entries(statChanges.intimacyStats).filter(([_, change]) => change > 0);
         if (intimacyChanges.length > 0) {
             logs.push(`\n亲密统计:`);
@@ -1333,7 +1894,7 @@ class StatsTracker {
                 logs.push(`  ${keyName}: +${change}`);
             });
         }
-        
+
         const emotionChanges = Object.entries(statChanges.emotionStats).filter(([_, change]) => change > 0);
         if (emotionChanges.length > 0) {
             logs.push(`\n情感统计:`);
@@ -1342,7 +1903,7 @@ class StatsTracker {
                 logs.push(`  ${keyName}: +${change}`);
             });
         }
-        
+
         const violenceChanges = Object.entries(statChanges.violenceStats).filter(([_, change]) => change > 0);
         if (violenceChanges.length > 0) {
             logs.push(`\n暴力统计:`);
@@ -1351,7 +1912,7 @@ class StatsTracker {
                 logs.push(`  ${keyName}: +${change}`);
             });
         }
-        
+
         return logs.join('\n');
     }
 
@@ -1364,26 +1925,26 @@ class StatsTracker {
             violenceStats: {},
             exchangeStats: {}
         };
-        
+
         Object.keys(afterStats.intimacyStats || {}).forEach(key => {
             changes.intimacyStats[key] = (afterStats.intimacyStats[key] || 0) - (beforeStats.intimacyStats[key] || 0);
         });
-        
+
         Object.keys(afterStats.emotionStats || {}).forEach(key => {
             changes.emotionStats[key] = (afterStats.emotionStats[key] || 0) - (beforeStats.emotionStats[key] || 0);
         });
-        
+
         Object.keys(afterStats.violenceStats || {}).forEach(key => {
             changes.violenceStats[key] = (afterStats.violenceStats[key] || 0) - (beforeStats.violenceStats[key] || 0);
         });
-        
+
         return changes;
     }
 
     getStatKeyName(key) {
         const keyMap = {
             'kissingEvents': '接吻次数',
-            'embraceEvents': '拥抱次数', 
+            'embraceEvents': '拥抱次数',
             'sexualEncounters': '性爱次数',
             'maleOrgasms': '男性高潮',
             'femaleOrgasms': '女性高潮',
@@ -1405,9 +1966,9 @@ class StatsTracker {
     }
 
     showDebugLog(log) {
-    $('#debug-log-modal').remove();
-  
-    const modalHtml = `
+        $('#debug-log-modal').remove();
+
+        const modalHtml = `
     <div id="debug-log-modal" class="debug-log-modal">
         <div class="debug-log-content">
             <div class="debug-log-header">
@@ -1420,14 +1981,14 @@ class StatsTracker {
             </div>
         </div>
     </div>`;
-  
-    $('body').append(modalHtml);
-  
-    $('#debug-log-modal .debug-log-close, #close-debug-log').on('click', function() {
-        $('#debug-log-modal').remove();
-    });
-    
-}
+
+        $('body').append(modalHtml);
+
+        $('#debug-log-modal .debug-log-close, #close-debug-log').on('click', function () {
+            $('#debug-log-modal').remove();
+        });
+
+    }
 
     showMemoryModal(content, isEditing = false) {
         $('#memory-modal').remove();
@@ -1482,9 +2043,9 @@ class StatsTracker {
                     currentStats = this.createEmptyStats();
                 }
                 const updatedStatsFromForm = this.collectStatsFromForm();
-                
+
                 const finalStats = {
-                    ...currentStats,  
+                    ...currentStats,
                     ...updatedStatsFromForm,
                     relationships: { ...currentStats.relationships }
                 };
@@ -1561,7 +2122,7 @@ class StatsTracker {
 
     createEditableStatsForm(stats) {
         const relationships = Object.entries(stats.relationships || {}).sort((a, b) => b[1].interactions - a[1].interactions);
-        
+
         const sections = [
             {
                 title: '💬 基础数据', fields: [
@@ -1570,7 +2131,7 @@ class StatsTracker {
                 ]
             },
             {
-                title: '💞 关系网络', 
+                title: '💞 关系网络',
                 isRelationships: true,
                 relationships: relationships
             },
@@ -1615,7 +2176,7 @@ class StatsTracker {
         let html = '<div class="stats-editor">';
         sections.forEach(section => {
             html += `<div class="stats-section"><h3>${section.title}</h3>`;
-            
+
             if (section.isRelationships) {
                 if (section.relationships && section.relationships.length > 0) {
                     section.relationships.forEach(([name, data]) => {
@@ -1623,7 +2184,7 @@ class StatsTracker {
                         const stage = data.stage || this.getRelationshipStage(intimacyLevel);
                         html += `<div class="stats-field">
                             <label>${name}:</label>
-                            <input type="number" data-path="relationships.${name}.intimacyLevel" value="${intimacyLevel}" min="-100" max="100" />
+                            <input type="number" data-path="relationships.${name}.intimacyLevel" value="${intimacyLevel}" min="-100" />
                             <span class="relationship-stage">${stage}</span>
                         </div>`;
                     });
@@ -1635,7 +2196,7 @@ class StatsTracker {
                     html += `<div class="stats-field"><label>${field.label}:</label><input type="number" data-path="${field.path}" value="${field.value}" min="0" /></div>`;
                 });
             }
-            
+
             html += '</div>';
         });
         html += '</div>';
@@ -1649,10 +2210,10 @@ class StatsTracker {
         $('.stats-field input').each(function () {
             const path = $(this).data('path');
             if (!path) return;
-            
+
             const value = parseInt($(this).val()) || 0;
             const pathParts = path.split('.');
-            
+
             if (pathParts.length === 1) {
                 stats[pathParts[0]] = value;
             } else if (pathParts.length === 2) {
@@ -1663,16 +2224,16 @@ class StatsTracker {
             } else if (pathParts.length === 3 && pathParts[0] === 'relationships') {
                 const name = pathParts[1];
                 const field = pathParts[2];
-                
+
                 if (!stats.relationships[name]) {
                     stats.relationships[name] = {
                         interactions: 0,
                         initialIntimacy: 0
                     };
                 }
-                
+
                 stats.relationships[name][field] = value;
-                
+
                 if (field === 'intimacyLevel') {
                     stats.relationships[name].stage = self.getRelationshipStage(value);
                 }
@@ -1687,7 +2248,7 @@ class StatsTracker {
         try {
             const currentBehaviors = this.getCurrentCharacterGuidelines();
             const currentStats = await this.getCurrentStats();
-  
+
             const trackedRelationships = {};
             Object.entries(currentStats.relationships || {}).forEach(([name, data]) => {
                 trackedRelationships[name] = {
@@ -1807,7 +2368,7 @@ class StatsTracker {
                     }
 
                     let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
-          
+
                     if (!currentStats || currentStats === "undefined") {
                         currentStats = this.createEmptyStats();
                     } else {
@@ -1832,7 +2393,7 @@ class StatsTracker {
                                 currentStats.relationships[name].initialIntimacy = initialIntimacy;
                             }
                         });
-              
+
                         await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(currentStats)}`);
                     }
 
@@ -1856,10 +2417,10 @@ class StatsTracker {
                         await this.saveRelationshipSettingsToCharacter(true);
                     }
 
-        if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled && this.isGloballyEnabled()) {
-            await this.updateMemoryPrompt();
-        }
-          
+                    if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled && this.isGloballyEnabled()) {
+                        await this.updateMemoryPrompt();
+                    }
+
                     if (isCharacterSpecific && isMatchingCharacter) {
                         await this.handleCharacterSwitch();
                     }
@@ -1934,11 +2495,11 @@ class StatsTracker {
         $(document).off('click', '#behavior-reset').on('click', '#behavior-reset', () => {
             this.showConfirmDialog('确定要重置所有行为设定为默认值吗？', () => {
                 extension_settings[this.EXT_ID].relationshipGuidelines = structuredClone(this.relationshipGuidelines);
-    
+
                 if (this.currentCharacterId) {
                     this.characterSettings.set(this.currentCharacterId, structuredClone(this.relationshipGuidelines));
                 }
-    
+
                 saveSettingsDebounced();
 
                 const newContent = this.createBehaviorSettingsForm(this.relationshipGuidelines);
@@ -1990,9 +2551,9 @@ class StatsTracker {
             $('#behavior-modal').remove();
             this.executeCommand('/echo 行为设定已保存');
 
-    if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled && this.isGloballyEnabled()) {
-        await this.updateMemoryPrompt();
-    }
+            if (this.settings.memoryEnabled && this.settings.memoryInjectEnabled && this.isGloballyEnabled()) {
+                await this.updateMemoryPrompt();
+            }
         });
 
         $(document).off('keydown.behaviormodal').on('keydown.behaviormodal', function (e) {
@@ -2022,10 +2583,10 @@ class StatsTracker {
             listContainer.empty();
 
             trackedNames.forEach(name => {
-                const initialIntimacy = stats.relationships[name].initialIntimacy !== undefined 
-                    ? stats.relationships[name].initialIntimacy 
+                const initialIntimacy = stats.relationships[name].initialIntimacy !== undefined
+                    ? stats.relationships[name].initialIntimacy
                     : stats.relationships[name].intimacyLevel || 0;
-    
+
                 const nameItem = $(`
                     <div class="tracked-name-item template-mode">
                         <span class="tracked-name">${name}</span>
@@ -2044,7 +2605,7 @@ class StatsTracker {
             if (addNameContainer.length) {
                 addNameContainer.html(`
                     <input type="text" id="new-tracked-name" class="tracked-name-input" placeholder="输入人物名称" />
-                    <input type="number" id="new-tracked-intimacy" class="tracked-intimacy-input" placeholder="初始好感度" min="-100" max="100" value="0" />
+                    <input type="number" id="new-tracked-intimacy" class="tracked-intimacy-input" placeholder="初始好感度" min="-100" value="0" />
                     <button id="add-tracked-name" class="add-name-button">添加</button>
                 `);
             }
@@ -2059,10 +2620,10 @@ class StatsTracker {
                 }
             });
 
-            $(document).off('click', '.edit-name').on('click', '.edit-name', function() {
+            $(document).off('click', '.edit-name').on('click', '.edit-name', function () {
                 const name = $(this).data('name');
                 const currentIntimacy = $(this).data('intimacy');
-    
+
                 statsTracker.showEditNameDialog(name, currentIntimacy);
             });
 
@@ -2086,8 +2647,8 @@ class StatsTracker {
                     <input type="text" id="edit-name-input" value="${name}" readonly />
                 </div>
                 <div class="edit-name-field">
-                    <label>初始好感度 (-100 ~ 100):</label>
-                    <input type="number" id="edit-intimacy-input" min="-100" max="100" value="${currentIntimacy}" />
+                    <label>初始好感度 (-100 ~ 无上限):</label>
+                    <input type="number" id="edit-intimacy-input" min="-100" value="${currentIntimacy}" />
                 </div>
                 <div class="xiaobaix-edit-name-buttons">
                     <button class="xiaobaix-edit-name-save">保存</button>
@@ -2104,7 +2665,7 @@ class StatsTracker {
             $('.xiaobaix-edit-name-modal').remove();
         });
 
-        $(document).off('click', '.xiaobaix-edit-name-cancel, .xiaobaix-edit-name-modal').on('click', '.xiaobaix-edit-name-cancel, .xiaobaix-edit-name-modal', function(e) {
+        $(document).off('click', '.xiaobaix-edit-name-cancel, .xiaobaix-edit-name-modal').on('click', '.xiaobaix-edit-name-cancel, .xiaobaix-edit-name-modal', function (e) {
             if (e.target === this) {
                 $('.xiaobaix-edit-name-modal').remove();
             }
@@ -2115,12 +2676,12 @@ class StatsTracker {
         const stats = await this.getCurrentStats();
         if (stats.relationships[name]) {
             stats.relationships[name].initialIntimacy = initialIntimacy;
-  
+
             await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(stats)}`);
-  
+
             $(`.edit-name[data-name="${name}"]`).data('intimacy', initialIntimacy);
             $(`.tracked-name-item:has(.edit-name[data-name="${name}"]) .initial-intimacy-value`).text(`⭐ ${initialIntimacy}`);
-  
+
             this.executeCommand(`/echo 已更新"${name}"的初始好感度: ${initialIntimacy}`);
         }
     }
@@ -2128,13 +2689,13 @@ class StatsTracker {
     async addTrackedName(name, initialIntimacy = 0) {
         if (!name) return;
 
-        initialIntimacy = Math.min(100, Math.max(-100, initialIntimacy));
+        initialIntimacy = Math.max(-100, initialIntimacy);
 
         const stats = await this.getCurrentStats();
         if (!stats.relationships[name]) {
-            stats.relationships[name] = { 
-                intimacyLevel: initialIntimacy, 
-                stage: this.getRelationshipStage(initialIntimacy), 
+            stats.relationships[name] = {
+                intimacyLevel: initialIntimacy,
+                stage: this.getRelationshipStage(initialIntimacy),
                 interactions: 0,
                 initialIntimacy: initialIntimacy
             };
@@ -2184,15 +2745,15 @@ class StatsTracker {
             "无视": "0~9",
             "礼貌": "10~19",
             "熟悉": "20~29",
-            "友善": "30~39", 
+            "友善": "30~39",
             "好感": "40~49",
             "暧昧": "50~59",
             "恋人初期": "60~69",
             "热恋": "70~79",
             "深爱": "80~89",
             "唯一": "90~99",
-            "命运": "100"
-        };    	
+            "命运": "100~∞"
+        };
         let html = `
         <div class="behavior-settings-form">
             <div class="behavior-intro">
@@ -2205,7 +2766,7 @@ class StatsTracker {
                 <div id="tracked-names-list" class="tracked-names-list"></div>
                 <div class="add-name-container">
                     <input type="text" id="new-tracked-name" class="tracked-name-input" placeholder="输入人物名称" />
-                    <input type="number" id="new-tracked-intimacy" class="tracked-intimacy-input" placeholder="初始好感度" min="-100" max="100" value="0" />
+                    <input type="number" id="new-tracked-intimacy" class="tracked-intimacy-input" placeholder="初始好感度" min="-100" value="0" />
                     <button id="add-tracked-name" class="add-name-button">添加</button>
                 </div>
             </div>
@@ -2282,7 +2843,7 @@ class StatsTracker {
             let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
             if (!currentStats || currentStats === "undefined") {
                 const newStats = this.createEmptyStats();
-    
+
                 if (savedData.trackedRelationships) {
                     Object.entries(savedData.trackedRelationships).forEach(([name, data]) => {
                         const initialIntimacy = data.initialIntimacy !== undefined ? data.initialIntimacy : 0;
@@ -2294,16 +2855,16 @@ class StatsTracker {
                         };
                     });
                 }
-    
+
                 await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(newStats)}`);
             }
 
             saveSettingsDebounced();
 
-            const trackedNames = savedData.trackedRelationships ? 
-                Object.keys(savedData.trackedRelationships) : 
+            const trackedNames = savedData.trackedRelationships ?
+                Object.keys(savedData.trackedRelationships) :
                 [];
-    
+
             const message = `🎉 自动导入成功！\n角色：${character.name}\n关系阶段：${Object.keys(savedData.relationshipGuidelines).length}个\n追踪人物：${trackedNames.join(', ') || '无'}\n版本：${savedData.version || '1.0'}`;
 
             this.executeCommand(`/echo ${message}`);
@@ -2347,7 +2908,7 @@ class StatsTracker {
                 let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
                 if (!currentStats || currentStats === "undefined") {
                     const newStats = this.createEmptyStats();
-        
+
                     if (savedData.trackedRelationships) {
                         Object.entries(savedData.trackedRelationships).forEach(([name, data]) => {
                             const initialIntimacy = data.initialIntimacy !== undefined ? data.initialIntimacy : 0;
@@ -2359,23 +2920,23 @@ class StatsTracker {
                             };
                         });
                     }
-        
+
                     await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(newStats)}`);
                 }
 
                 saveSettingsDebounced();
 
-                const trackedNames = savedData.trackedRelationships ? 
-                    Object.keys(savedData.trackedRelationships) : 
+                const trackedNames = savedData.trackedRelationships ?
+                    Object.keys(savedData.trackedRelationships) :
                     [];
-        
+
                 const message = `已加载角色卡中的行为设定配置\n追踪人物：${trackedNames.join(', ')}\n版本：${savedData.version || '1.0'}`;
                 this.executeCommand(`/echo ${message}`);
 
                 if (this.settings.memoryInjectEnabled) {
                     this.updateMemoryPrompt();
                 }
-    
+
                 await this.handleCharacterSwitch();
             } catch (error) {
             }
@@ -2384,10 +2945,10 @@ class StatsTracker {
 
     async showCharacterDataImportDialog(savedData) {
         return new Promise((resolve) => {
-            const trackedNames = savedData.trackedRelationships ? 
-                Object.keys(savedData.trackedRelationships) : 
+            const trackedNames = savedData.trackedRelationships ?
+                Object.keys(savedData.trackedRelationships) :
                 [];
-    
+
             const message = `
                 <div style="text-align: left;">
                     <h3>🎭 发现角色卡中的行为设定数据</h3>
