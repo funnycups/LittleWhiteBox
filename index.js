@@ -4,6 +4,7 @@ import { statsTracker } from "./relationship-metrics.js";
 import { initTasks } from "./scheduledTasks.js";
 import { initScriptAssistant } from "./scriptAssistant.js";
 import { initMessagePreview, addHistoryButtonsDebounced } from "./message-preview.js";
+import { initImmersiveMode } from "./immersive-mode.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
@@ -367,6 +368,10 @@ function toggleAllFeatures(enabled) {
         if (extension_settings[EXT_ID].recorded?.enabled) {
             setTimeout(() => addHistoryButtonsDebounced(), 500);
         }
+        
+        document.dispatchEvent(new CustomEvent('xiaobaixEnabledChanged', { 
+            detail: { enabled: true } 
+        }));
     } else {
         saveCurrentSettings();
         
@@ -374,7 +379,7 @@ function toggleAllFeatures(enabled) {
             sandboxMode: false, memoryEnabled: false, memoryInjectEnabled: false
         });
         
-        ['recorded', 'preview', 'scriptAssistant', 'tasks'].forEach(module => {
+        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive'].forEach(module => {
             if (!extension_settings[EXT_ID][module]) extension_settings[EXT_ID][module] = {};
             extension_settings[EXT_ID][module].enabled = false;
         });
@@ -384,7 +389,6 @@ function toggleAllFeatures(enabled) {
          "scheduled_tasks_enabled"].forEach(id => $(`#${id}`).prop("checked", false));
         
         toggleSettingsControls(false);
-
         document.querySelectorAll('iframe.xiaobaix-iframe').forEach(iframe => iframe.remove());
         document.querySelectorAll('pre[data-xiaobaix-bound="true"]').forEach(pre => {
             pre.style.display = '';
@@ -392,9 +396,12 @@ function toggleAllFeatures(enabled) {
         });
         document.querySelectorAll('.memory-button, .mes_history_preview').forEach(btn => btn.remove());
         document.querySelectorAll('#message_preview_btn').forEach(btn => btn.style.display = 'none');
-
         moduleInstances.statsTracker?.removeMemoryPrompt?.();
         window.removeScriptDocs?.();
+        
+        document.dispatchEvent(new CustomEvent('xiaobaixEnabledChanged', { 
+            detail: { enabled: false } 
+        }));
     }
 }
 
@@ -601,6 +608,7 @@ jQuery(async () => {
         setupEventListeners();
         initTasks();
         initScriptAssistant();
+        initImmersiveMode();
         
         setTimeout(setupMenuTabs, 500);
         setTimeout(initMessagePreview, 1500);
