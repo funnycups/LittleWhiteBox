@@ -1315,3 +1315,131 @@ input.disable_task {
     opacity: 0.7;
     white-space: nowrap;
 }
+
+/* 沉浸式显示模式样式 */
+body.immersive-mode #chat {
+   padding: 0px !important;
+   border: 0px !important;
+   overflow: visible !important;
+}
+
+body.immersive-mode .mesAvatarWrapper,
+body.immersive-mode .timestamp,
+body.immersive-mode .swipe_left,
+body.immersive-mode .swipeRightBlock {
+   display: none !important;
+}
+
+body.immersive-mode .mes_block {
+   padding-left: 0 !important;
+   margin-left: 0 !important;
+}
+
+body.immersive-mode .mes_text {
+   padding: 0px !important;
+   max-width: 100%;
+   width: 100%;
+}
+
+body.immersive-mode .mes {
+   width: 99%;
+   margin: 0 0.5%;
+   padding: 0px !important;
+
+}
+
+body.immersive-mode .mes[is_user="true"] .mes_text {
+    display: flex !important;
+    align-items: center !important;
+    min-height: 80vh !important;
+}
+
+/* 导航按钮容器 */
+.immersive-navigation {
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   background-color: rgba(51, 51, 51, 0.3);
+   border-radius: 25px;
+   margin: 10px auto 0 auto;
+   width: fit-content;
+   max-width: 50%;
+   z-index: 100;
+   height: 25px;
+   box-sizing: border-box;
+}
+
+
+.immersive-nav-btn {
+   background: none;
+   border: none;
+   color: var(--SmartThemeBodyColor);
+   cursor: pointer;
+   border-radius: 50%;
+   transition: all 0.2s ease;
+   font-size: 12px;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   min-width: 24px;
+   height: 24px;
+}
+
+.immersive-nav-btn:hover:not(:disabled) {
+   background-color: rgba(var(--SmartThemeBodyColor), 0.2);
+   transform: scale(1.1);
+}
+
+.immersive-nav-btn:disabled {
+   opacity: 0.3;
+   cursor: not-allowed;
+}
+
+.immersive-counter,
+.immersive-floor-input {
+   font-size: 11px;
+   color: var(--SmartThemeBodyColor);
+   min-width: 35px;
+   text-align: center;
+   padding: 2px 4px;
+   border-radius: 3px;
+   transition: all 0.2s ease;
+}
+
+.immersive-counter {
+   opacity: 0.8;
+   cursor: pointer;
+}
+
+.immersive-counter:hover {
+   background-color: rgba(var(--SmartThemeBodyColor), 0.2);
+   opacity: 1;
+}
+
+.immersive-floor-input {
+   background-color: rgba(var(--SmartThemeBodyColor), 0.1);
+   border: 1px solid rgba(var(--SmartThemeBodyColor), 0.3);
+   outline: none;
+}
+
+.immersive-floor-input:focus {
+   border-color: var(--SmartThemeQuoteColor);
+   background-color: rgba(var(--SmartThemeBodyColor), 0.2);
+}
+
+@media (max-width: 768px) {
+   .immersive-navigation {
+       gap: 8px;
+       height: 30px;
+   }
+   
+   .immersive-nav-btn {
+       min-width: 20px;
+       font-size: 10px;
+   }
+   
+   .immersive-counter {
+       font-size: 10px;
+       min-width: 30px;
+   }
+}
