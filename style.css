@@ -1320,7 +1320,9 @@ input.disable_task {
 body.immersive-mode #chat {
    padding: 0px !important;
    border: 0px !important;
-   overflow: visible !important;
+   overflow-y: auto;
+   margin-bottom: -6% !important;
+   
 }
 
 body.immersive-mode .mesAvatarWrapper,
@@ -1346,12 +1348,6 @@ body.immersive-mode .mes {
    margin: 0 0.5%;
    padding: 0px !important;
 
-}
-
-body.immersive-mode .mes[is_user="true"] .mes_text {
-    display: flex !important;
-    align-items: center !important;
-    min-height: 80vh !important;
 }
 
 /* 导航按钮容器 */
