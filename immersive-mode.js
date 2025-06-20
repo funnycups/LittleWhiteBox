@@ -7,14 +7,13 @@ const MODULE_NAME = "immersive";
 
 const defaultSettings = {
     enabled: false,
-    currentFloor: -1,
-    showNavigationButtons: true
+    showAllMessages: false,
+    autoJumpOnAI: true
 };
 
 let isImmersiveModeActive = false;
-let totalMessages = 0;
-let currentDisplayFloor = -1;
 let menuButtonAdded = false;
+let chatObserver = null;
 
 function initImmersiveMode() {
     if (!extension_settings[EXT_ID].immersive) {
@@ -43,11 +42,7 @@ function initImmersiveMode() {
         updateMenuButtonState();
     }
     
-    [event_types.MESSAGE_RECEIVED, event_types.MESSAGE_SENT].forEach(eventType => {
-        eventSource.on(eventType, onMessageUpdate);
-    });
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-    
     document.addEventListener('xiaobaixEnabledChanged', handleGlobalStateChange);
     
     console.log(`[${EXT_ID}] 沉浸式显示模式功能已加载`);
@@ -70,7 +65,6 @@ function handleGlobalStateChange(event) {
         }
         
         removeMenuButton();
-        
         isImmersiveModeActive = false;
     }
     
@@ -128,6 +122,7 @@ function enableImmersiveMode() {
     $('body').addClass('immersive-mode');
     updateMessageDisplay();
     showNavigationButtons();
+    startChatObserver();
 }
 
 function disableImmersiveMode() {
@@ -135,24 +130,90 @@ function disableImmersiveMode() {
     $('body').removeClass('immersive-mode');
     $('#chat .mes').show();
     hideNavigationButtons();
+    stopChatObserver();
+}
+
+function startChatObserver() {
+    if (chatObserver) {
+        stopChatObserver();
+    }
+    
+    const chatContainer = document.getElementById('chat');
+    if (!chatContainer) return;
+    
+    chatObserver = new MutationObserver((mutations) => {
+        let hasNewMessage = false;
+        let hasAIMessage = false;
+        
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === Node.ELEMENT_NODE && node.classList && node.classList.contains('mes')) {
+                        hasNewMessage = true;
+                        if (!node.classList.contains('is_user')) {
+                            hasAIMessage = true;
+                        }
+                    }
+                });
+            }
+            
+            if (mutation.type === 'subtree' || mutation.type === 'characterData') {
+                const target = mutation.target;
+                if (target && target.closest && target.closest('.mes:not(.is_user)')) {
+                    hasAIMessage = true;
+                }
+            }
+        });
+        
+        if (hasNewMessage || hasAIMessage) {
+            handleChatUpdate(hasAIMessage);
+        }
+    });
+    
+    chatObserver.observe(chatContainer, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+    
+    console.log('[小白X] 开始监听聊天DOM变化');
+}
+
+function stopChatObserver() {
+    if (chatObserver) {
+        chatObserver.disconnect();
+        chatObserver = null;
+        console.log('[小白X] 停止监听聊天DOM变化');
+    }
+}
+
+function handleChatUpdate(hasAIMessage) {
+    if (!isImmersiveModeActive) return;
+    
+    const settings = getImmersiveSettings();
+    
+    if (settings.autoJumpOnAI && hasAIMessage) {
+        console.log('[小白X] 检测到AI消息，切换到最新消息模式');
+        settings.showAllMessages = false;
+        saveSettingsDebounced();
+    }
+    
+    updateMessageDisplay();
 }
 
 function updateMessageDisplay() {
     if (!isImmersiveModeActive) return;
     
     const messages = $('#chat .mes');
-    totalMessages = messages.length;
+    const settings = getImmersiveSettings();
     
-    if (totalMessages === 0) return;
+    if (messages.length === 0) return;
     
-    messages.hide();
-    
-    const targetIndex = (currentDisplayFloor === -1 || currentDisplayFloor >= totalMessages) 
-        ? totalMessages - 1 : currentDisplayFloor;
-    
-    if (targetIndex >= 0) {
-        $(messages[targetIndex]).show();
-        if (currentDisplayFloor >= totalMessages) currentDisplayFloor = -1;
+    if (settings.showAllMessages) {
+        messages.show();
+    } else {
+        messages.hide();
+        messages.last().show();
     }
     
     updateNavigationButtons();
@@ -174,11 +235,11 @@ function showNavigationButtons() {
                 <button id="immersive-swipe-left" class="immersive-nav-btn" title="左滑">
                     <i class="fa-solid fa-chevron-left"></i>
                 </button>
-                <button id="immersive-up" class="immersive-nav-btn" title="上一条消息">
+                <button id="immersive-up" class="immersive-nav-btn" title="上一页">
                     <i class="fa-solid fa-chevron-up"></i>
                 </button>
-                <span id="immersive-counter" class="immersive-counter">1/1</span>
-                <button id="immersive-down" class="immersive-nav-btn" title="下一条消息">
+                <span id="immersive-counter" class="immersive-counter">1/2</span>
+                <button id="immersive-down" class="immersive-nav-btn" title="下一页">
                     <i class="fa-solid fa-chevron-down"></i>
                 </button>
                 <button id="immersive-swipe-right" class="immersive-nav-btn" title="右滑">
@@ -194,7 +255,7 @@ function showNavigationButtons() {
             '#immersive-down': () => navigate(1),
             '#immersive-swipe-left': () => handleSwipe('.swipe_left'),
             '#immersive-swipe-right': () => handleSwipe('.swipe_right'),
-            '#immersive-counter': showFloorInput
+            '#immersive-counter': showPageInput
         };
 
         Object.entries(navActions).forEach(([selector, handler]) => {
@@ -210,30 +271,30 @@ function hideNavigationButtons() {
 }
 
 function updateNavigationButtons() {
-    if (!isImmersiveModeActive || totalMessages === 0) return;
+    if (!isImmersiveModeActive) return;
     
-    const currentIndex = currentDisplayFloor === -1 ? totalMessages - 1 : currentDisplayFloor;
-    $('#immersive-counter').text(`${currentIndex + 1}/${totalMessages}`);
-    $('#immersive-up').prop('disabled', currentIndex <= 0);
-    $('#immersive-down').prop('disabled', currentIndex >= totalMessages - 1);
+    const settings = getImmersiveSettings();
+    const currentPage = settings.showAllMessages ? 1 : 2;
+    
+    $('#immersive-counter').text(`${currentPage}/2`);
+    $('#immersive-up').prop('disabled', currentPage <= 1);
+    $('#immersive-down').prop('disabled', currentPage >= 2);
 }
 
 function navigate(direction) {
-    if (!isImmersiveModeActive || totalMessages === 0) return;
+    if (!isImmersiveModeActive) return;
     
-    const currentIndex = currentDisplayFloor === -1 ? totalMessages - 1 : currentDisplayFloor;
-    const newIndex = currentIndex + direction;
+    const settings = getImmersiveSettings();
+    const currentPage = settings.showAllMessages ? 1 : 2;
     
-    if (direction === -1 && newIndex >= 0) {
-        currentDisplayFloor = newIndex;
+    if (direction === -1 && currentPage > 1) {
+        settings.showAllMessages = true;
         updateMessageDisplay();
-    } else if (direction === 1) {
-        if (newIndex < totalMessages - 1) {
-            currentDisplayFloor = newIndex;
-        } else {
-            currentDisplayFloor = -1;
-        }
+        saveSettingsDebounced();
+    } else if (direction === 1 && currentPage < 2) {
+        settings.showAllMessages = false;
         updateMessageDisplay();
+        saveSettingsDebounced();
     }
 }
 
@@ -247,12 +308,13 @@ function handleSwipe(swipeSelector) {
     }
 }
 
-function showFloorInput() {
-    if (!isImmersiveModeActive || totalMessages === 0) return;
+function showPageInput() {
+    if (!isImmersiveModeActive) return;
 
     const $counter = $('#immersive-counter');
-    const currentIndex = currentDisplayFloor === -1 ? totalMessages - 1 : currentDisplayFloor;
-    const $input = $(`<input type="number" class="immersive-floor-input" min="1" max="${totalMessages}" value="${currentIndex + 1}">`);
+    const settings = getImmersiveSettings();
+    const currentPage = settings.showAllMessages ? 1 : 2;
+    const $input = $(`<input type="number" class="immersive-floor-input" min="1" max="2" value="${currentPage}">`);
 
     $counter.replaceWith($input);
     $input.focus().select();
@@ -264,15 +326,16 @@ function showFloorInput() {
         if (shouldApply || shouldCancel) {
             if (shouldApply && !shouldCancel) {
                 const inputValue = parseInt($(this).val());
-                if (!isNaN(inputValue) && inputValue >= 1 && inputValue <= totalMessages) {
-                    currentDisplayFloor = inputValue - 1;
+                if (inputValue === 1 || inputValue === 2) {
+                    settings.showAllMessages = (inputValue === 1);
                     updateMessageDisplay();
+                    saveSettingsDebounced();
                 }
             }
 
-            const $newCounter = $('<span id="immersive-counter" class="immersive-counter">1/1</span>');
+            const $newCounter = $('<span id="immersive-counter" class="immersive-counter">1/2</span>');
             $(this).replaceWith($newCounter);
-            $newCounter.on('click', showFloorInput);
+            $newCounter.on('click', showPageInput);
             updateNavigationButtons();
         }
     });
@@ -289,42 +352,13 @@ function updateMenuButtonState() {
     $button.find('.extensionsMenuExtensionButton').removeClass('fa-eye fa-eye-slash').addClass(iconClass);
 }
 
-function findLastAIMessage() {
-    const messages = $('#chat .mes');
-    for (let i = messages.length - 1; i >= 0; i--) {
-        const $message = $(messages[i]);
-        if (!$message.hasClass('is_user')) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-function onMessageUpdate() {
-    const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-    if (!globalEnabled) return;
-    
-    if (isImmersiveModeActive) {
-        setTimeout(() => {
-            const lastAIMessageIndex = findLastAIMessage();
-            if (lastAIMessageIndex !== -1) {
-                currentDisplayFloor = lastAIMessageIndex;
-            } else if (currentDisplayFloor === -1) {
-                currentDisplayFloor = -1;
-            }
-
-            updateMessageDisplay();
-        }, 100);
-    }
-}
-
 function onChatChanged() {
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     if (!globalEnabled) return;
     
     if (isImmersiveModeActive) {
-        currentDisplayFloor = -1;
         setTimeout(() => {
+            startChatObserver();
             updateMessageDisplay();
             showNavigationButtons();
         }, 100);
