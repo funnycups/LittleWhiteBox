@@ -232,17 +232,13 @@ function showNavigationButtons() {
     if ($('#immersive-navigation').length === 0) {
         const navigationHtml = `
             <div id="immersive-navigation" class="immersive-navigation">
-                <button id="immersive-swipe-left" class="immersive-nav-btn" title="左滑">
+                <button id="immersive-swipe-left" class="immersive-nav-btn" title="左滑消息">
                     <i class="fa-solid fa-chevron-left"></i>
                 </button>
-                <button id="immersive-up" class="immersive-nav-btn" title="上一页">
-                    <i class="fa-solid fa-chevron-up"></i>
+                <button id="immersive-toggle" class="immersive-nav-btn" title="切换显示模式">
+                    <i class="fa-solid fa-expand"></i>
                 </button>
-                <span id="immersive-counter" class="immersive-counter">1/2</span>
-                <button id="immersive-down" class="immersive-nav-btn" title="下一页">
-                    <i class="fa-solid fa-chevron-down"></i>
-                </button>
-                <button id="immersive-swipe-right" class="immersive-nav-btn" title="右滑">
+                <button id="immersive-swipe-right" class="immersive-nav-btn" title="右滑消息">
                     <i class="fa-solid fa-chevron-right"></i>
                 </button>
             </div>
@@ -251,11 +247,9 @@ function showNavigationButtons() {
         $('#chat').after(navigationHtml);
 
         const navActions = {
-            '#immersive-up': () => navigate(-1),
-            '#immersive-down': () => navigate(1),
             '#immersive-swipe-left': () => handleSwipe('.swipe_left'),
-            '#immersive-swipe-right': () => handleSwipe('.swipe_right'),
-            '#immersive-counter': showPageInput
+            '#immersive-toggle': toggleDisplayMode,
+            '#immersive-swipe-right': () => handleSwipe('.swipe_right')
         };
 
         Object.entries(navActions).forEach(([selector, handler]) => {
@@ -274,28 +268,25 @@ function updateNavigationButtons() {
     if (!isImmersiveModeActive) return;
     
     const settings = getImmersiveSettings();
-    const currentPage = settings.showAllMessages ? 1 : 2;
+    const $toggleBtn = $('#immersive-toggle');
     
-    $('#immersive-counter').text(`${currentPage}/2`);
-    $('#immersive-up').prop('disabled', currentPage <= 1);
-    $('#immersive-down').prop('disabled', currentPage >= 2);
+    if (settings.showAllMessages) {
+        $toggleBtn.find('i').removeClass('fa-expand').addClass('fa-compress');
+        $toggleBtn.attr('title', '切换到单层模式');
+    } else {
+        $toggleBtn.find('i').removeClass('fa-compress').addClass('fa-expand');
+        $toggleBtn.attr('title', '切换到多层模式');
+    }
 }
 
-function navigate(direction) {
+function toggleDisplayMode() {
     if (!isImmersiveModeActive) return;
     
     const settings = getImmersiveSettings();
-    const currentPage = settings.showAllMessages ? 1 : 2;
+    settings.showAllMessages = !settings.showAllMessages;
     
-    if (direction === -1 && currentPage > 1) {
-        settings.showAllMessages = true;
-        updateMessageDisplay();
-        saveSettingsDebounced();
-    } else if (direction === 1 && currentPage < 2) {
-        settings.showAllMessages = false;
-        updateMessageDisplay();
-        saveSettingsDebounced();
-    }
+    updateMessageDisplay();
+    saveSettingsDebounced();
 }
 
 function handleSwipe(swipeSelector) {
@@ -306,39 +297,6 @@ function handleSwipe(swipeSelector) {
     if (swipeBtn.length > 0) {
         swipeBtn.click();
     }
-}
-
-function showPageInput() {
-    if (!isImmersiveModeActive) return;
-
-    const $counter = $('#immersive-counter');
-    const settings = getImmersiveSettings();
-    const currentPage = settings.showAllMessages ? 1 : 2;
-    const $input = $(`<input type="number" class="immersive-floor-input" min="1" max="2" value="${currentPage}">`);
-
-    $counter.replaceWith($input);
-    $input.focus().select();
-
-    $input.on('blur keydown', function(e) {
-        const shouldApply = e.type === 'blur' || e.key === 'Enter';
-        const shouldCancel = e.key === 'Escape';
-        
-        if (shouldApply || shouldCancel) {
-            if (shouldApply && !shouldCancel) {
-                const inputValue = parseInt($(this).val());
-                if (inputValue === 1 || inputValue === 2) {
-                    settings.showAllMessages = (inputValue === 1);
-                    updateMessageDisplay();
-                    saveSettingsDebounced();
-                }
-            }
-
-            const $newCounter = $('<span id="immersive-counter" class="immersive-counter">1/2</span>');
-            $(this).replaceWith($newCounter);
-            $newCounter.on('click', showPageInput);
-            updateNavigationButtons();
-        }
-    });
 }
 
 function updateMenuButtonState() {
