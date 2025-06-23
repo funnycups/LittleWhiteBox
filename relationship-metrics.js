@@ -301,7 +301,12 @@ class TextAnalysisEngine {
     updateUserSettings(userSettings) {
         this.userSettings = userSettings;
     }
-
+    getCurrentCharacterName() {
+        if (this_chid && characters[this_chid]) {
+            return characters[this_chid].name;
+        }
+        return null;
+    }
     filterXmlTags(text) {
         if (!text || typeof text !== 'string') return text;
 
@@ -418,17 +423,6 @@ class TextAnalysisEngine {
                 } else if (gender === 'male') {
                     this.pronounMapping.set('他', lastMentionedPerson);
                     lastMentionedMale = lastMentionedPerson;
-                } else {
-                    const isFemale = /女|妹|姐|妈|娘|婆|媳|嫂|姑|妮|娜|花|莉|美|芳|红|玲|珍/.test(lastMentionedPerson);
-                    const isMale = /男|哥|弟|爸|父|公|叔|伯|爷|子|郎|峰|强|刚|伟|明|军|杰|宏/.test(lastMentionedPerson);
-
-                    if (isFemale) {
-                        this.pronounMapping.set('她', lastMentionedPerson);
-                        lastMentionedFemale = lastMentionedPerson;
-                    } else if (isMale) {
-                        this.pronounMapping.set('他', lastMentionedPerson);
-                        lastMentionedMale = lastMentionedPerson;
-                    }
                 }
             }
 
@@ -734,7 +728,7 @@ class TextAnalysisEngine {
     }
 
     findSpeakerInText(text, defaultSpeaker, trackedNames) {
-        if (!text) return defaultSpeaker;
+        if (!text) return null;
 
         const speakerPatterns = [
             /([^，。！？\s]+)(?:说道|说|问道|问|回答道|回答|喊道|叫道|答道|叹道|笑道|冷冷地说)[:：]?\s*["'""''「」『』]/,
@@ -796,12 +790,30 @@ class TextAnalysisEngine {
             }
         }
 
-        return defaultSpeaker;
+        return null;
     }
 
     identifySubjectsInSentence(sentence, names) {
         let subjects = [];
+        const quoteCharsPattern = this.quoteChars.map(char => `\\${char}`).join('');
+        const beforeFirstQuote = sentence.split(new RegExp(`[${quoteCharsPattern}]`))[0];
 
+        if (beforeFirstQuote.includes('我')) {
+
+            const currentCharName = this.getCurrentCharacterName();
+            if (currentCharName && names.includes(currentCharName)) {
+                subjects.push({
+                    name: currentCharName,
+                    role: 'agent',
+                    weight: 1.0,
+                    pattern: 'first_person'
+                });
+            }
+        }
+
+        if (subjects.length > 0) {
+            return subjects;
+        }
         const negativeEmotionWords = /不悦|冷冷地|厌烦|冷淡|不屑|讽刺|嘲讽|反感|不耐烦|讨厌/g;
         const negativeMatches = [...sentence.matchAll(negativeEmotionWords)];
 
@@ -1199,10 +1211,6 @@ class TextAnalysisEngine {
         if (!text.trim()) return stats;
 
         this.pronounMapping.clear();
-        if (characterName) {
-            this.pronounMapping.set('她', characterName);
-            this.pronounMapping.set('他', characterName);
-        }
 
         stats.dialogueCount += (text.match(/[\u201C\u201D\u300C\u300D\u300E\u300F\u301D\u301E\u301F\uFF02\u2033\u2036""][^\u201C\u201D\u300C\u300D\u300E\u300F\u301D\u301E\u301F\uFF02\u2033\u2036""]{3,}[\u201C\u201D\u300C\u300D\u300E\u300F\u301D\u301E\u301F\uFF02\u2033\u2036""]/g) || []).length;
         stats.locationChanges += (text.match(/进入|走进|来到|到达|离开|前往|回到/g) || []).length > 0 ? 1 : 0;
@@ -1238,7 +1246,7 @@ class TextAnalysisEngine {
 
             const dialogueMatch = sentence.match(new RegExp(`[${this.quoteChars.join('')}].*[${this.quoteChars.join('')}]`, 'g'));
             if (dialogueMatch) {
-                const speaker = this.findSpeakerInText(sentence, characterName, trackedNames);
+                const speaker = this.findSpeakerInText(sentence, null, trackedNames);
                 if (speaker) {
                     this.pronounMapping.set('她', speaker);
                     this.pronounMapping.set('他', speaker);
@@ -1431,10 +1439,6 @@ class TextAnalysisEngine {
         const beforeStats = JSON.parse(JSON.stringify(debugStats));
 
         this.pronounMapping.clear();
-        if (characterName) {
-            this.pronounMapping.set('她', characterName);
-            this.pronounMapping.set('他', characterName);
-        }
 
         const relationshipChanges = {};
         trackedNames.forEach(name => {
@@ -1751,10 +1755,6 @@ class TextAnalysisEngine {
         if (!text.trim()) return { relationshipChanges: {}, globalSentiment: 0, events: {} };
 
         this.pronounMapping.clear();
-        if (characterName) {
-            this.pronounMapping.set('她', characterName);
-            this.pronounMapping.set('他', characterName);
-        }
 
         const relationshipChanges = {};
         trackedNames.forEach(name => {
