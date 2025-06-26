@@ -6,7 +6,9 @@
     <div class="inline-drawer-content">
         <div class="settings-menu">
             <div class="menu-tab active" data-target="js-memory">小白X</div>
+            <div class="menu-tab" data-target="wallhaven">AI配图</div>
             <div class="menu-tab" data-target="task">循环任务</div>
+            <div class="menu-tab" data-target="template">模板编辑</div>
             <div class="menu-tab" data-target="instructions">说明指南</div>
         </div>
 
@@ -20,6 +22,13 @@
                 <input type="checkbox" id="xiaobaix_sandbox" />
                 <label for="xiaobaix_sandbox">沙盒模式</label>
             </div>
+            <div class="flex-container">
+                <input type="checkbox" id="xiaobaix_immersive_enabled" />
+                <label for="xiaobaix_immersive_enabled">启用沉浸式显示模式</label>
+                <i class="fa-solid fa-circle-info" title="专注单条消息显示，支持左右滑动切换消息"></i>
+            </div>
+
+
             <div class="flex-container">
                 <input type="checkbox" id="xiaobaix_memory_enabled" />
                 <label for="xiaobaix_memory_enabled">启用数据统计</label>
@@ -61,8 +70,58 @@
                 <p>3. 数据统计：每条消息添加大脑图标，点击查看统计</p>
                 <p>4. 循环任务：自动执行设定好的斜杠命令</p>
                 <p>5. 消息预览：查看AI接收到的完整消息内容</p>
+                <p>6. 模板编辑器：为角色设置输出模板，AI输出会立即用模板渲染</p>
             </div>
 
+        </div>
+
+        <div class="wallhaven settings-section" style="display: none;">
+            <div class="flex-container">
+                <input type="checkbox" id="wallhaven_enabled" />
+                <label for="wallhaven_enabled">启用AI消息配图</label>
+                <i class="fa-solid fa-circle-info" title="AI回复时自动提取消息内容，转换为标签并获取Wallhaven图片作为聊天背景"></i>
+            </div>
+
+            <div class="flex-container">
+                <input type="checkbox" id="wallhaven_bg_mode" />
+                <label for="wallhaven_bg_mode">背景图模式（纯场景，无人物）</label>
+            </div>
+
+            <div class="flex-container">
+                <label for="wallhaven_category">图片分类:</label>
+                <select id="wallhaven_category" class="text_pole">
+                    <option value="010">动漫漫画</option>
+                    <option value="111">全部类型</option>
+                    <option value="001">人物写真</option>
+                    <option value="100">综合壁纸</option>
+                </select>
+            </div>
+
+            <div class="flex-container">
+                <label for="wallhaven_purity">内容分级:</label>
+                <select id="wallhaven_purity" class="text_pole">
+                    <option value="100">仅 SFW</option>
+                    <option value="010">仅 Sketchy (轻微)</option>
+                    <option value="110">SFW + Sketchy</option>
+                    <option value="001">仅 NSFW</option>
+                    <option value="011">Sketchy + NSFW</option>
+                    <option value="111">全部内容</option>
+                </select>
+            </div>
+
+            <div class="flex-container">
+                <label for="wallhaven_opacity">黑纱透明度: <span id="wallhaven_opacity_value">30%</span></label>
+                <input type="range" id="wallhaven_opacity" min="0" max="0.8" step="0.1" value="0.3" class="wide50p" />
+            </div>
+
+            <hr class="sysHR">
+            <div style="font-size:0.9em; opacity:0.8; margin-top:10px;">
+                <p><b>配图说明：</b></p>
+                <p>• 自动从AI消息中提取角色、服装、场景等关键词</p>
+                <p>• 转换为英文标签并搜索Wallhaven图库</p>
+                <p>• 智能匹配最佳图片作为聊天背景</p>
+                <p>• 黑纱效果确保文字清晰可读</p>
+            </div>
         </div>
 
         <div class="task settings-section" style="display: none;">
@@ -125,6 +184,56 @@
             </div>
         </div>
 
+        <div class="template settings-section" style="display: none;">
+            <div class="flex-container">
+                <input type="checkbox" id="xiaobaix_template_enabled" />
+                <label for="xiaobaix_template_enabled">启用模板编辑器</label>
+                <i class="fa-solid fa-circle-info" title="允许为每个角色设置输出模板，AI输出会立即用模板渲染，然后逐渐填充内容"></i>
+            </div>
+
+            <hr class="sysHR" />
+
+            <div id="current_template_settings">
+                <div class="template-replacer-header">
+                    <div class="template-replacer-title">当前角色模板设置</div>
+                    <div class="template-replacer-controls">
+                        <button id="open_template_editor" class="menu_button menu_button_icon">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                            <small>编辑模板</small>
+                        </button>
+                    </div>
+                </div>
+                <div class="template-replacer-status" id="template_character_status">
+                    请选择一个角色
+                </div>
+            </div>
+
+            <hr class="sysHR" />
+
+            <div class="flex-container">
+                <button id="export_template_settings" class="menu_button menu_button_icon" type="button">
+                    <i class="fa-solid fa-download"></i> 导出
+                </button>
+                <button id="import_template_settings" class="menu_button menu_button_icon" type="button"
+                    style="margin-left: 10px;">
+                    <i class="fa-solid fa-upload"></i> 导入
+                </button>
+                <input type="file" id="import_template_file" accept=".json" style="display: none;" />
+            </div>
+
+            <hr class="sysHR">
+
+            <div style="font-size:0.9em; opacity:0.8; margin-top:10px;">
+                <p><b>功能说明：</b></p>
+                <p>1. 为角色设置输出模板，AI开始输出时立即显示模板结构</p>
+                <p>2. 使用正则表达式从AI输出中提取变量，默认格式：<code>[变量名]内容[/变量名]</code></p>
+                <p>3. 模板中使用<code>[[变量名]]</code>格式引用变量</p>
+                <p>4. 可为每个变量设置个别占位符，未检测到时显示占位符</p>
+                <p>5. 支持HTML模板，会自动渲染为交互式界面</p>
+                <p>6. 模板设置会随角色卡一起导出/导入</p>
+            </div>
+        </div>
+
         <div class="instructions settings-section" style="display: none;">
             <div style="font-size:0.9em; opacity:0.8; margin-top:10px;">
                 <p><b>使用示例：</b></p>
@@ -151,7 +260,6 @@ document.body.appendChild(button);
         </div>
     </div>
 </div>
-</div>
 
 <div id="task_editor_template" style="display: none;">
     <div class="task_editor">
@@ -163,7 +271,8 @@ document.body.appendChild(button);
             </div>
             <div class="flex1">
                 <label for="task_commands_edit">斜杠命令</label>
-                <textarea class="task_commands_edit text_pole wide100p textarea_compact" placeholder="输入要执行的斜杠命令, eg: /buttons labels=[&quot;男&quot;,&quot;女&quot;] 你是？ | /echo 你选择了：{{pipe}}"></textarea>
+                <textarea class="task_commands_edit text_pole wide100p textarea_compact"
+                    placeholder="输入要执行的斜杠命令, eg: /buttons labels=[&quot;男&quot;,&quot;女&quot;] 你是？ | /echo 你选择了：{{pipe}}"></textarea>
             </div>
             <div class="flex-container">
                 <div class="flex1">
@@ -262,5 +371,35 @@ document.body.appendChild(button);
 
     .settings-section {
         padding: 10px 0;
+    }
+
+    .template-replacer-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+
+    .template-replacer-title {
+        font-weight: bold;
+        color: #007acc;
+    }
+
+    .template-replacer-status {
+        padding: 5px 10px;
+        background: #2a2a2a;
+        border-radius: 4px;
+        margin-bottom: 10px;
+        font-size: 0.9em;
+    }
+
+    .template-replacer-status.has-settings {
+        background: #1a4a1a;
+        color: #90ee90;
+    }
+
+    .template-replacer-status.no-character {
+        background: #4a1a1a;
+        color: #ffb3b3;
     }
 </style>

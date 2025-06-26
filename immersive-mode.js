@@ -12,7 +12,6 @@ const defaultSettings = {
 };
 
 let isImmersiveModeActive = false;
-let menuButtonAdded = false;
 let chatObserver = null;
 
 function initImmersiveMode() {
@@ -31,15 +30,14 @@ function initImmersiveMode() {
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     
     if (globalEnabled) {
-        addMenuButton();
-        
         isImmersiveModeActive = settings.enabled;
         
         if (isImmersiveModeActive) {
             enableImmersiveMode();
         }
         
-        updateMenuButtonState();
+        // 綁定settings頁面的checkbox事件
+        bindSettingsEvents();
     }
     
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
@@ -48,48 +46,39 @@ function initImmersiveMode() {
     console.log(`[${EXT_ID}] 沉浸式显示模式功能已加载`);
 }
 
+function bindSettingsEvents() {
+    // 等待DOM加載完成後綁定事件
+    setTimeout(() => {
+        const checkbox = document.getElementById('xiaobaix_immersive_enabled');
+        if (checkbox) {
+            // 初始化checkbox狀態
+            const settings = getImmersiveSettings();
+            checkbox.checked = settings.enabled;
+            
+            // 綁定change事件
+            checkbox.addEventListener('change', function() {
+                toggleImmersiveMode();
+            });
+        }
+    }, 500);
+}
+
 function handleGlobalStateChange(event) {
     const globalEnabled = event.detail.enabled;
     
     if (globalEnabled) {
-        addMenuButton();
-        
         const settings = getImmersiveSettings();
         if (settings.enabled) {
             isImmersiveModeActive = true;
             enableImmersiveMode();
         }
+        bindSettingsEvents();
     } else {
         if (isImmersiveModeActive) {
             disableImmersiveMode();
         }
-        
-        removeMenuButton();
         isImmersiveModeActive = false;
     }
-    
-    updateMenuButtonState();
-}
-
-function addMenuButton() {
-    if (!menuButtonAdded && $('#immersive-mode-toggle').length === 0) {
-        const buttonHtml = `
-            <div id="immersive-mode-toggle" class="list-group-item flex-container flexGap5" title="切换沉浸式显示模式">
-                <div class="fa-solid fa-eye extensionsMenuExtensionButton"></div>
-                <span>沉浸式模式</span>
-            </div>
-        `;
-        $('#extensionsMenu').append(buttonHtml);
-        
-        $('#immersive-mode-toggle').on('click', toggleImmersiveMode);
-        
-        menuButtonAdded = true;
-    }
-}
-
-function removeMenuButton() {
-    $('#immersive-mode-toggle').remove();
-    menuButtonAdded = false;
 }
 
 function getImmersiveSettings() {
@@ -104,6 +93,12 @@ function toggleImmersiveMode() {
     settings.enabled = !settings.enabled;
     isImmersiveModeActive = settings.enabled;
     
+    // 同步更新checkbox狀態
+    const checkbox = document.getElementById('xiaobaix_immersive_enabled');
+    if (checkbox) {
+        checkbox.checked = settings.enabled;
+    }
+    
     if (isImmersiveModeActive) {
         enableImmersiveMode();
     } else {
@@ -111,7 +106,6 @@ function toggleImmersiveMode() {
     }
     
     saveSettingsDebounced();
-    updateMenuButtonState();
 }
 
 function enableImmersiveMode() {
@@ -133,6 +127,7 @@ function disableImmersiveMode() {
     stopChatObserver();
 }
 
+// 其他函數保持不變...
 function startChatObserver() {
     if (chatObserver) {
         stopChatObserver();
@@ -148,7 +143,6 @@ function startChatObserver() {
             if (mutation.type === 'childList') {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE && node.classList && node.classList.contains('mes')) {
-                        // 檢查是否為AI消息：is_user="false" 且 is_system="false"
                         const isUser = node.getAttribute('is_user') === 'true';
                         const isSystem = node.getAttribute('is_system') === 'true';
                         
@@ -160,7 +154,6 @@ function startChatObserver() {
                 });
             }
             
-            // 監聽內容變化（打字效果等）
             if (mutation.type === 'subtree' || mutation.type === 'characterData') {
                 const target = mutation.target;
                 if (target && target.closest) {
@@ -308,17 +301,6 @@ function handleSwipe(swipeSelector) {
     }
 }
 
-function updateMenuButtonState() {
-    const $button = $('#immersive-mode-toggle');
-    if ($button.length === 0) return;
-    
-    const settings = getImmersiveSettings();
-    const iconClass = settings.enabled ? 'fa-eye-slash' : 'fa-eye';
-    
-    $button.toggleClass('active', settings.enabled);
-    $button.find('.extensionsMenuExtensionButton').removeClass('fa-eye fa-eye-slash').addClass(iconClass);
-}
-
 function onChatChanged() {
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     if (!globalEnabled) return;
@@ -332,4 +314,4 @@ function onChatChanged() {
     }
 }
 
-export { initImmersiveMode };
+export { initImmersiveMode, toggleImmersiveMode };

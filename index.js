@@ -5,6 +5,8 @@ import { initTasks } from "./scheduledTasks.js";
 import { initScriptAssistant } from "./scriptAssistant.js";
 import { initMessagePreview, addHistoryButtonsDebounced } from "./message-preview.js";
 import { initImmersiveMode } from "./immersive-mode.js";
+import { initTemplateEditor, templateSettings } from "./template-editor.js";
+import { initWallhavenBackground } from "./wallhaven-background.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
@@ -48,17 +50,28 @@ function shouldRenderContent(content) {
 
 function createIframeApi() {
     return `
+    // 重写 document.getElementById 以防止错误
+    const originalGetElementById = document.getElementById;
+    document.getElementById = function(id) {
+        try {
+            return originalGetElementById.call(document, id);
+        } catch(e) {
+            console.warn('Element not found:', id);
+            return null;
+        }
+    };
+
     window.STBridge = {
         sendMessageToST: function(type, data = {}) {
             try {
                 window.parent.postMessage({
                     source: 'xiaobaix-iframe',
-                    type: type, 
+                    type: type,
                     ...data
                 }, '*');
             } catch(e) {}
         },
-        
+
         updateHeight: function() {
             try {
                 const height = document.body.scrollHeight;
@@ -143,6 +156,12 @@ function createIframeApi() {
         });
     }
     
+    // 添加全局错误处理
+    window.addEventListener('error', function(e) {
+        console.warn('Iframe error caught:', e.message);
+        return true; // 阻止错误冒泡
+    });
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
             setupAutoResize();
@@ -264,7 +283,15 @@ function renderHtmlInIframe(htmlContent, container, preElement) {
         
         const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
         iframeDoc.open();
-        iframeDoc.write(prepareHtmlContent(htmlContent));
+
+        try {
+            iframeDoc.write(prepareHtmlContent(htmlContent));
+        } catch (writeError) {
+            console.warn('[小白X] iframe 内容写入警告:', writeError.message);
+            // 尝试写入简化的内容
+            iframeDoc.write(`<html><body><p>内容渲染出现问题，请检查HTML格式</p></body></html>`);
+        }
+
         iframeDoc.close();
         
         return iframe;
@@ -278,7 +305,7 @@ function toggleSettingsControls(enabled) {
     const controls = [
         'xiaobaix_sandbox', 'xiaobaix_memory_enabled', 'xiaobaix_memory_inject', 
         'xiaobaix_memory_depth', 'xiaobaix_recorded_enabled', 'xiaobaix_preview_enabled',
-        'xiaobaix_script_assistant', 'scheduled_tasks_enabled'
+        'xiaobaix_script_assistant', 'scheduled_tasks_enabled', 'xiaobaix_template_enabled'
     ];
     
     controls.forEach(id => {
@@ -309,7 +336,8 @@ function saveCurrentSettings() {
         recordedEnabled: extension_settings[EXT_ID].recorded?.enabled,
         previewEnabled: extension_settings[EXT_ID].preview?.enabled,
         scriptAssistantEnabled: extension_settings[EXT_ID].scriptAssistant?.enabled,
-        scheduledTasksEnabled: extension_settings[EXT_ID].tasks?.enabled
+        scheduledTasksEnabled: extension_settings[EXT_ID].tasks?.enabled,
+        templateEnabled: extension_settings[EXT_ID].templateEditor?.enabled
     };
 }
 
@@ -335,7 +363,8 @@ function restoreSettings() {
         { key: 'recordedEnabled', module: 'recorded', control: 'xiaobaix_recorded_enabled' },
         { key: 'previewEnabled', module: 'preview', control: 'xiaobaix_preview_enabled' },
         { key: 'scriptAssistantEnabled', module: 'scriptAssistant', control: 'xiaobaix_script_assistant' },
-        { key: 'scheduledTasksEnabled', module: 'tasks', control: 'scheduled_tasks_enabled' }
+        { key: 'scheduledTasksEnabled', module: 'tasks', control: 'scheduled_tasks_enabled' },
+        { key: 'templateEnabled', module: 'templateEditor', control: 'xiaobaix_template_enabled' }
     ];
     
     moduleSettings.forEach(({ key, module, control }) => {
@@ -379,14 +408,14 @@ function toggleAllFeatures(enabled) {
             sandboxMode: false, memoryEnabled: false, memoryInjectEnabled: false
         });
         
-        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive'].forEach(module => {
+        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive', 'templateEditor'].forEach(module => {
             if (!extension_settings[EXT_ID][module]) extension_settings[EXT_ID][module] = {};
             extension_settings[EXT_ID][module].enabled = false;
         });
         
         ["xiaobaix_sandbox", "xiaobaix_memory_enabled", "xiaobaix_memory_inject", 
          "xiaobaix_recorded_enabled", "xiaobaix_preview_enabled", "xiaobaix_script_assistant", 
-         "scheduled_tasks_enabled"].forEach(id => $(`#${id}`).prop("checked", false));
+         "scheduled_tasks_enabled", "xiaobaix_template_enabled"].forEach(id => $(`#${id}`).prop("checked", false));
         
         toggleSettingsControls(false);
         document.querySelectorAll('iframe.xiaobaix-iframe').forEach(iframe => iframe.remove());
@@ -434,6 +463,10 @@ function processExistingMessages() {
             const messageId = $(this).attr('mesid');
             if (messageId) statsTracker.addMemoryButtonToMessage(messageId);
         });
+    }
+    
+    if (templateSettings.get().enabled) {
+        // Template processing is handled by template-editor.js
     }
 }
 
@@ -591,6 +624,9 @@ function setupEventListeners() {
     window.addEventListener('message', handleIframeMessage);
 }
 
+window.processExistingMessages = processExistingMessages;
+window.renderHtmlInIframe = renderHtmlInIframe;
+
 jQuery(async () => {
     try {
         isXiaobaixEnabled = settings.enabled;
@@ -609,6 +645,8 @@ jQuery(async () => {
         initTasks();
         initScriptAssistant();
         initImmersiveMode();
+        initTemplateEditor();
+        initWallhavenBackground();
         
         setTimeout(setupMenuTabs, 500);
         setTimeout(initMessagePreview, 1500);
