@@ -142,31 +142,43 @@ function startChatObserver() {
     if (!chatContainer) return;
     
     chatObserver = new MutationObserver((mutations) => {
-        let hasNewMessage = false;
-        let hasAIMessage = false;
+        let hasValidAIMessage = false;
         
         mutations.forEach((mutation) => {
             if (mutation.type === 'childList') {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE && node.classList && node.classList.contains('mes')) {
-                        hasNewMessage = true;
-                        if (!node.classList.contains('is_user')) {
-                            hasAIMessage = true;
+                        // 檢查是否為AI消息：is_user="false" 且 is_system="false"
+                        const isUser = node.getAttribute('is_user') === 'true';
+                        const isSystem = node.getAttribute('is_system') === 'true';
+                        
+                        if (!isUser && !isSystem) {
+                            hasValidAIMessage = true;
+                            console.log('[小白X] 檢測到AI消息，準備切換頁面');
                         }
                     }
                 });
             }
             
+            // 監聽內容變化（打字效果等）
             if (mutation.type === 'subtree' || mutation.type === 'characterData') {
                 const target = mutation.target;
-                if (target && target.closest && target.closest('.mes:not(.is_user)')) {
-                    hasAIMessage = true;
+                if (target && target.closest) {
+                    const mesElement = target.closest('.mes');
+                    if (mesElement) {
+                        const isUser = mesElement.getAttribute('is_user') === 'true';
+                        const isSystem = mesElement.getAttribute('is_system') === 'true';
+                        
+                        if (!isUser && !isSystem) {
+                            hasValidAIMessage = true;
+                        }
+                    }
                 }
             }
         });
         
-        if (hasNewMessage || hasAIMessage) {
-            handleChatUpdate(hasAIMessage);
+        if (hasValidAIMessage) {
+            handleChatUpdate();
         }
     });
     
@@ -175,30 +187,27 @@ function startChatObserver() {
         subtree: true,
         characterData: true
     });
-    
-    console.log('[小白X] 开始监听聊天DOM变化');
 }
 
 function stopChatObserver() {
     if (chatObserver) {
         chatObserver.disconnect();
         chatObserver = null;
-        console.log('[小白X] 停止监听聊天DOM变化');
     }
 }
 
-function handleChatUpdate(hasAIMessage) {
+function handleChatUpdate() {
     if (!isImmersiveModeActive) return;
     
     const settings = getImmersiveSettings();
     
-    if (settings.autoJumpOnAI && hasAIMessage) {
-        console.log('[小白X] 检测到AI消息，切换到最新消息模式');
-        settings.showAllMessages = false;
-        saveSettingsDebounced();
+    if (settings.autoJumpOnAI && !settings.showAllMessages) {
+        console.log('[小白X] AI消息檢測，保持單個消息顯示模式');
+        updateMessageDisplay();
+    } else if (settings.showAllMessages) {
+        console.log('[小白X] AI消息檢測，但當前為多層模式，不進行跳轉');
+        updateMessageDisplay();
     }
-    
-    updateMessageDisplay();
 }
 
 function updateMessageDisplay() {
