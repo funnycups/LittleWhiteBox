@@ -426,6 +426,37 @@ const wallhavenTags = {
 
 let isProcessing = false;
 let currentProgressButton = null;
+let processedMessages = new Set();
+let currentImageUrl = null;
+let currentSettings = null;
+let lastScreenSize = null;
+
+function getCurrentScreenSize() {
+    return window.innerWidth <= 1000 ? 'small' : 'large';
+}
+
+function handleWindowResize() {
+    const currentScreenSize = getCurrentScreenSize();
+    
+    if (lastScreenSize && lastScreenSize !== currentScreenSize && currentImageUrl && currentSettings) {
+        console.log(`[小白X] 屏幕尺寸变化: ${lastScreenSize} → ${currentScreenSize}，重新应用背景`);
+        
+        $('#wallhaven-app-background, #wallhaven-chat-background').remove();
+        $('#wallhaven-app-overlay, #wallhaven-chat-overlay').remove();
+        
+        applyBackgroundToApp(currentImageUrl, currentSettings);
+    }
+    
+    lastScreenSize = currentScreenSize;
+}
+
+function clearBackgroundState() {
+    $('#wallhaven-app-background, #wallhaven-chat-background').remove();
+    $('#wallhaven-app-overlay, #wallhaven-chat-overlay').remove();
+    currentImageUrl = null;
+    currentSettings = null;
+    lastScreenSize = null;
+}
 
 function getWallhavenSettings() {
     if (!extension_settings[EXT_ID].wallhavenBackground) {
@@ -727,17 +758,28 @@ function applyMessageStyling() {
 }
 
 function applyBackgroundToApp(imageUrl, settings) {
-    const expressionWrapper = document.getElementById('expression-wrapper');
-    if (!expressionWrapper) return;
+    currentImageUrl = imageUrl;
+    currentSettings = { ...settings };
+    lastScreenSize = getCurrentScreenSize();
+    
+    const isSmallScreen = window.innerWidth <= 1000;
+    const targetContainer = isSmallScreen ? 
+        document.getElementById('chat') : 
+        document.getElementById('expression-wrapper');
+    
+    if (!targetContainer) return;
 
-    let backgroundContainer = document.getElementById('wallhaven-app-background');
-    let overlay = document.getElementById('wallhaven-app-overlay');
+    const bgId = isSmallScreen ? 'wallhaven-chat-background' : 'wallhaven-app-background';
+    const overlayId = isSmallScreen ? 'wallhaven-chat-overlay' : 'wallhaven-app-overlay';
+
+    let backgroundContainer = document.getElementById(bgId);
+    let overlay = document.getElementById(overlayId);
 
     if (!backgroundContainer) {
         backgroundContainer = document.createElement('div');
-        backgroundContainer.id = 'wallhaven-app-background';
+        backgroundContainer.id = bgId;
         backgroundContainer.style.cssText = `
-            position: fixed;
+            position: ${isSmallScreen ? 'absolute' : 'fixed'};
             top: 0;
             left: 0;
             right: 0;
@@ -745,51 +787,64 @@ function applyBackgroundToApp(imageUrl, settings) {
             background-size: 100% auto;
             background-position: top center;
             background-repeat: no-repeat;
-            z-index: 1;
+            z-index: ${isSmallScreen ? '-2' : '1'};
             pointer-events: none;
         `;
-        expressionWrapper.insertBefore(backgroundContainer, expressionWrapper.firstChild);
+        targetContainer.insertBefore(backgroundContainer, targetContainer.firstChild);
     }
 
     if (!overlay) {
         overlay = document.createElement('div');
-        overlay.id = 'wallhaven-app-overlay';
+        overlay.id = overlayId;
         overlay.style.cssText = `
-            position: fixed;
+            position: ${isSmallScreen ? 'absolute' : 'fixed'};
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
             background-color: rgba(0, 0, 0, ${settings.opacity});
-            z-index: 2;
+            z-index: ${isSmallScreen ? '-1' : '2'};
             pointer-events: none;
         `;
-        expressionWrapper.insertBefore(overlay, expressionWrapper.firstChild);
+        targetContainer.insertBefore(overlay, targetContainer.firstChild);
     }
 
     backgroundContainer.style.backgroundImage = `url("${imageUrl}")`;
     overlay.style.backgroundColor = `rgba(0, 0, 0, ${settings.opacity})`;
     
-    expressionWrapper.style.position = 'relative';
+    targetContainer.style.position = 'relative';
     
-    const chatElement = document.getElementById('chat');
-    if (chatElement) {
-        chatElement.style.cssText += `
-            background-color: transparent !important;
-            background-image: none !important;
-            background: transparent !important;
-            position: relative;
-            z-index: 3;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-            box-shadow: none !important;
-            border: none !important;
-            text-shadow: none !important;
-            opacity: 1 !important;
-        `;
+    if (isSmallScreen) {
+        const chatElement = document.getElementById('chat');
+        if (chatElement) {
+            chatElement.style.cssText += `
+                background-color: transparent !important;
+                background-image: none !important;
+                background: transparent !important;
+                position: relative;
+                z-index: 3;
+            `;
+        }
+        applyMessageStyling();
+    } else {
+        const chatElement = document.getElementById('chat');
+        if (chatElement) {
+            chatElement.style.cssText += `
+                background-color: transparent !important;
+                background-image: none !important;
+                background: transparent !important;
+                position: relative;
+                z-index: 3;
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+                box-shadow: none !important;
+                border: none !important;
+                text-shadow: none !important;
+                opacity: 1 !important;
+            `;
+        }
+        applyMessageStyling();
     }
-    
-    applyMessageStyling();
 }
 
 function isMessageComplete(messageElement) {
@@ -820,6 +875,8 @@ async function handleAIMessage(data) {
         const messageId = data.messageId || data;
         if (!messageId) return;
         
+        if (processedMessages.has(messageId)) return;
+        
         const messageElement = document.querySelector(`div.mes[mesid="${messageId}"]`);
         if (!messageElement || messageElement.classList.contains('is_user')) return;
         
@@ -839,6 +896,8 @@ async function handleAIMessage(data) {
         
         const messageText = mesText.textContent || '';
         if (!messageText.trim() || messageText.length < 10) return;
+        
+        processedMessages.add(messageId);
         
         showProgressInMessageHeader(messageElement, '提取标签中...');
         
@@ -897,9 +956,9 @@ function initSettingsEvents() {
         settings.enabled = $(this).prop('checked');
         saveSettingsDebounced();
         if (!settings.enabled) {
-            $('#wallhaven-app-background').remove();
-            $('#wallhaven-app-overlay').remove();
+            clearBackgroundState();
             removeProgressFromMessageHeader();
+            processedMessages.clear();
         }
     });
     
@@ -925,7 +984,7 @@ function initSettingsEvents() {
         if (!window.isXiaobaixEnabled) return;
         settings.opacity = parseFloat($(this).val());
         $('#wallhaven_opacity_value').text(Math.round(settings.opacity * 100) + '%');
-        $('#wallhaven-app-overlay').css('background-color', `rgba(0, 0, 0, ${settings.opacity})`);
+        $('#wallhaven-app-overlay, #wallhaven-chat-overlay').css('background-color', `rgba(0, 0, 0, ${settings.opacity})`);
         saveSettingsDebounced();
     });
     
@@ -970,9 +1029,9 @@ function handleGlobalStateChange(event) {
         updateSettingsControls();
         initSettingsEvents();
     } else {
-        $('#wallhaven-app-background').remove();
-        $('#wallhaven-app-overlay').remove();
+        clearBackgroundState();
         removeProgressFromMessageHeader();
+        processedMessages.clear();
         
         $('#wallhaven_enabled, #wallhaven_bg_mode, #wallhaven_category, #wallhaven_purity, #wallhaven_opacity, #wallhaven_add_custom_tag').off();
         $('#wallhaven_custom_tag_input').off();
@@ -1001,10 +1060,18 @@ function initWallhavenBackground() {
     document.addEventListener('xiaobaixEnabledChanged', handleGlobalStateChange);
     
     eventSource.on(event_types.CHAT_CHANGED, () => {
-        $('#wallhaven-app-background').remove();
-        $('#wallhaven-app-overlay').remove();
+        processedMessages.clear();
+        clearBackgroundState();
         removeProgressFromMessageHeader();
     });
+    
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(handleWindowResize, 300);
+    });
+    
+    lastScreenSize = getCurrentScreenSize();
 }
 
 export { initWallhavenBackground };

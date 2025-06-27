@@ -50,7 +50,6 @@ function shouldRenderContent(content) {
 
 function createIframeApi() {
     return `
-    // 重写 document.getElementById 以防止错误
     const originalGetElementById = document.getElementById;
     document.getElementById = function(id) {
         try {
@@ -156,10 +155,9 @@ function createIframeApi() {
         });
     }
     
-    // 添加全局错误处理
     window.addEventListener('error', function(e) {
         console.warn('Iframe error caught:', e.message);
-        return true; // 阻止错误冒泡
+        return true;
     });
 
     if (document.readyState === 'loading') {
@@ -288,7 +286,6 @@ function renderHtmlInIframe(htmlContent, container, preElement) {
             iframeDoc.write(prepareHtmlContent(htmlContent));
         } catch (writeError) {
             console.warn('[小白X] iframe 内容写入警告:', writeError.message);
-            // 尝试写入简化的内容
             iframeDoc.write(`<html><body><p>内容渲染出现问题，请检查HTML格式</p></body></html>`);
         }
 
@@ -469,10 +466,8 @@ function processExistingMessages() {
     }
     
     if (templateSettings.get().enabled) {
-        // Template processing is handled by template-editor.js
     }
 }
-
 
 async function setupSettings() {
     try {
@@ -523,7 +518,6 @@ async function setupSettings() {
             statsTracker.removeMemoryPrompt();
             
             if (settings.memoryEnabled && settings.memoryInjectEnabled) {
-
                 statsTracker.updateMemoryPrompt();
             }
         });
@@ -558,6 +552,8 @@ function setupMenuTabs() {
 }
 
 function setupEventListeners() {
+    if (!isXiaobaixEnabled) return;
+    
     const { eventSource, event_types } = getContext();
     
     const handleMessage = async (data, isReceived = false) => {
@@ -587,9 +583,22 @@ function setupEventListeners() {
     eventSource.on(event_types.USER_MESSAGE_RENDERED, handleMessage);
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, handleMessage);
     
+    if (event_types.MESSAGE_SWIPED) {
+        eventSource.on(event_types.MESSAGE_SWIPED, handleMessage);
+    }
+    if (event_types.MESSAGE_EDITED) {
+        eventSource.on(event_types.MESSAGE_EDITED, handleMessage);
+    }
+    if (event_types.MESSAGE_UPDATED) {
+        eventSource.on(event_types.MESSAGE_UPDATED, handleMessage);
+    }
+    
     eventSource.on(event_types.CHAT_CHANGED, async () => {
-        if (!settings.memoryEnabled || !isXiaobaixEnabled) return;
-
+        if (!isXiaobaixEnabled) return;
+        
+        setTimeout(() => processExistingMessages(), 200);
+        
+        if (!settings.memoryEnabled) return;
         setTimeout(async () => {
             try {
                 let stats = await executeSlashCommand('/getvar xiaobaix_stats');
