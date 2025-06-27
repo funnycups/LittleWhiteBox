@@ -1,6 +1,5 @@
 import { extension_settings, getContext, writeExtensionField } from "../../../extensions.js";
-import { renderTemplateAsync } from "../../../templates.js";
-import { saveSettingsDebounced, eventSource, event_types, characters, this_chid, chat, updateMessageBlock, substituteParams } from "../../../../script.js";
+import { saveSettingsDebounced, eventSource, event_types, characters, this_chid, updateMessageBlock } from "../../../../script.js";
 import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { selected_group } from "../../../group-chats.js";
 import { findChar, download } from "../../../utils.js";
@@ -417,26 +416,40 @@ class TemplateProcessor {
 
 class IframeManager {
 
-   static createWrapper(content) {
-       const processed = substituteParams(content);
-       const iframeId = `xiaobaix-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+static createWrapper(content) {
+    // 1. 先嘗試套用 substituteParams（如果呼叫端有提供）
+    let processed = content;
+    try {
+        const { substituteParams } = getContext() || {};
+        if (typeof substituteParams === 'function') {
+            processed = substituteParams(content);
+        }
+    } catch (e) {
+        console.warn('[LittleWhiteBox] substituteParams 無法使用：', e);
+    }
 
-       const wrapperHtml = `
-           <div class="xiaobaix-iframe-wrapper" style="margin: 10px 0px;">
-               <iframe id="${iframeId}" class="xiaobaix-iframe"
-                   style="width: 100%; border: none; background: transparent; overflow: hidden; margin: 0px; padding: 0px; display: block;"
-                   frameborder="0" scrolling="no">
-               </iframe>
-           </div>
-       `;
+    // 2. 產生唯一 iframe-id
+    const iframeId = `xiaobaix-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-       setTimeout(() => {
-           const iframe = document.getElementById(iframeId);
-           if (iframe) this.writeContentToIframe(iframe, processed);
-       }, 0);
+    // 3. 包一層 div 與 iframe
+    const wrapperHtml = `
+        <div class="xiaobaix-iframe-wrapper" style="margin: 10px 0;">
+            <iframe id="${iframeId}" class="xiaobaix-iframe"
+                style="width:100%;border:none;background:transparent;overflow:hidden;margin:0;padding:0;display:block"
+                frameborder="0" scrolling="no"></iframe>
+        </div>
+    `;
 
-       return wrapperHtml;
-   }
+    // 4. 等 DOM 插入後再寫內容進 iframe
+    setTimeout(() => {
+        const iframe = document.getElementById(iframeId);
+        if (iframe) this.writeContentToIframe(iframe, processed);
+    }, 0);
+
+    return wrapperHtml;
+}
+
+
 
    static writeContentToIframe(iframe, content) {
        try {
