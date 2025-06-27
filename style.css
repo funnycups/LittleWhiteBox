@@ -1114,7 +1114,7 @@ input.disable_task {
 
 /* ==================== 沉浸式显示模式样式 ==================== */
 body.immersive-mode #chat {
-   padding: 2% 0 0 0 !important;
+   padding: 0 !important;
    border: 0px !important;
    overflow-y: auto;
    margin: 0 0 -6% 0 !important;
@@ -1127,9 +1127,13 @@ body.immersive-mode .swipeRightBlock {
    display: none !important;
 }
 
+body.immersive-mode .mes {
+   margin: 2% 0 0 0 !important;
+}
+
 body.immersive-mode .mes_block {
    padding-left: 0 !important;
-   margin-left: 2% 0 0 0 !important;
+   margin: 0 !important;
 }
 
 body.immersive-mode .mes_text {
