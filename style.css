@@ -1695,3 +1695,98 @@ body.immersive-mode .mes {
         font-size: 10px;
     }
 }
+/* ==================== auto-backgroung样式 ==================== */
+    .settings-menu {
+        display: flex;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #444;
+    }
+    .menu-tab {
+        flex: 1;
+        padding: 2px 8px;
+        text-align: center;
+        cursor: pointer;
+        color: #ccc;
+        border: none;
+        transition: color 0.2s ease;
+        font-weight: 500;
+    }
+    .menu-tab:hover {
+        color: #fff;
+    }
+    .menu-tab.active {
+        color: #007acc;
+        border-bottom: 2px solid #007acc;
+    }
+    .settings-section {
+        padding: 10px 0;
+    }
+    .template-replacer-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    .template-replacer-title {
+        font-weight: bold;
+        color: #007acc;
+    }
+    .template-replacer-status {
+        padding: 5px 10px;
+        background: #2a2a2a;
+        border-radius: 4px;
+        margin-bottom: 10px;
+        font-size: 0.9em;
+    }
+    .template-replacer-status.has-settings {
+        background: #1a4a1a;
+        color: #90ee90;
+    }
+    .template-replacer-status.no-character {
+        background: #4a1a1a;
+        color: #ffb3b3;
+    }
+    /* 新增自定义标签样式 */
+    .custom-tags-container {
+        margin-top: 10px;
+    }
+    .custom-tags-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+        min-height: 20px;
+        padding: 8px;
+        background: #2a2a2a;
+        border-radius: 4px;
+        border: 1px solid #444;
+    }
+    .custom-tag-item {
+        display: flex;
+        align-items: center;
+        background: #007acc;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        gap: 6px;
+    }
+    .custom-tag-text {
+        font-weight: 500;
+    }
+    .custom-tag-remove {
+        cursor: pointer;
+        color: rgba(255, 255, 255, 0.8);
+        font-weight: bold;
+        transition: color 0.2s ease;
+    }
+    .custom-tag-remove:hover {
+        color: #ff6b6b;
+    }
+    .custom-tags-empty {
+        color: #888;
+        font-style: italic;
+        font-size: 12px;
+        text-align: center;
+        padding: 8px;
+    }
