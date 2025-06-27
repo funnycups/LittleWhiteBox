@@ -7,6 +7,10 @@ pre:has(+ .xiaobaix-iframe) {
     display: none;
 }
 
+.xiaobaix-iframe-wrapper {
+    margin: 10px 0;
+}
+
 .dark-number-input {
    background-color: rgba(0, 0, 0, 0.3) !important;
    color: var(--SmartThemeText) !important;
@@ -52,23 +56,6 @@ pre:has(+ .xiaobaix-iframe) {
 
 .mes_btn.memory-button.has-memory {
     color: var(--SmartThemeAccent);
-}
-
-/* ==================== 调试按钮样式 ==================== */
-.mes_btn.debug-button {
-    opacity: 0.6;
-    transition: all 0.2s ease;
-    color: var(--SmartThemeBodyColor);
-}
-
-.mes_btn.debug-button:hover {
-    opacity: 1;
-    color: var(--SmartThemeAccent);
-    transform: scale(1.05);
-}
-
-.mes_btn.debug-button:active {
-    transform: scale(0.95);
 }
 
 /* ==================== 模态框基础样式 ==================== */
@@ -1012,6 +999,26 @@ pre:has(+ .xiaobaix-iframe) {
     text-align: center;
 }
 
+/* 嵌入任务警告样式 */
+.scheduled-tasks-embedded-warning {
+    padding: 15px;
+    background: var(--SmartThemeBlurTintColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    margin: 10px 0;
+}
+
+.warning-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 8px;
+    background: rgba(255, 193, 7, 0.1);
+    border-left: 3px solid #ffc107;
+    border-radius: 4px;
+}
+
 .task-item {
     align-items: center;
     border: 1px solid var(--SmartThemeBorderColor);
@@ -1107,10 +1114,10 @@ input.disable_task {
 
 /* ==================== 沉浸式显示模式样式 ==================== */
 body.immersive-mode #chat {
-   padding: 0px !important;
+   padding: 2% 0 0 0 !important;
    border: 0px !important;
    overflow-y: auto;
-   margin: 2% 0 -6% 0 !important;
+   margin: 0 0 -6% 0 !important;
 }
 
 body.immersive-mode .mesAvatarWrapper,
@@ -1122,7 +1129,7 @@ body.immersive-mode .swipeRightBlock {
 
 body.immersive-mode .mes_block {
    padding-left: 0 !important;
-   margin-left: 0 !important;
+   margin-left: 2% 0 0 0 !important;
 }
 
 body.immersive-mode .mes_text {
@@ -1177,141 +1184,12 @@ body.immersive-mode .mes {
    cursor: not-allowed;
 }
 
-.immersive-counter,
-.immersive-floor-input {
-   font-size: 11px;
-   color: var(--SmartThemeBodyColor);
-   min-width: 35px;
-   text-align: center;
-   padding: 2px 4px;
-   border-radius: 3px;
-   transition: all 0.2s ease;
-}
-
-.immersive-counter {
-   opacity: 0.8;
-   cursor: pointer;
-}
-
-.immersive-counter:hover {
-   background-color: rgba(var(--SmartThemeBodyColor), 0.2);
-   opacity: 1;
-}
-
-.immersive-floor-input {
-   background-color: rgba(var(--SmartThemeBodyColor), 0.1);
-   border: 1px solid rgba(var(--SmartThemeBodyColor), 0.3);
-   outline: none;
-}
-
-.immersive-floor-input:focus {
-   border-color: var(--SmartThemeQuoteColor);
-   background-color: rgba(var(--SmartThemeBodyColor), 0.2);
-}
-
-/* ==================== Fixed Character Text 样式 ==================== */
-#fixed_character_text_settings {
-    margin: 10px 0;
-}
-
-#character_bindings_container h4 {
-    margin: 15px 0 10px 0;
-    color: inherit;
-}
-
-.fixed_character_text_editor {
-    max-width: 800px;
-    padding: 20px;
-}
-
+/* ==================== 模板编辑器样式 ==================== */
 .xiaobai_template_editor {
     max-height: 80vh;
     overflow-y: auto;
     padding: 20px;
     border-radius: 8px;
-}
-
-.character-binding {
-    margin: 15px 0;
-    padding: 15px;
-    border: 1px solid #444;
-    border-radius: 8px;
-    background-color: rgba(255, 255, 255, 0.03);
-    transition: all 0.2s ease;
-}
-
-.character-binding:hover {
-    background-color: rgba(255, 255, 255, 0.08);
-    border-color: #666;
-}
-
-.character-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.character-label {
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    font-weight: bold;
-}
-
-.character-label input[type="checkbox"] {
-    margin-right: 8px;
-}
-
-.character-name {
-    color: inherit;
-}
-
-.character-status {
-    font-size: 0.8em;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-weight: bold;
-}
-
-.character-status.enabled {
-    background-color: #28a745;
-    color: white;
-}
-
-.character-status.disabled {
-    background-color: #6c757d;
-    color: white;
-}
-
-.character-text-input {
-    margin-top: 10px;
-}
-
-.character-text-input label {
-    font-weight: bold;
-    margin-bottom: 5px;
-    display: block;
-}
-
-.character-custom-text {
-    width: 100%;
-    min-height: 80px;
-    padding: 10px;
-    border: 1px solid #555;
-    border-radius: 5px;
-    background-color: rgba(0, 0, 0, 0.2);
-    color: inherit;
-    font-family: inherit;
-    font-size: 0.9em;
-    resize: vertical;
-    transition: border-color 0.2s ease;
-}
-
-.character-custom-text:focus {
-    outline: none;
-    border-color: #007bff;
-    box-shadow: 0 0 8px rgba(0, 123, 255, 0.4);
 }
 
 .template-replacer-header {
@@ -1346,81 +1224,6 @@ body.immersive-mode .mes {
     color: var(--SmartThemeCheckboxBgColor, #666);
 }
 
-.variables-list {
-    margin: 10px 0;
-    padding: 10px;
-    border: 1px solid var(--SmartThemeBorderColor, #555);
-    border-radius: 8px;
-    background-color: var(--black30a, rgba(0, 0, 0, 0.2));
-}
-
-.variable-item {
-    margin-bottom: 10px;
-}
-
-.variable-item:last-child {
-    margin-bottom: 0;
-}
-
-.variable-item .flex-container {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.variable-name {
-    flex: 1;
-    min-width: 120px;
-}
-
-.variable-placeholder {
-    flex: 1;
-    min-width: 120px;
-}
-
-.remove-variable {
-    flex-shrink: 0;
-    width: auto;
-    padding: 5px 10px;
-}
-
-.button-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 15px;
-}
-
-.button-group .menu_button {
-    flex: 1;
-    min-width: 120px;
-    text-align: center;
-}
-
-.button-group .menu_button i {
-    margin-right: 5px;
-}
-
-.menu_button_icon {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.file-input-label {
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.help-text {
-    font-size: 0.9em;
-    color: var(--SmartThemeQuoteColor, #888);
-    font-style: italic;
-    margin-top: 5px;
-}
-
 .example-text {
     font-size: 0.9em;
     color: var(--SmartThemeQuoteColor, #888);
@@ -1433,23 +1236,6 @@ body.immersive-mode .mes {
 
 .example-text strong {
     color: var(--SmartThemeEmColor);
-}
-
-.variable-item .flex-container {
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 8px;
-}
-
-.variable-item .text_pole {
-    flex: 1;
-    min-width: 100px;
-}
-
-.variable-item .menu_button {
-    flex-shrink: 0;
-    width: 40px;
 }
 
 /* ==================== 消息预览插件样式 ==================== */
@@ -1714,11 +1500,6 @@ body.immersive-mode .mes {
         min-width: 20px;
         font-size: 10px;
     }
-    
-    .immersive-counter {
-        font-size: 10px;
-        min-width: 30px;
-    }
 }
 
 /* 手机端 */
@@ -1890,27 +1671,14 @@ body.immersive-mode .mes {
         flex: 1 !important;
         padding: 10px 12px !important;
     }
-    
-    .fixed_character_text_editor {
-        padding: 10px;
-    }
 
-    .remove-variable {
-        align-self: flex-end;
-    }
-    
     .immersive-navigation {
         gap: 8px;
         height: 30px;
     }
-    
+
     .immersive-nav-btn {
         min-width: 20px;
         font-size: 10px;
-    }
-    
-    .immersive-counter {
-        font-size: 10px;
-        min-width: 30px;
     }
 }
