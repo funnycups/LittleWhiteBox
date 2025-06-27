@@ -1114,7 +1114,7 @@ input.disable_task {
 
 /* ==================== 沉浸式显示模式样式 ==================== */
 body.immersive-mode #chat {
-   padding: 0 !important;
+   padding: 0 0 -6% 0 !important;
    border: 0px !important;
    overflow-y: auto;
    margin: 0 !important;
