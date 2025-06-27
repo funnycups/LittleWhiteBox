@@ -1150,17 +1150,32 @@ body.immersive-mode .mes {
 
 /* 导航按钮容器 */
 .immersive-navigation {
-   display: flex;
-   align-items: center;
-   justify-content: center;
-   background-color: rgba(51, 51, 51, 0.3);
-   border-radius: 25px;
-   margin: 0px auto 0 auto;
-   width: fit-content;
-   max-width: 50%;
-   z-index: 100;
-   height: 25px;
-   box-sizing: border-box;
+    position: absolute;
+    transform: translateX(-50%);
+    left: 50%;
+    bottom: 10%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(51, 51, 51, 0.3);
+    border-radius: 25px;
+    width: fit-content;
+    max-width: 50%;
+    z-index: 100;
+    height: 25px;
+    box-sizing: border-box;
+}
+
+@media (max-width: 450px) {
+    .immersive-navigation {
+        bottom: 10%;
+    }
+}
+
+@media (min-width: 451px) {
+    .immersive-navigation {
+        bottom: 5%;
+    }
 }
 
 .immersive-nav-btn {
