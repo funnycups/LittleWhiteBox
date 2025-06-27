@@ -1,3 +1,4 @@
+
 <div class="inline-drawer">
     <div class="inline-drawer-toggle inline-drawer-header">
         <b>小白X</b>
@@ -6,10 +7,9 @@
     <div class="inline-drawer-content">
         <div class="settings-menu">
             <div class="menu-tab active" data-target="js-memory">小白X</div>
-            <div class="menu-tab" data-target="wallhaven">AI配图</div>
+            <div class="menu-tab" data-target="wallhaven">自动插图</div>
             <div class="menu-tab" data-target="task">循环任务</div>
-            <div class="menu-tab" data-target="template">模板编辑</div>
-            <div class="menu-tab" data-target="instructions">说明指南</div>
+            <div class="menu-tab" data-target="template">沉浸式模板</div>
         </div>
 
         <div class="js-memory settings-section" style="display: block;">
@@ -69,7 +69,7 @@
                 <p>3. 数据统计：每条消息添加大脑图标，点击查看统计</p>
                 <p>4. 循环任务：自动执行设定好的斜杠命令</p>
                 <p>5. 消息预览：查看AI接收到的完整消息内容</p>
-                <p>6. 模板编辑器：为角色设置输出模板，AI输出会立即用模板渲染</p>
+                <p>6. 沉浸式模板：为角色设置输出模板，随流式输出动态渲染</p>
             </div>
 
         </div>
@@ -112,7 +112,7 @@
 
             <div class="flex-container">
                 <label><strong>自定义标签</strong></label>
-                <i class="fa-solid fa-circle-info" title="添加的标签会强制加入每次配图的搜索中，支持任何英文标签"></i>
+                <i class="fa-solid fa-circle-info" title="自定义标签可强制加入每次的搜图tag队列"></i>
             </div>
 
             <div class="flex-container">
@@ -126,12 +126,10 @@
             </div>
             <hr class="sysHR">
             <div style="font-size:0.9em; opacity:0.8; margin-top:10px;">
-                <p><b>配图说明：</b></p>
-                <p>• 自动从AI消息中提取角色、服装、场景等关键词</p>
-                <p>• 转换为英文标签并搜索Wallhaven图库</p>
-                <p>• 智能匹配最佳图片作为聊天背景</p>
-                <p>• 黑纱效果确保文字清晰可读</p>
-                <p>• 自定义标签会强制加入每次搜索，权重为3.0</p>
+                <p><b>声明：</b></p>
+                <p>• 图片来源于Wallhaven网站，版权完全归Wallhaven所有</p>
+                <p>• 图片不缓存，不占用内存，仅用于临时显示</p>
+                <p>• 自定义标签可强制加入每次的搜图tag队列</p>
             </div>
         </div>
 
@@ -198,7 +196,7 @@
         <div class="template settings-section" style="display: none;">
             <div class="flex-container">
                 <input type="checkbox" id="xiaobaix_template_enabled" />
-                <label for="xiaobaix_template_enabled">启用模板编辑器</label>
+                <label for="xiaobaix_template_enabled">启用沉浸式模板</label>
                 <i class="fa-solid fa-circle-info" title="允许为每个角色设置输出模板，AI输出会立即用模板渲染，然后逐渐填充内容"></i>
             </div>
 
@@ -219,52 +217,13 @@
                 </div>
             </div>
 
-            <hr class="sysHR" />
-
-            <div class="flex-container">
-                <button id="export_template_settings" class="menu_button menu_button_icon" type="button">
-                    <i class="fa-solid fa-download"></i> 导出
-                </button>
-                <button id="import_template_settings" class="menu_button menu_button_icon" type="button"
-                    style="margin-left: 10px;">
-                    <i class="fa-solid fa-upload"></i> 导入
-                </button>
-                <input type="file" id="import_template_file" accept=".json" style="display: none;" />
-            </div>
-
             <hr class="sysHR">
 
             <div style="font-size:0.9em; opacity:0.8; margin-top:10px;">
                 <p><b>功能说明：</b></p>
-                <p>1. 让你能为聊天角色创建动态模板，支持参数提取和自定义渲染，AI开始输出时立即显示模板结构</p>
-                <p>2. 使用正则表达式从AI输出中提取参数，默认格式：<code>[参数名]内容[/参数名]</code>，模板中使用<code>[[参数名]]</code>格式引用参数</p>
-                <p>3. 模板设置会随角色卡一起导出/导入</p>
-                <p>4. 更详细的介绍请参考⮕<a href="https://littlewhitebox.pages.dev" target="_blank">文檔</a></p>
-            </div>
-        </div>
-
-        <div class="instructions settings-section" style="display: none;">
-            <div style="font-size:0.9em; opacity:0.8; margin-top:10px;">
-                <p><b>使用示例：</b></p>
-                <pre
-                    style="background: #2a2a2a; padding: 15px; border-radius: 6px; border-left: 4px solid #007acc; white-space: pre-wrap; word-wrap: break-word;">
-// 显示提示消息
-await STscript('/echo 你好世界！');
-
-// 创建变量
-await STscript('/setvar key=天气 晴朗');
-const weather = await STscript('/getvar 天气');
-
-// 动态更新界面
-document.querySelector('#status').textContent = `当前天气：${weather}`;
-
-// 创建按钮
-const button = document.createElement('button');
-button.textContent = '点击我';
-button.onclick = () => STscript('/xbqte task');
-document.body.appendChild(button);
-</pre>
-
+                <p>1. 让你能为聊天角色创建动态模板，AI开始输出时先UI再动态渲染</p>
+                <p>2. 模板设置会随角色卡一起导出/导入</p>
+                <p>3. 更详细的介绍请参考⮕<a href="https://littlewhitebox.pages.dev" target="_blank">文檔</a></p>
             </div>
         </div>
     </div>
