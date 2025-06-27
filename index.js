@@ -305,7 +305,10 @@ function toggleSettingsControls(enabled) {
     const controls = [
         'xiaobaix_sandbox', 'xiaobaix_memory_enabled', 'xiaobaix_memory_inject', 
         'xiaobaix_memory_depth', 'xiaobaix_recorded_enabled', 'xiaobaix_preview_enabled',
-        'xiaobaix_script_assistant', 'scheduled_tasks_enabled', 'xiaobaix_template_enabled', 'xiaobaix_immersive_enabled'
+        'xiaobaix_script_assistant', 'scheduled_tasks_enabled', 'xiaobaix_template_enabled',
+        'wallhaven_enabled', 'wallhaven_bg_mode', 'wallhaven_category', 
+        'wallhaven_purity', 'wallhaven_opacity',
+        'xiaobaix_immersive_enabled'
     ];
     
     controls.forEach(id => {

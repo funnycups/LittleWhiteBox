@@ -10,6 +10,33 @@ const defaultSettings = {
     category: "010",
     purity: "100",
     opacity: 0.3,
+    customTags: []
+};
+
+const tagWeights = {
+    custom: 3.0,
+    characters: 3,
+    locations: 3,
+    nsfw_actions: 3,
+    intimate_settings: 3,
+    poses: 2,
+    clothing: 2,
+    nsfw_body_parts: 2,
+    activities: 2,
+    expressions: 1.5,
+    body_features: 1.5,
+    nsfw_states: 1.5,
+    fetish_categories: 1.5,
+    clothing_states: 1.5,
+    nsfw_descriptions: 1.5,
+    colors: 1,
+    objects: 1,
+    weather_time: 1,
+    styles: 1,
+    emotional_states: 1,
+    romance_keywords: 1,
+    body_modifications: 1,
+    nsfw_sounds: 1
 };
 
 const wallhavenTags = {
@@ -413,6 +440,18 @@ function getWallhavenSettings() {
     return settings;
 }
 
+function isLandscapeOrientation() {
+    return window.innerWidth > window.innerHeight;
+}
+
+function getRatiosForOrientation() {
+    if (isLandscapeOrientation()) {
+        return "16x9,16x10,21x9";
+    } else {
+        return "9x16,10x16,1x1,9x18";
+    }
+}
+
 function showProgressInMessageHeader(messageElement, text) {
     const flexContainer = messageElement.querySelector('.flex-container.flex1.alignitemscenter');
     if (!flexContainer) return null;
@@ -451,42 +490,161 @@ function removeProgressFromMessageHeader() {
     document.querySelectorAll('.wallhaven_progress_indicator').forEach(el => el.remove());
 }
 
-function extractTagsFromText(text) {
-    const extractedEnglishTags = new Set();
-    Object.keys(wallhavenTags).forEach(category => {
-        Object.entries(wallhavenTags[category]).forEach(([chinese, english]) => {
-            if (text.includes(chinese)) {
-                extractedEnglishTags.add(english);
-            }
+function renderCustomTagsList() {
+    const settings = getWallhavenSettings();
+    const container = document.getElementById('wallhaven_custom_tags_list');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    if (!settings.customTags || settings.customTags.length === 0) {
+        container.innerHTML = '<div class="custom-tags-empty">暂无自定义标签</div>';
+        return;
+    }
+    
+    settings.customTags.forEach(tag => {
+        const tagElement = document.createElement('div');
+        tagElement.className = 'custom-tag-item';
+        tagElement.innerHTML = `
+            <span class="custom-tag-text">${tag}</span>
+            <span class="custom-tag-remove" data-tag="${tag}">×</span>
+        `;
+        container.appendChild(tagElement);
+    });
+    
+    container.querySelectorAll('.custom-tag-remove').forEach(btn => {
+        btn.addEventListener('click', function() {
+            removeCustomTag(this.dataset.tag);
         });
     });
-    return { tags: Array.from(extractedEnglishTags) };
 }
 
-async function searchSingleTag(tag, category, purity, isBgMode) {
-    let searchTag = tag;
-    if (isBgMode) {
-        searchTag = `${tag} -girl -male -people -anime`;
+function addCustomTag(tag) {
+    if (!tag || !tag.trim()) return;
+    
+    tag = tag.trim().toLowerCase();
+    const settings = getWallhavenSettings();
+    
+    if (!settings.customTags) {
+        settings.customTags = [];
     }
-    const ratios = "9x16,10x16,1x1,9x18";
-    const wallhavenUrl = `https://wallhaven.cc/api/v1/search?q=${encodeURIComponent(searchTag)}&categories=${category}&purity=${purity}&ratios=${ratios}&sorting=favorites&page=1&`;
-    const proxyUrl = 'https://api.allorigins.win/raw?url=';
-    const finalUrl = proxyUrl + encodeURIComponent(wallhavenUrl);
-    try {
-        const response = await fetch(finalUrl);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+    
+    if (settings.customTags.includes(tag)) {
+        return false;
+    }
+    
+    settings.customTags.push(tag);
+    saveSettingsDebounced();
+    renderCustomTagsList();
+    return true;
+}
+
+function removeCustomTag(tag) {
+    const settings = getWallhavenSettings();
+    if (!settings.customTags) return;
+    
+    const index = settings.customTags.indexOf(tag);
+    if (index > -1) {
+        settings.customTags.splice(index, 1);
+        saveSettingsDebounced();
+        renderCustomTagsList();
+    }
+}
+
+function extractTagsFromText(text, isBgMode = false) {
+    const settings = getWallhavenSettings();
+    
+    const customTagObjs = (settings.customTags || []).map(tag => ({
+        tag: tag,
+        category: 'custom',
+        weight: tagWeights.custom
+    }));
+    
+    if (isBgMode) {
+        const bgCategories = ['locations', 'weather_time', 'objects'];
+        const tagsByCategory = {};
+        
+        bgCategories.forEach(category => {
+            tagsByCategory[category] = new Set();
+            if (wallhavenTags[category]) {
+                Object.entries(wallhavenTags[category]).forEach(([chinese, english]) => {
+                    if (text.includes(chinese)) {
+                        tagsByCategory[category].add(english);
+                    }
+                });
+            }
+        });
+        
+        const selectedTags = [...customTagObjs];
+        Object.entries(tagsByCategory).forEach(([category, tagSet]) => {
+            const tags = Array.from(tagSet);
+            const selectedFromCategory = tags.slice(0, 2);
+            selectedFromCategory.forEach(tag => {
+                selectedTags.push({ tag, category, weight: tagWeights[category] || 1 });
+            });
+        });
+        
+        if (selectedTags.length === customTagObjs.length) {
+            selectedTags.push({ tag: 'landscape', category: 'background_fallback', weight: 1 });
         }
+        
+        return { tags: selectedTags };
+    } else {
+        const tagsByCategory = {};
+        
+        Object.keys(wallhavenTags).forEach(category => {
+            tagsByCategory[category] = new Set();
+            Object.entries(wallhavenTags[category]).forEach(([chinese, english]) => {
+                if (text.includes(chinese)) {
+                    tagsByCategory[category].add(english);
+                }
+            });
+        });
+        
+        const selectedTags = [...customTagObjs];
+        Object.entries(tagsByCategory).forEach(([category, tagSet]) => {
+            const tags = Array.from(tagSet);
+            const selectedFromCategory = tags.slice(0, 2);
+            selectedFromCategory.forEach(tag => {
+                selectedTags.push({ tag, category, weight: tagWeights[category] || 1 });
+            });
+        });
+        
+        return { tags: selectedTags };
+    }
+}
+
+async function fetchWithCFWorker(targetUrl) {
+    const cfWorkerUrl = 'https://wallhaven.velure.top/?url=';
+    const finalUrl = cfWorkerUrl + encodeURIComponent(targetUrl);
+    
+    const response = await fetch(finalUrl);
+    if (!response.ok) {
+        throw new Error(`CF Worker请求失败: HTTP ${response.status} - ${response.statusText}`);
+    }
+    return response;
+}
+
+async function searchSingleTag(tagObj, category, purity, isBgMode) {
+    let searchTag = tagObj.tag;
+    if (isBgMode) {
+        searchTag = `${tagObj.tag} -girl -male -people -anime`;
+    }
+    const ratios = getRatiosForOrientation();
+    const wallhavenUrl = `https://wallhaven.cc/api/v1/search?q=${encodeURIComponent(searchTag)}&categories=${category}&purity=${purity}&ratios=${ratios}&sorting=favorites&page=1&`;
+    
+    try {
+        const response = await fetchWithCFWorker(wallhavenUrl);
         const data = await response.json();
         return {
-            tag: tag,
+            tagObj: tagObj,
             success: true,
             total: data.meta.total,
             images: data.data || []
         };
     } catch (error) {
         return {
-            tag: tag,
+            tagObj: tagObj,
             success: false,
             error: error.message,
             total: 0,
@@ -495,33 +653,34 @@ async function searchSingleTag(tag, category, purity, isBgMode) {
     }
 }
 
-async function intelligentTagMatching(tags, settings) {
-    if (!tags || tags.length === 0) {
+async function intelligentTagMatching(tagObjs, settings) {
+    if (!tagObjs || tagObjs.length === 0) {
         throw new Error('没有可用的标签');
     }
-    const targetTags = [...new Set(tags.filter(tag => tag.trim()))];
+    
     const allImages = new Map();
     
-    for (let i = 0; i < Math.min(targetTags.length, 5); i++) {
-        const tag = targetTags[i];
-        updateProgressText(`搜索 ${i + 1}/${Math.min(targetTags.length, 5)}: ${tag}`);
-        const result = await searchSingleTag(tag, settings.category, settings.purity, settings.bgMode);
+    for (let i = 0; i < tagObjs.length; i++) {
+        const tagObj = tagObjs[i];
+        const isCustom = tagObj.category === 'custom' ? '[自定义]' : '';
+        updateProgressText(`搜索 ${i + 1}/${tagObjs.length}: ${isCustom}${tagObj.tag} (权重${tagObj.weight})`);
+        const result = await searchSingleTag(tagObj, settings.category, settings.purity, settings.bgMode);
         if (result.success) {
             result.images.forEach(img => {
                 if (!allImages.has(img.id)) {
                     allImages.set(img.id, {
                         ...img,
-                        matchedTags: [tag],
-                        matchCount: 1
+                        matchedTags: [tagObj],
+                        weightedScore: tagObj.weight
                     });
                 } else {
                     const existingImg = allImages.get(img.id);
-                    existingImg.matchedTags.push(tag);
-                    existingImg.matchCount++;
+                    existingImg.matchedTags.push(tagObj);
+                    existingImg.weightedScore += tagObj.weight;
                 }
             });
         }
-        if (i < targetTags.length - 1) {
+        if (i < tagObjs.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 500));
         }
     }
@@ -532,67 +691,123 @@ async function intelligentTagMatching(tags, settings) {
     }
     
     allImagesArray.sort((a, b) => {
-        if (b.matchCount !== a.matchCount) {
-            return b.matchCount - a.matchCount;
+        if (b.weightedScore !== a.weightedScore) {
+            return b.weightedScore - a.weightedScore;
         }
         return b.favorites - a.favorites;
     });
     
-    const maxMatchCount = allImagesArray[0].matchCount;
-    const bestMatches = allImagesArray.filter(img => img.matchCount === maxMatchCount);
+    const maxWeightedScore = allImagesArray[0].weightedScore;
+    const bestMatches = allImagesArray.filter(img => img.weightedScore === maxWeightedScore);
     const randomIndex = Math.floor(Math.random() * bestMatches.length);
     
     return bestMatches[randomIndex];
 }
 
-function applyBackgroundToChat(imageUrl, settings) {
-    const chatElement = document.getElementById('chat');
-    if (!chatElement) return;
+function applyMessageStyling() {
+    const mesElements = document.querySelectorAll('#chat .mes:not([data-wallhaven-styled])');
+    mesElements.forEach(mes => {
+        mes.style.cssText += `
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            background-color: transparent !important;
+            box-shadow: none !important;
+        `;
+        mes.setAttribute('data-wallhaven-styled', 'true');
+    });
+    
+    const mesTextElements = document.querySelectorAll('#chat .mes_text:not([data-wallhaven-text-styled])');
+    mesTextElements.forEach(mesText => {
+        mesText.style.cssText += `
+            text-shadow: rgba(0, 0, 0, 0.8) 1px 1px 2px !important;
+            color: inherit !important;
+        `;
+        mesText.setAttribute('data-wallhaven-text-styled', 'true');
+    });
+}
 
-    let backgroundContainer = document.getElementById('wallhaven-chat-background');
-    let overlay = document.getElementById('wallhaven-chat-overlay');
+function applyBackgroundToApp(imageUrl, settings) {
+    const expressionWrapper = document.getElementById('expression-wrapper');
+    if (!expressionWrapper) return;
+
+    let backgroundContainer = document.getElementById('wallhaven-app-background');
+    let overlay = document.getElementById('wallhaven-app-overlay');
 
     if (!backgroundContainer) {
         backgroundContainer = document.createElement('div');
-        backgroundContainer.id = 'wallhaven-chat-background';
+        backgroundContainer.id = 'wallhaven-app-background';
         backgroundContainer.style.cssText = `
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            background-size: 100% 100%;
-            background-position: center;
+            background-size: 100% auto;
+            background-position: top center;
             background-repeat: no-repeat;
-            z-index: -2;
+            z-index: 1;
             pointer-events: none;
         `;
-        chatElement.insertBefore(backgroundContainer, chatElement.firstChild);
+        expressionWrapper.insertBefore(backgroundContainer, expressionWrapper.firstChild);
     }
 
     if (!overlay) {
         overlay = document.createElement('div');
-        overlay.id = 'wallhaven-chat-overlay';
+        overlay.id = 'wallhaven-app-overlay';
         overlay.style.cssText = `
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
             background-color: rgba(0, 0, 0, ${settings.opacity});
-            z-index: -1;
+            z-index: 2;
             pointer-events: none;
         `;
-        chatElement.insertBefore(overlay, chatElement.firstChild);
+        expressionWrapper.insertBefore(overlay, expressionWrapper.firstChild);
     }
 
     backgroundContainer.style.backgroundImage = `url("${imageUrl}")`;
     overlay.style.backgroundColor = `rgba(0, 0, 0, ${settings.opacity})`;
     
-    chatElement.style.position = 'relative';
+    expressionWrapper.style.position = 'relative';
+    
+    const chatElement = document.getElementById('chat');
+    if (chatElement) {
+        chatElement.style.cssText += `
+            background-color: transparent !important;
+            background-image: none !important;
+            background: transparent !important;
+            position: relative;
+            z-index: 3;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            box-shadow: none !important;
+            border: none !important;
+            text-shadow: none !important;
+            opacity: 1 !important;
+        `;
+    }
+    
+    applyMessageStyling();
 }
 
-async function handleAIMessageForBackground(data) {
+function isMessageComplete(messageElement) {
+    const regenerateBtn = messageElement.querySelector('.mes_regenerate');
+    const editBtn = messageElement.querySelector('.mes_edit');
+    const hasButtons = regenerateBtn || editBtn;
+    
+    const mesText = messageElement.querySelector('.mes_text');
+    const hasContent = mesText && mesText.textContent.trim().length > 0;
+    
+    const hasStreamingIndicator = messageElement.querySelector('.typing_indicator') || 
+                                 messageElement.querySelector('.mes_loading') ||
+                                 messageElement.classList.contains('streaming');
+    
+    return hasButtons && hasContent && !hasStreamingIndicator;
+}
+
+async function handleAIMessage(data) {
     const settings = getWallhavenSettings();
     if (!settings.enabled || isProcessing) return;
     
@@ -602,53 +817,63 @@ async function handleAIMessageForBackground(data) {
     try {
         isProcessing = true;
         
-        setTimeout(async () => {
-            try {
-                const messageId = data.messageId || data;
-                if (!messageId) return;
-                
-                const messageElement = document.querySelector(`div.mes[mesid="${messageId}"]`);
-                if (!messageElement || messageElement.classList.contains('is_user')) return;
-                
-                const mesText = messageElement.querySelector('.mes_text');
-                if (!mesText) return;
-                
-                const messageText = mesText.textContent || '';
-                if (!messageText.trim()) return;
-                
-                showProgressInMessageHeader(messageElement, '提取标签中...');
-                
-                const result = extractTagsFromText(messageText);
-                if (result.tags.length === 0) {
-                    updateProgressText('未提取到标签');
-                    setTimeout(removeProgressFromMessageHeader, 2000);
-                    return;
-                }
-                
-                updateProgressText(`提取到 ${result.tags.length} 个标签`);
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                const selectedImage = await intelligentTagMatching(result.tags, settings);
-                
-                updateProgressText('应用背景中...');
-                const proxyImageUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(selectedImage.thumbs.large)}`;
-                
-                applyBackgroundToChat(proxyImageUrl, settings);
-                
-                updateProgressText('配图完成!');
-                setTimeout(removeProgressFromMessageHeader, 1500);
-                
-            } catch (error) {
-                updateProgressText(`配图失败: ${error.message.length > 20 ? error.message.substring(0, 20) + '...' : error.message}`);
-                setTimeout(removeProgressFromMessageHeader, 3000);
-            } finally {
-                isProcessing = false;
+        const messageId = data.messageId || data;
+        if (!messageId) return;
+        
+        const messageElement = document.querySelector(`div.mes[mesid="${messageId}"]`);
+        if (!messageElement || messageElement.classList.contains('is_user')) return;
+        
+        let retryCount = 0;
+        const maxRetries = 10;
+        
+        while (retryCount < maxRetries) {
+            if (isMessageComplete(messageElement)) {
+                break;
             }
-        }, 1000);
+            retryCount++;
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+        const mesText = messageElement.querySelector('.mes_text');
+        if (!mesText) return;
+        
+        const messageText = mesText.textContent || '';
+        if (!messageText.trim() || messageText.length < 10) return;
+        
+        showProgressInMessageHeader(messageElement, '提取标签中...');
+        
+        const result = extractTagsFromText(messageText, settings.bgMode);
+        if (result.tags.length === 0) {
+            updateProgressText('未提取到标签');
+            setTimeout(removeProgressFromMessageHeader, 2000);
+            return;
+        }
+        
+        const orientation = isLandscapeOrientation() ? '横屏' : '竖屏';
+        const modeText = settings.bgMode ? '背景' : '角色';
+        const totalWeight = result.tags.reduce((sum, tagObj) => sum + tagObj.weight, 0);
+        const customCount = result.tags.filter(t => t.category === 'custom').length;
+        updateProgressText(`${orientation}${modeText}:提取到 ${result.tags.length} 个标签 (自定义${customCount}个,总权重${totalWeight})`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const selectedImage = await intelligentTagMatching(result.tags, settings);
+        
+        updateProgressText('应用背景中...');
+        
+        const imageUrl = `https://wallhaven.velure.top/?url=${encodeURIComponent(selectedImage.path)}`;
+        
+        applyBackgroundToApp(imageUrl, settings);
+        
+        const coreTagsCount = selectedImage.matchedTags.filter(t => t.weight >= 2).length;
+        const customMatchCount = selectedImage.matchedTags.filter(t => t.category === 'custom').length;
+        updateProgressText(`${modeText}配图完成! 核心匹配${coreTagsCount}个 自定义${customMatchCount}个 权重${selectedImage.weightedScore}`);
+        setTimeout(removeProgressFromMessageHeader, 2000);
         
     } catch (error) {
+        updateProgressText(`配图失败: ${error.message.length > 20 ? error.message.substring(0, 20) + '...' : error.message}`);
+        setTimeout(removeProgressFromMessageHeader, 3000);
+    } finally {
         isProcessing = false;
-        removeProgressFromMessageHeader();
     }
 }
 
@@ -660,6 +885,7 @@ function updateSettingsControls() {
     $('#wallhaven_purity').val(settings.purity);
     $('#wallhaven_opacity').val(settings.opacity);
     $('#wallhaven_opacity_value').text(Math.round(settings.opacity * 100) + '%');
+    renderCustomTagsList();
 }
 
 function initSettingsEvents() {
@@ -671,8 +897,8 @@ function initSettingsEvents() {
         settings.enabled = $(this).prop('checked');
         saveSettingsDebounced();
         if (!settings.enabled) {
-            $('#wallhaven-chat-background').remove();
-            $('#wallhaven-chat-overlay').remove();
+            $('#wallhaven-app-background').remove();
+            $('#wallhaven-app-overlay').remove();
             removeProgressFromMessageHeader();
         }
     });
@@ -699,34 +925,86 @@ function initSettingsEvents() {
         if (!window.isXiaobaixEnabled) return;
         settings.opacity = parseFloat($(this).val());
         $('#wallhaven_opacity_value').text(Math.round(settings.opacity * 100) + '%');
-        $('#wallhaven-chat-overlay').css('background-color', `rgba(0, 0, 0, ${settings.opacity})`);
+        $('#wallhaven-app-overlay').css('background-color', `rgba(0, 0, 0, ${settings.opacity})`);
         saveSettingsDebounced();
+    });
+    
+    $('#wallhaven_add_custom_tag').on('click', function() {
+        if (!window.isXiaobaixEnabled) return;
+        const input = document.getElementById('wallhaven_custom_tag_input');
+        const tag = input.value.trim();
+        if (tag) {
+            if (addCustomTag(tag)) {
+                input.value = '';
+            } else {
+                input.style.borderColor = '#ff6b6b';
+                setTimeout(() => {
+                    input.style.borderColor = '';
+                }, 1000);
+            }
+        }
+    });
+    
+    $('#wallhaven_custom_tag_input').on('keypress', function(e) {
+        if (!window.isXiaobaixEnabled) return;
+        if (e.which === 13) {
+            $('#wallhaven_add_custom_tag').click();
+        }
     });
 }
 
 function handleGlobalStateChange(event) {
     const globalEnabled = event.detail.enabled;
     
+    const wallhavenControls = [
+        'wallhaven_enabled', 'wallhaven_bg_mode', 'wallhaven_category', 
+        'wallhaven_purity', 'wallhaven_opacity', 'wallhaven_custom_tag_input',
+        'wallhaven_add_custom_tag'
+    ];
+    
+    wallhavenControls.forEach(id => {
+        $(`#${id}`).prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
+    });
+    
     if (globalEnabled) {
         updateSettingsControls();
         initSettingsEvents();
     } else {
-        $('#wallhaven-chat-background').remove();
-        $('#wallhaven-chat-overlay').remove();
+        $('#wallhaven-app-background').remove();
+        $('#wallhaven-app-overlay').remove();
         removeProgressFromMessageHeader();
+        
+        $('#wallhaven_enabled, #wallhaven_bg_mode, #wallhaven_category, #wallhaven_purity, #wallhaven_opacity, #wallhaven_add_custom_tag').off();
+        $('#wallhaven_custom_tag_input').off();
     }
 }
 
 function initWallhavenBackground() {
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     
+    const wallhavenControls = [
+        'wallhaven_enabled', 'wallhaven_bg_mode', 'wallhaven_category', 
+        'wallhaven_purity', 'wallhaven_opacity', 'wallhaven_custom_tag_input',
+        'wallhaven_add_custom_tag'
+    ];
+    
+    wallhavenControls.forEach(id => {
+        $(`#${id}`).prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
+    });
+    
     if (globalEnabled) {
         updateSettingsControls();
         initSettingsEvents();
-        eventSource.on(event_types.MESSAGE_RECEIVED, handleAIMessageForBackground);
-        eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, handleAIMessageForBackground);
+        eventSource.on(event_types.MESSAGE_RECEIVED, handleAIMessage);
     }
+    
     document.addEventListener('xiaobaixEnabledChanged', handleGlobalStateChange);
+    
+    eventSource.on(event_types.CHAT_CHANGED, () => {
+        $('#wallhaven-app-background').remove();
+        $('#wallhaven-app-overlay').remove();
+        removeProgressFromMessageHeader();
+    });
 }
 
 export { initWallhavenBackground };

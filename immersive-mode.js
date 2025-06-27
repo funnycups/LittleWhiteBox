@@ -13,6 +13,7 @@ const defaultSettings = {
 
 let isImmersiveModeActive = false;
 let chatObserver = null;
+let eventsBound = false; // 防止重复绑定事件
 
 function initImmersiveMode() {
     if (!extension_settings[EXT_ID].immersive) {
@@ -29,6 +30,9 @@ function initImmersiveMode() {
     
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     
+    // 立即设置控件状态
+    $('#xiaobaix_immersive_enabled').prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
+    
     if (globalEnabled) {
         isImmersiveModeActive = settings.enabled;
         
@@ -36,7 +40,6 @@ function initImmersiveMode() {
             enableImmersiveMode();
         }
         
-        // 綁定settings頁面的checkbox事件
         bindSettingsEvents();
     }
     
@@ -47,37 +50,70 @@ function initImmersiveMode() {
 }
 
 function bindSettingsEvents() {
-    // 等待DOM加載完成後綁定事件
+    // 防止重复绑定
+    if (eventsBound) return;
+    
+    // 等待DOM加载完成后绑定事件
     setTimeout(() => {
         const checkbox = document.getElementById('xiaobaix_immersive_enabled');
-        if (checkbox) {
-            // 初始化checkbox狀態
+        if (checkbox && !eventsBound) {
+            // 初始化checkbox状态
             const settings = getImmersiveSettings();
             checkbox.checked = settings.enabled;
             
-            // 綁定change事件
+            // 绑定change事件
             checkbox.addEventListener('change', function() {
                 toggleImmersiveMode();
             });
+            
+            eventsBound = true;
         }
     }, 500);
+}
+
+function unbindSettingsEvents() {
+    const checkbox = document.getElementById('xiaobaix_immersive_enabled');
+    if (checkbox) {
+        // 移除所有事件监听器
+        const newCheckbox = checkbox.cloneNode(true);
+        checkbox.parentNode.replaceChild(newCheckbox, checkbox);
+    }
+    eventsBound = false;
 }
 
 function handleGlobalStateChange(event) {
     const globalEnabled = event.detail.enabled;
     
+    // 控制沉浸式控件的启用/禁用状态
+    $('#xiaobaix_immersive_enabled').prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
+    
     if (globalEnabled) {
+        // 恢复功能
         const settings = getImmersiveSettings();
-        if (settings.enabled) {
-            isImmersiveModeActive = true;
+        isImmersiveModeActive = settings.enabled;
+        
+        if (isImmersiveModeActive) {
             enableImmersiveMode();
         }
+        
         bindSettingsEvents();
+        
+        // 更新checkbox状态
+        setTimeout(() => {
+            const checkbox = document.getElementById('xiaobaix_immersive_enabled');
+            if (checkbox) {
+                checkbox.checked = settings.enabled;
+            }
+        }, 100);
     } else {
+        // 禁用功能并清理
         if (isImmersiveModeActive) {
             disableImmersiveMode();
         }
         isImmersiveModeActive = false;
+        
+        // 清理事件绑定
+        unbindSettingsEvents();
     }
 }
 
@@ -93,7 +129,7 @@ function toggleImmersiveMode() {
     settings.enabled = !settings.enabled;
     isImmersiveModeActive = settings.enabled;
     
-    // 同步更新checkbox狀態
+    // 同步更新checkbox状态
     const checkbox = document.getElementById('xiaobaix_immersive_enabled');
     if (checkbox) {
         checkbox.checked = settings.enabled;
@@ -127,7 +163,6 @@ function disableImmersiveMode() {
     stopChatObserver();
 }
 
-// 其他函數保持不變...
 function startChatObserver() {
     if (chatObserver) {
         stopChatObserver();
@@ -148,7 +183,7 @@ function startChatObserver() {
                         
                         if (!isUser && !isSystem) {
                             hasValidAIMessage = true;
-                            console.log('[小白X] 檢測到AI消息，準備切換頁面');
+                            console.log('[小白X] 检测到AI消息，准备切换页面');
                         }
                     }
                 });
@@ -195,10 +230,10 @@ function handleChatUpdate() {
     const settings = getImmersiveSettings();
     
     if (settings.autoJumpOnAI && !settings.showAllMessages) {
-        console.log('[小白X] AI消息檢測，保持單個消息顯示模式');
+        console.log('[小白X] AI消息检测，保持单个消息显示模式');
         updateMessageDisplay();
     } else if (settings.showAllMessages) {
-        console.log('[小白X] AI消息檢測，但當前為多層模式，不進行跳轉');
+        console.log('[小白X] AI消息检测，但当前为多层模式，不进行跳转');
         updateMessageDisplay();
     }
 }

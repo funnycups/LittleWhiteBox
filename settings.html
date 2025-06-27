@@ -80,12 +80,10 @@
                 <label for="wallhaven_enabled">启用AI消息配图</label>
                 <i class="fa-solid fa-circle-info" title="AI回复时自动提取消息内容，转换为标签并获取Wallhaven图片作为聊天背景"></i>
             </div>
-
             <div class="flex-container">
                 <input type="checkbox" id="wallhaven_bg_mode" />
                 <label for="wallhaven_bg_mode">背景图模式（纯场景，无人物）</label>
             </div>
-
             <div class="flex-container">
                 <label for="wallhaven_category">图片分类:</label>
                 <select id="wallhaven_category" class="text_pole">
@@ -95,7 +93,6 @@
                     <option value="100">综合壁纸</option>
                 </select>
             </div>
-
             <div class="flex-container">
                 <label for="wallhaven_purity">内容分级:</label>
                 <select id="wallhaven_purity" class="text_pole">
@@ -107,12 +104,26 @@
                     <option value="111">全部内容</option>
                 </select>
             </div>
-
             <div class="flex-container">
                 <label for="wallhaven_opacity">黑纱透明度: <span id="wallhaven_opacity_value">30%</span></label>
                 <input type="range" id="wallhaven_opacity" min="0" max="0.8" step="0.1" value="0.3" class="wide50p" />
             </div>
+            <hr class="sysHR">
 
+            <div class="flex-container">
+                <label><strong>自定义标签</strong></label>
+                <i class="fa-solid fa-circle-info" title="添加的标签会强制加入每次配图的搜索中，支持任何英文标签"></i>
+            </div>
+
+            <div class="flex-container">
+                <input type="text" id="wallhaven_custom_tag_input" placeholder="输入英文标签，如: beautiful girl"
+                    class="text_pole wide50p" />
+                <button id="wallhaven_add_custom_tag" class="menu_button" type="button">添加标签</button>
+            </div>
+
+            <div id="wallhaven_custom_tags_container" class="custom-tags-container">
+                <div id="wallhaven_custom_tags_list" class="custom-tags-list"></div>
+            </div>
             <hr class="sysHR">
             <div style="font-size:0.9em; opacity:0.8; margin-top:10px;">
                 <p><b>配图说明：</b></p>
@@ -120,6 +131,7 @@
                 <p>• 转换为英文标签并搜索Wallhaven图库</p>
                 <p>• 智能匹配最佳图片作为聊天背景</p>
                 <p>• 黑纱效果确保文字清晰可读</p>
+                <p>• 自定义标签会强制加入每次搜索，权重为3.0</p>
             </div>
         </div>
 
