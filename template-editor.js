@@ -10,7 +10,7 @@ const TEMPLATE_MODULE_NAME = "xiaobaix-template";
 const extensionFolderPath = `scripts/extensions/third-party/${EXT_ID}`;
 
 async function STscript(command) {
-    if (!command) return { error: "命令為空" };
+    if (!command) return { error: "命令为空" };
     if (!command.startsWith('/')) command = '/' + command;
     return await executeSlashCommand(command);
 }
@@ -409,7 +409,7 @@ class TemplateProcessor {
         return tmpl?.replace(/\[\[([^\]]+)\]\]/g, (match, varName) => {
             const cleanVarName = varName.trim();
             const value = vars[cleanVarName] ?? match;
-            return `<span data-xiaobaix-var="${cleanVarName}">${value}</span>`;
+            return `<bdi data-xiaobaix-var="${cleanVarName}">${value}</bdi>`;
         }) || '';
     }
 }
@@ -417,7 +417,6 @@ class TemplateProcessor {
 class IframeManager {
 
 static createWrapper(content) {
-    // 1. 先嘗試套用 substituteParams（如果呼叫端有提供）
     let processed = content;
     try {
         const { substituteParams } = getContext() || {};
@@ -428,10 +427,8 @@ static createWrapper(content) {
         console.warn('[LittleWhiteBox] substituteParams 無法使用：', e);
     }
 
-    // 2. 產生唯一 iframe-id
     const iframeId = `xiaobaix-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    // 3. 包一層 div 與 iframe
     const wrapperHtml = `
         <div class="xiaobaix-iframe-wrapper" style="margin: 10px 0;">
             <iframe id="${iframeId}" class="xiaobaix-iframe"
@@ -440,7 +437,6 @@ static createWrapper(content) {
         </div>
     `;
 
-    // 4. 等 DOM 插入後再寫內容進 iframe
     setTimeout(() => {
         const iframe = document.getElementById(iframeId);
         if (iframe) this.writeContentToIframe(iframe, processed);
@@ -896,7 +892,6 @@ const eventHandlers = {
         state.isStreamingCheckActive = false;
         setTimeout(() => {
             MessageHandler.process(id);
-            // 確保 swipe 後變量更新
             const ctx = getContext();
             const msg = ctx.chat?.[id];
             if (msg && !msg.is_user && !msg.is_system) {
@@ -1158,6 +1153,10 @@ function initTemplateEditor() {
 
     $("#xiaobaix_template_enabled").prop("checked", TemplateSettings.get().enabled);
     updateStatus();
+
+    if (window.registerModuleCleanup) {
+        window.registerModuleCleanup('templateEditor', cleanup);
+    }
 
     if (utils.isEnabled()) {
         setTimeout(() => {

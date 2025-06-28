@@ -25,8 +25,63 @@ const settings = extension_settings[EXT_ID];
 let isXiaobaixEnabled = settings.enabled;
 let moduleInstances = { statsTracker: null };
 let savedSettings = {};
+let globalEventListeners = [];
+let globalTimers = [];
+let moduleCleanupFunctions = new Map();
 
 window.isXiaobaixEnabled = isXiaobaixEnabled;
+
+function registerModuleCleanup(moduleName, cleanupFunction) {
+    moduleCleanupFunctions.set(moduleName, cleanupFunction);
+}
+
+function addGlobalEventListener(target, event, handler, options) {
+    target.addEventListener(event, handler, options);
+    globalEventListeners.push({ target, event, handler, options });
+}
+
+function addGlobalTimer(timerId) {
+    globalTimers.push(timerId);
+}
+
+function cleanupAllResources() {
+    globalEventListeners.forEach(({ target, event, handler, isEventSource }) => {
+        try {
+            if (isEventSource) {
+                target.off(event, handler);
+            } else {
+                target.removeEventListener(event, handler);
+            }
+        } catch (e) {
+            console.warn('[小白X] 清理事件監聽器失敗:', e);
+        }
+    });
+    globalEventListeners.length = 0;
+
+    globalTimers.forEach(timerId => {
+        try {
+            clearTimeout(timerId);
+            clearInterval(timerId);
+        } catch (e) {
+            console.warn('[小白X] 清理計時器失敗:', e);
+        }
+    });
+    globalTimers.length = 0;
+
+    moduleCleanupFunctions.forEach((cleanupFn, moduleName) => {
+        try {
+            cleanupFn();
+        } catch (e) {
+            console.warn(`[小白X] 清理模塊 ${moduleName} 失敗:`, e);
+        }
+    });
+
+    document.querySelectorAll('iframe.xiaobaix-iframe').forEach(iframe => iframe.remove());
+    document.querySelectorAll('.xiaobaix-iframe-wrapper').forEach(wrapper => wrapper.remove());
+
+    document.querySelectorAll('.memory-button, .mes_history_preview').forEach(btn => btn.remove());
+    document.querySelectorAll('#message_preview_btn').forEach(btn => btn.style.display = 'none');
+}
 
 async function waitForElement(selector, root = document, timeout = 10000) {
     const start = Date.now();
@@ -403,33 +458,35 @@ function toggleAllFeatures(enabled) {
         }));
     } else {
         saveCurrentSettings();
-        
+
+        cleanupAllResources();
+
         Object.assign(settings, {
             sandboxMode: false, memoryEnabled: false, memoryInjectEnabled: false
         });
-        
-        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive', 'templateEditor'].forEach(module => {
+
+        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive', 'templateEditor', 'wallhaven'].forEach(module => {
             if (!extension_settings[EXT_ID][module]) extension_settings[EXT_ID][module] = {};
             extension_settings[EXT_ID][module].enabled = false;
         });
-        
-        ["xiaobaix_sandbox", "xiaobaix_memory_enabled", "xiaobaix_memory_inject", 
-         "xiaobaix_recorded_enabled", "xiaobaix_preview_enabled", "xiaobaix_script_assistant", 
-         "scheduled_tasks_enabled", "xiaobaix_template_enabled"].forEach(id => $(`#${id}`).prop("checked", false));
-        
+
+        ["xiaobaix_sandbox", "xiaobaix_memory_enabled", "xiaobaix_memory_inject",
+         "xiaobaix_recorded_enabled", "xiaobaix_preview_enabled", "xiaobaix_script_assistant",
+         "scheduled_tasks_enabled", "xiaobaix_template_enabled", "wallhaven_enabled",
+         "xiaobaix_immersive_enabled"].forEach(id => $(`#${id}`).prop("checked", false));
+
         toggleSettingsControls(false);
-        document.querySelectorAll('iframe.xiaobaix-iframe').forEach(iframe => iframe.remove());
+
         document.querySelectorAll('pre[data-xiaobaix-bound="true"]').forEach(pre => {
             pre.style.display = '';
             delete pre.dataset.xiaobaixBound;
         });
-        document.querySelectorAll('.memory-button, .mes_history_preview').forEach(btn => btn.remove());
-        document.querySelectorAll('#message_preview_btn').forEach(btn => btn.style.display = 'none');
+
         moduleInstances.statsTracker?.removeMemoryPrompt?.();
         window.removeScriptDocs?.();
-        
-        document.dispatchEvent(new CustomEvent('xiaobaixEnabledChanged', { 
-            detail: { enabled: false } 
+
+        document.dispatchEvent(new CustomEvent('xiaobaixEnabledChanged', {
+            detail: { enabled: false }
         }));
     }
 }
@@ -579,48 +636,58 @@ function setupEventListeners() {
         }, isReceived ? 300 : 100);
     };
 
-    eventSource.on(event_types.MESSAGE_RECEIVED, (data) => handleMessage(data, true));
+    const messageReceivedHandler = (data) => handleMessage(data, true);
+    eventSource.on(event_types.MESSAGE_RECEIVED, messageReceivedHandler);
+    globalEventListeners.push({ target: eventSource, event: event_types.MESSAGE_RECEIVED, handler: messageReceivedHandler, isEventSource: true });
+
     eventSource.on(event_types.USER_MESSAGE_RENDERED, handleMessage);
+    globalEventListeners.push({ target: eventSource, event: event_types.USER_MESSAGE_RENDERED, handler: handleMessage, isEventSource: true });
+
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, handleMessage);
-    
+    globalEventListeners.push({ target: eventSource, event: event_types.CHARACTER_MESSAGE_RENDERED, handler: handleMessage, isEventSource: true });
+
     if (event_types.MESSAGE_SWIPED) {
         eventSource.on(event_types.MESSAGE_SWIPED, handleMessage);
+        globalEventListeners.push({ target: eventSource, event: event_types.MESSAGE_SWIPED, handler: handleMessage, isEventSource: true });
     }
     if (event_types.MESSAGE_EDITED) {
         eventSource.on(event_types.MESSAGE_EDITED, handleMessage);
+        globalEventListeners.push({ target: eventSource, event: event_types.MESSAGE_EDITED, handler: handleMessage, isEventSource: true });
     }
     if (event_types.MESSAGE_UPDATED) {
         eventSource.on(event_types.MESSAGE_UPDATED, handleMessage);
+        globalEventListeners.push({ target: eventSource, event: event_types.MESSAGE_UPDATED, handler: handleMessage, isEventSource: true });
     }
     
-    eventSource.on(event_types.CHAT_CHANGED, async () => {
+    const chatChangedHandler = async () => {
         if (!isXiaobaixEnabled) return;
-        
-        setTimeout(() => processExistingMessages(), 200);
-        
+
+        const timer1 = setTimeout(() => processExistingMessages(), 200);
+        addGlobalTimer(timer1);
+
         if (!settings.memoryEnabled) return;
-        setTimeout(async () => {
+        const timer2 = setTimeout(async () => {
             try {
                 let stats = await executeSlashCommand('/getvar xiaobaix_stats');
-                
+
                 if (!stats || stats === "undefined") {
                     const messagesText = await executeSlashCommand('/messages names=on');
                     if (messagesText) {
                         const newStats = statsTracker.createEmptyStats();
-                        
+
                         const messageBlocks = messagesText.split('\n\n');
                         for (const block of messageBlocks) {
                             const colonIndex = block.indexOf(':');
                             if (colonIndex !== -1) {
                                 const name = block.substring(0, colonIndex).trim();
                                 const content = block.substring(colonIndex + 1).trim();
-                                
+
                                 if (name !== getContext().name1 && content) {
                                     statsTracker.updateStatsFromText(newStats, content, name);
                                 }
                             }
                         }
-                        
+
                         await executeSlashCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(newStats)}`);
                         if (settings.memoryInjectEnabled) statsTracker.updateMemoryPrompt();
                     }
@@ -631,13 +698,20 @@ function setupEventListeners() {
                 console.error('[小白X] 处理聊天历史出错:', error);
             }
         }, 500);
-    });
-    
-    window.addEventListener('message', handleIframeMessage);
+        addGlobalTimer(timer2);
+    };
+
+    eventSource.on(event_types.CHAT_CHANGED, chatChangedHandler);
+    globalEventListeners.push({ target: eventSource, event: event_types.CHAT_CHANGED, handler: chatChangedHandler, isEventSource: true });
+
+    addGlobalEventListener(window, 'message', handleIframeMessage);
 }
 
 window.processExistingMessages = processExistingMessages;
 window.renderHtmlInIframe = renderHtmlInIframe;
+window.registerModuleCleanup = registerModuleCleanup;
+window.addGlobalEventListener = addGlobalEventListener;
+window.addGlobalTimer = addGlobalTimer;
 
 jQuery(async () => {
     try {
@@ -660,13 +734,16 @@ jQuery(async () => {
         initTemplateEditor();
         initWallhavenBackground();
         
-        setTimeout(setupMenuTabs, 500);
-        setTimeout(initMessagePreview, 1500);
-        
-        setTimeout(async () => {
+        const timer1 = setTimeout(setupMenuTabs, 500);
+        addGlobalTimer(timer1);
+
+        const timer2 = setTimeout(initMessagePreview, 1500);
+        addGlobalTimer(timer2);
+
+        const timer3 = setTimeout(async () => {
             if (isXiaobaixEnabled) {
                 processExistingMessages();
-                
+
                 if (settings.memoryEnabled) {
                     const messages = await statsTracker.processMessageHistory();
                     if (messages?.length > 0) {
@@ -674,17 +751,19 @@ jQuery(async () => {
                         messages.forEach(message => {
                             statsTracker.updateStatsFromText(stats, message.content, message.name);
                         });
-                        
+
                         await executeSlashCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(stats)}`);
                         if (settings.memoryInjectEnabled) statsTracker.updateMemoryPrompt();
                     }
                 }
             }
         }, 1000);
+        addGlobalTimer(timer3);
 
-        setInterval(() => {
+        const intervalId = setInterval(() => {
             if (isXiaobaixEnabled) processExistingMessages();
         }, 5000);
+        addGlobalTimer(intervalId);
         
     } catch (err) {
         console.error('[小白X] 初始化出错:', err);

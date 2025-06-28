@@ -619,6 +619,15 @@ function initMessagePreview() {
             settings.preview.enabled = $(this).prop("checked");
             saveSettingsDebounced();
             $('#message_preview_btn').toggle(settings.preview.enabled);
+
+            if (!settings.preview.enabled) {
+                if (cleanupTimer) {
+                    clearInterval(cleanupTimer);
+                    cleanupTimer = null;
+                }
+            } else {
+                cleanupTimer = setInterval(cleanupMemory, CONSTANTS.CLEANUP_INTERVAL);
+            }
         });
 
         $("#xiaobaix_recorded_enabled").prop("checked", settings.recorded.enabled).on("change", function() {
@@ -631,6 +640,7 @@ function initMessagePreview() {
                 addHistoryButtonsDebounced();
             } else {
                 $('.mes_history_preview').remove();
+                apiRequestHistory.length = 0;
             }
         });
     
@@ -643,11 +653,15 @@ function initMessagePreview() {
         }
     
         addEventListeners();
-    
+
+        if (window.registerModuleCleanup) {
+            window.registerModuleCleanup('messagePreview', cleanup);
+        }
+
         if (settings.preview.enabled) {
             cleanupTimer = setInterval(cleanupMemory, CONSTANTS.CLEANUP_INTERVAL);
         }
-    
+
     } catch (error) {
         toastr.error('模块初始化失败');
     }

@@ -671,9 +671,13 @@ function registerSlashCommands() {
 
 function initTasks() {
     scheduleCleanup();
-    
+
     if (!extension_settings[EXT_ID].tasks) {
         extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
+    }
+
+    if (window.registerModuleCleanup) {
+        window.registerModuleCleanup('scheduledTasks', cleanup);
     }
     
     $('#scheduled_tasks_enabled').on('input', e => {
@@ -681,8 +685,13 @@ function initTasks() {
         const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
         if (!globalEnabled) return;
 
-        getSettings().enabled = $(e.target).prop('checked');
+        const enabled = $(e.target).prop('checked');
+        getSettings().enabled = enabled;
         debouncedSave();
+
+        if (!enabled) {
+            cleanup();
+        }
     });
     $('#add_global_task').on('click', () => showTaskEditor(null, false, false));
     $('#add_character_task').on('click', () => showTaskEditor(null, false, true));

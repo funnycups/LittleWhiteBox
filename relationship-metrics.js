@@ -2515,6 +2515,10 @@ class StatsTracker {
 
         this.setupEventListeners();
 
+        if (window.registerModuleCleanup) {
+            window.registerModuleCleanup('relationshipMetrics', () => this.cleanup());
+        }
+
         setTimeout(() => {
             this.initializeCurrentCharacter();
         }, 100);
@@ -2523,13 +2527,31 @@ class StatsTracker {
     }
 
     setupEventListeners() {
-        eventSource.on(event_types.CHAT_CHANGED, async () => {
+        this.chatChangedHandler = async () => {
             await this.handleCharacterSwitch();
-        });
+        };
+        this.appReadyHandler = async () => {
+            await this.handleCharacterSwitch();
+        };
 
-        eventSource.on(event_types.APP_READY, async () => {
-            await this.handleCharacterSwitch();
-        });
+        eventSource.on(event_types.CHAT_CHANGED, this.chatChangedHandler);
+        eventSource.on(event_types.APP_READY, this.appReadyHandler);
+    }
+
+    cleanup() {
+        if (this.chatChangedHandler) {
+            eventSource.off(event_types.CHAT_CHANGED, this.chatChangedHandler);
+        }
+        if (this.appReadyHandler) {
+            eventSource.off(event_types.APP_READY, this.appReadyHandler);
+        }
+
+        this.removeMemoryPrompt();
+
+        this.isInitialized = false;
+        this.chatChangedHandler = null;
+        this.appReadyHandler = null;
+        this.textAnalysis.pronounMapping.clear();
     }
 
     async initializeCurrentCharacter() {

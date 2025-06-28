@@ -24,38 +24,69 @@ function initScriptAssistant() {
             injectScriptDocs();
         } else {
             removeScriptDocs();
+            cleanup();
         }
     });
     
     $('#xiaobaix_script_assistant').prop('checked', extension_settings[EXT_ID].scriptAssistant.enabled);
     
     setupEventListeners();
-    
+
+    if (window.registerModuleCleanup) {
+        window.registerModuleCleanup('scriptAssistant', cleanup);
+    }
+
     if (extension_settings[EXT_ID].scriptAssistant.enabled) {
         setTimeout(() => injectScriptDocs(), 1000);
     }
 }
 
+let eventHandlers = {};
+
 function setupEventListeners() {
-    eventSource.on(event_types.CHAT_CHANGED, () => {
+    eventHandlers.chatChanged = () => {
         setTimeout(() => checkAndInjectDocs(), 500);
-    });
-    
-    eventSource.on(event_types.MESSAGE_RECEIVED, () => {
+    };
+    eventHandlers.messageReceived = () => {
         checkAndInjectDocs();
-    });
-    
-    eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
+    };
+    eventHandlers.userMessageRendered = () => {
         checkAndInjectDocs();
-    });
-    
-    eventSource.on(event_types.SETTINGS_LOADED_AFTER, () => {
+    };
+    eventHandlers.settingsLoadedAfter = () => {
         setTimeout(() => checkAndInjectDocs(), 1000);
-    });
-    
-    eventSource.on(event_types.APP_READY, () => {
+    };
+    eventHandlers.appReady = () => {
         setTimeout(() => checkAndInjectDocs(), 1500);
-    });
+    };
+
+    eventSource.on(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
+    eventSource.on(event_types.MESSAGE_RECEIVED, eventHandlers.messageReceived);
+    eventSource.on(event_types.USER_MESSAGE_RENDERED, eventHandlers.userMessageRendered);
+    eventSource.on(event_types.SETTINGS_LOADED_AFTER, eventHandlers.settingsLoadedAfter);
+    eventSource.on(event_types.APP_READY, eventHandlers.appReady);
+}
+
+function cleanup() {
+    if (eventHandlers.chatChanged) {
+        eventSource.off(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
+    }
+    if (eventHandlers.messageReceived) {
+        eventSource.off(event_types.MESSAGE_RECEIVED, eventHandlers.messageReceived);
+    }
+    if (eventHandlers.userMessageRendered) {
+        eventSource.off(event_types.USER_MESSAGE_RENDERED, eventHandlers.userMessageRendered);
+    }
+    if (eventHandlers.settingsLoadedAfter) {
+        eventSource.off(event_types.SETTINGS_LOADED_AFTER, eventHandlers.settingsLoadedAfter);
+    }
+    if (eventHandlers.appReady) {
+        eventSource.off(event_types.APP_READY, eventHandlers.appReady);
+    }
+
+    removeScriptDocs();
+
+    eventHandlers = {};
 }
 
 function checkAndInjectDocs() {

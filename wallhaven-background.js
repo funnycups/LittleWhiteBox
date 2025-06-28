@@ -430,6 +430,8 @@ let processedMessages = new Set();
 let currentImageUrl = null;
 let currentSettings = null;
 let lastScreenSize = null;
+let eventHandlers = {};
+let timers = [];
 
 function getCurrentScreenSize() {
     return window.innerWidth <= 1000 ? 'small' : 'large';
@@ -959,6 +961,7 @@ function initSettingsEvents() {
             clearBackgroundState();
             removeProgressFromMessageHeader();
             processedMessages.clear();
+            cleanup();
         }
     });
     
@@ -1054,24 +1057,63 @@ function initWallhavenBackground() {
     if (globalEnabled) {
         updateSettingsControls();
         initSettingsEvents();
-        eventSource.on(event_types.MESSAGE_RECEIVED, handleAIMessage);
+
+        eventHandlers.messageReceived = handleAIMessage;
+        eventSource.on(event_types.MESSAGE_RECEIVED, eventHandlers.messageReceived);
     }
-    
-    document.addEventListener('xiaobaixEnabledChanged', handleGlobalStateChange);
-    
-    eventSource.on(event_types.CHAT_CHANGED, () => {
+
+    eventHandlers.globalStateChange = handleGlobalStateChange;
+    document.addEventListener('xiaobaixEnabledChanged', eventHandlers.globalStateChange);
+
+    eventHandlers.chatChanged = () => {
         processedMessages.clear();
         clearBackgroundState();
         removeProgressFromMessageHeader();
-    });
-    
-    let resizeTimeout;
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimeout);
-        resizeTimeout = setTimeout(handleWindowResize, 300);
-    });
+    };
+    eventSource.on(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
+
+    eventHandlers.windowResize = () => {
+        const resizeTimeout = setTimeout(handleWindowResize, 300);
+        timers.push(resizeTimeout);
+    };
+    window.addEventListener('resize', eventHandlers.windowResize);
+
+    if (window.registerModuleCleanup) {
+        window.registerModuleCleanup('wallhavenBackground', cleanup);
+    }
     
     lastScreenSize = getCurrentScreenSize();
+}
+
+function cleanup() {
+    timers.forEach(timerId => {
+        clearTimeout(timerId);
+        clearInterval(timerId);
+    });
+    timers.length = 0;
+
+    if (eventHandlers.messageReceived) {
+        eventSource.off(event_types.MESSAGE_RECEIVED, eventHandlers.messageReceived);
+    }
+    if (eventHandlers.globalStateChange) {
+        document.removeEventListener('xiaobaixEnabledChanged', eventHandlers.globalStateChange);
+    }
+    if (eventHandlers.chatChanged) {
+        eventSource.off(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
+    }
+    if (eventHandlers.windowResize) {
+        window.removeEventListener('resize', eventHandlers.windowResize);
+    }
+
+    clearBackgroundState();
+    removeProgressFromMessageHeader();
+
+    isProcessing = false;
+    processedMessages.clear();
+    currentProgressButton = null;
+    currentImageUrl = null;
+    currentSettings = null;
+    eventHandlers = {};
 }
 
 export { initWallhavenBackground };

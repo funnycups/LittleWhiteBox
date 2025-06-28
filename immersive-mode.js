@@ -13,7 +13,8 @@ const defaultSettings = {
 
 let isImmersiveModeActive = false;
 let chatObserver = null;
-let eventsBound = false; // 防止重复绑定事件
+let eventsBound = false;
+let eventHandlers = {};
 
 function initImmersiveMode() {
     if (!extension_settings[EXT_ID].immersive) {
@@ -29,8 +30,7 @@ function initImmersiveMode() {
     }
     
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-    
-    // 立即设置控件状态
+
     $('#xiaobaix_immersive_enabled').prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
     
     if (globalEnabled) {
@@ -43,25 +43,28 @@ function initImmersiveMode() {
         bindSettingsEvents();
     }
     
-    eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-    document.addEventListener('xiaobaixEnabledChanged', handleGlobalStateChange);
+    eventHandlers.chatChanged = onChatChanged;
+    eventHandlers.globalStateChange = handleGlobalStateChange;
+
+    eventSource.on(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
+    document.addEventListener('xiaobaixEnabledChanged', eventHandlers.globalStateChange);
+
+    if (window.registerModuleCleanup) {
+        window.registerModuleCleanup('immersiveMode', cleanup);
+    }
     
     console.log(`[${EXT_ID}] 沉浸式显示模式功能已加载`);
 }
 
 function bindSettingsEvents() {
-    // 防止重复绑定
     if (eventsBound) return;
     
-    // 等待DOM加载完成后绑定事件
     setTimeout(() => {
         const checkbox = document.getElementById('xiaobaix_immersive_enabled');
         if (checkbox && !eventsBound) {
-            // 初始化checkbox状态
             const settings = getImmersiveSettings();
             checkbox.checked = settings.enabled;
-            
-            // 绑定change事件
+
             checkbox.addEventListener('change', function() {
                 toggleImmersiveMode();
             });
@@ -74,7 +77,6 @@ function bindSettingsEvents() {
 function unbindSettingsEvents() {
     const checkbox = document.getElementById('xiaobaix_immersive_enabled');
     if (checkbox) {
-        // 移除所有事件监听器
         const newCheckbox = checkbox.cloneNode(true);
         checkbox.parentNode.replaceChild(newCheckbox, checkbox);
     }
@@ -84,11 +86,9 @@ function unbindSettingsEvents() {
 function handleGlobalStateChange(event) {
     const globalEnabled = event.detail.enabled;
     
-    // 控制沉浸式控件的启用/禁用状态
     $('#xiaobaix_immersive_enabled').prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
     
     if (globalEnabled) {
-        // 恢复功能
         const settings = getImmersiveSettings();
         isImmersiveModeActive = settings.enabled;
         
@@ -98,7 +98,6 @@ function handleGlobalStateChange(event) {
         
         bindSettingsEvents();
         
-        // 更新checkbox状态
         setTimeout(() => {
             const checkbox = document.getElementById('xiaobaix_immersive_enabled');
             if (checkbox) {
@@ -106,13 +105,11 @@ function handleGlobalStateChange(event) {
             }
         }, 100);
     } else {
-        // 禁用功能并清理
         if (isImmersiveModeActive) {
             disableImmersiveMode();
         }
         isImmersiveModeActive = false;
         
-        // 清理事件绑定
         unbindSettingsEvents();
     }
 }
@@ -129,7 +126,6 @@ function toggleImmersiveMode() {
     settings.enabled = !settings.enabled;
     isImmersiveModeActive = settings.enabled;
     
-    // 同步更新checkbox状态
     const checkbox = document.getElementById('xiaobaix_immersive_enabled');
     if (checkbox) {
         checkbox.checked = settings.enabled;
@@ -139,6 +135,7 @@ function toggleImmersiveMode() {
         enableImmersiveMode();
     } else {
         disableImmersiveMode();
+        cleanup();
     }
     
     saveSettingsDebounced();
@@ -339,7 +336,7 @@ function handleSwipe(swipeSelector) {
 function onChatChanged() {
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     if (!globalEnabled) return;
-    
+
     if (isImmersiveModeActive) {
         setTimeout(() => {
             startChatObserver();
@@ -347,6 +344,28 @@ function onChatChanged() {
             showNavigationButtons();
         }, 100);
     }
+}
+
+function cleanup() {
+    if (isImmersiveModeActive) {
+        stopImmersiveMode();
+    }
+
+    if (eventHandlers.chatChanged) {
+        eventSource.off(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
+    }
+    if (eventHandlers.globalStateChange) {
+        document.removeEventListener('xiaobaixEnabledChanged', eventHandlers.globalStateChange);
+    }
+
+    if (chatObserver) {
+        chatObserver.disconnect();
+        chatObserver = null;
+    }
+
+    isImmersiveModeActive = false;
+    eventsBound = false;
+    eventHandlers = {};
 }
 
 export { initImmersiveMode, toggleImmersiveMode };
