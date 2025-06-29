@@ -1324,8 +1324,7 @@ function handleWindowResize() {
 }
 
 function clearBackgroundState() {
-    $('#wallhaven-app-background, #wallhaven-chat-background').remove();
-    $('#wallhaven-app-overlay, #wallhaven-chat-overlay').remove();
+    document.querySelectorAll('[id^="wallhaven-"]').forEach(el => el.remove());
     currentImageUrl = null;
     currentSettings = null;
     lastScreenSize = null;
@@ -1663,6 +1662,8 @@ function applyMessageStyling() {
             -webkit-backdrop-filter: none !important;
             background-color: transparent !important;
             box-shadow: none !important;
+            position: relative !important;
+            z-index: 1002 !important;
         `;
         mes.setAttribute('data-wallhaven-styled', 'true');
     });
@@ -1672,8 +1673,21 @@ function applyMessageStyling() {
         mesText.style.cssText += `
             text-shadow: rgba(0, 0, 0, 0.8) 1px 1px 2px !important;
             color: inherit !important;
+            position: relative !important;
+            z-index: 1003 !important;
         `;
         mesText.setAttribute('data-wallhaven-text-styled', 'true');
+    });
+    
+    const messageElements = document.querySelectorAll('#chat .mes, #chat .mes_text, #chat .name, #chat .mes_img, #chat .mes_avatar, #chat .mes_btn');
+    messageElements.forEach(element => {
+        if (element && !element.hasAttribute('data-wallhaven-z-styled')) {
+            element.style.cssText += `
+                position: relative !important;
+                z-index: 1002 !important;
+            `;
+            element.setAttribute('data-wallhaven-z-styled', 'true');
+        }
     });
 }
 
@@ -1683,86 +1697,171 @@ function applyBackgroundToApp(imageUrl, settings) {
     lastScreenSize = getCurrentScreenSize();
     
     const isSmallScreen = window.innerWidth <= 1000;
-    const targetContainer = isSmallScreen ? 
-        document.getElementById('chat') : 
-        document.getElementById('expression-wrapper');
-    
-    if (!targetContainer) return;
-
-    const bgId = isSmallScreen ? 'wallhaven-chat-background' : 'wallhaven-app-background';
-    const overlayId = isSmallScreen ? 'wallhaven-chat-overlay' : 'wallhaven-app-overlay';
-
-    let backgroundContainer = document.getElementById(bgId);
-    let overlay = document.getElementById(overlayId);
-
-    if (!backgroundContainer) {
-        backgroundContainer = document.createElement('div');
-        backgroundContainer.id = bgId;
-        backgroundContainer.style.cssText = `
-            position: ${isSmallScreen ? 'absolute' : 'fixed'};
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-size: 100% auto;
-            background-position: top center;
-            background-repeat: no-repeat;
-            z-index: ${isSmallScreen ? '-2' : '1'};
-            pointer-events: none;
-        `;
-        targetContainer.insertBefore(backgroundContainer, targetContainer.firstChild);
-    }
-
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = overlayId;
-        overlay.style.cssText = `
-            position: ${isSmallScreen ? 'absolute' : 'fixed'};
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, ${settings.opacity});
-            z-index: ${isSmallScreen ? '-1' : '2'};
-            pointer-events: none;
-        `;
-        targetContainer.insertBefore(overlay, targetContainer.firstChild);
-    }
-
-    backgroundContainer.style.backgroundImage = `url("${imageUrl}")`;
-    overlay.style.backgroundColor = `rgba(0, 0, 0, ${settings.opacity})`;
-    
-    targetContainer.style.position = 'relative';
     
     if (isSmallScreen) {
+        // 手机端：创建固定定位的背景容器，从rightNavHolder下方开始
         const chatElement = document.getElementById('chat');
-        if (chatElement) {
-            chatElement.style.cssText += `
-                background-color: transparent !important;
-                background-image: none !important;
-                background: transparent !important;
-                position: relative;
-                z-index: 3;
-            `;
+        if (!chatElement) return;
+        
+        const bgId = 'wallhaven-mobile-background';
+        const overlayId = 'wallhaven-mobile-overlay';
+        
+        // 清除可能存在的其他背景
+        document.querySelectorAll('[id^="wallhaven-"]').forEach(el => el.remove());
+        
+        // 计算顶部导航栏高度
+        let topOffset = 0;
+        const rightNavHolder = document.getElementById('rightNavHolder');
+        if (rightNavHolder) {
+            const rect = rightNavHolder.getBoundingClientRect();
+            topOffset = rect.bottom; // 从rightNavHolder底部开始
+        } else {
+            // 如果找不到，使用默认值
+            topOffset = 50;
         }
+        
+        let backgroundContainer = document.getElementById(bgId);
+        let overlay = document.getElementById(overlayId);
+        
+        if (!backgroundContainer) {
+            backgroundContainer = document.createElement('div');
+            backgroundContainer.id = bgId;
+            backgroundContainer.style.cssText = `
+                position: fixed !important;
+                top: ${topOffset}px !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100vw !important;
+                height: calc(100vh - ${topOffset}px) !important;
+                background-size: 100% auto !important;
+                background-position: top center !important;
+                background-repeat: no-repeat !important;
+                z-index: -999 !important;
+                pointer-events: none !important;
+                overflow: hidden !important;
+            `;
+            document.body.appendChild(backgroundContainer);
+        }
+        
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = overlayId;
+            overlay.style.cssText = `
+                position: fixed !important;
+                top: ${topOffset}px !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100vw !important;
+                height: calc(100vh - ${topOffset}px) !important;
+                background-color: rgba(0, 0, 0, ${settings.opacity}) !important;
+                z-index: -998 !important;
+                pointer-events: none !important;
+                overflow: hidden !important;
+            `;
+            document.body.appendChild(overlay);
+        }
+        
+        backgroundContainer.style.backgroundImage = `url("${imageUrl}")`;
+        overlay.style.backgroundColor = `rgba(0, 0, 0, ${settings.opacity})`;
+        
+        // 更新位置（如果容器已存在）
+        backgroundContainer.style.top = `${topOffset}px`;
+        backgroundContainer.style.height = `calc(100vh - ${topOffset}px)`;
+        overlay.style.top = `${topOffset}px`;
+        overlay.style.height = `calc(100vh - ${topOffset}px)`;
+        
+        // 清理可能遮挡背景的元素背景
+        const elementsToMakeTransparent = [
+            document.body,
+            document.getElementById('sheld'),
+            document.getElementById('expression-wrapper'),
+            chatElement,
+            chatElement?.parentElement
+        ].filter(Boolean);
+        
+        elementsToMakeTransparent.forEach(element => {
+            if (element) {
+                element.style.cssText += `
+                    background-color: transparent !important;
+                    background-image: none !important;
+                    backdrop-filter: none !important;
+                    -webkit-backdrop-filter: none !important;
+                `;
+            }
+        });
+        
         applyMessageStyling();
+        
     } else {
-        const chatElement = document.getElementById('chat');
-        if (chatElement) {
-            chatElement.style.cssText += `
-                background-color: transparent !important;
-                background-image: none !important;
-                background: transparent !important;
-                position: relative;
-                z-index: 3;
-                backdrop-filter: none !important;
-                -webkit-backdrop-filter: none !important;
-                box-shadow: none !important;
-                border: none !important;
-                text-shadow: none !important;
-                opacity: 1 !important;
+        // 桌面端：保持原有逻辑
+        const targetContainer = document.getElementById('expression-wrapper');
+        if (!targetContainer) return;
+
+        const bgId = 'wallhaven-app-background';
+        const overlayId = 'wallhaven-app-overlay';
+        
+        // 清除可能存在的其他背景
+        document.querySelectorAll('[id^="wallhaven-"]').forEach(el => el.remove());
+
+        let backgroundContainer = document.getElementById(bgId);
+        let overlay = document.getElementById(overlayId);
+
+        if (!backgroundContainer) {
+            backgroundContainer = document.createElement('div');
+            backgroundContainer.id = bgId;
+            backgroundContainer.style.cssText = `
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                background-size: 100% auto !important;
+                background-position: top center !important;
+                background-repeat: no-repeat !important;
+                z-index: -999 !important;
+                pointer-events: none !important;
             `;
+            document.body.appendChild(backgroundContainer);
         }
+
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = overlayId;
+            overlay.style.cssText = `
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                background-color: rgba(0, 0, 0, ${settings.opacity}) !important;
+                z-index: -998 !important;
+                pointer-events: none !important;
+            `;
+            document.body.appendChild(overlay);
+        }
+
+        backgroundContainer.style.backgroundImage = `url("${imageUrl}")`;
+        overlay.style.backgroundColor = `rgba(0, 0, 0, ${settings.opacity})`;
+        
+        const elementsToMakeTransparent = [
+            document.body,
+            targetContainer,
+            document.getElementById('chat')
+        ].filter(Boolean);
+        
+        elementsToMakeTransparent.forEach(element => {
+            if (element) {
+                element.style.cssText += `
+                    background-color: transparent !important;
+                    background-image: none !important;
+                    backdrop-filter: none !important;
+                    -webkit-backdrop-filter: none !important;
+                `;
+            }
+        });
+        
         applyMessageStyling();
     }
 }
