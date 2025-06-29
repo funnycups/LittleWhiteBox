@@ -11,10 +11,10 @@ function initScriptAssistant() {
     if (!extension_settings[EXT_ID].scriptAssistant) {
         extension_settings[EXT_ID].scriptAssistant = { enabled: false };
     }
-    
+
     $('#xiaobaix_script_assistant').on('change', function() {
         const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-        if (!globalEnabled) return; 
+        if (!globalEnabled) return;
 
         const enabled = $(this).prop('checked');
         extension_settings[EXT_ID].scriptAssistant.enabled = enabled;
@@ -27,9 +27,9 @@ function initScriptAssistant() {
             cleanup();
         }
     });
-    
+
     $('#xiaobaix_script_assistant').prop('checked', extension_settings[EXT_ID].scriptAssistant.enabled);
-    
+
     setupEventListeners();
 
     if (window.registerModuleCleanup) {
@@ -69,19 +69,19 @@ function setupEventListeners() {
 
 function cleanup() {
     if (eventHandlers.chatChanged) {
-        eventSource.off(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
+        eventSource.removeListener(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
     }
     if (eventHandlers.messageReceived) {
-        eventSource.off(event_types.MESSAGE_RECEIVED, eventHandlers.messageReceived);
+        eventSource.removeListener(event_types.MESSAGE_RECEIVED, eventHandlers.messageReceived);
     }
     if (eventHandlers.userMessageRendered) {
-        eventSource.off(event_types.USER_MESSAGE_RENDERED, eventHandlers.userMessageRendered);
+        eventSource.removeListener(event_types.USER_MESSAGE_RENDERED, eventHandlers.userMessageRendered);
     }
     if (eventHandlers.settingsLoadedAfter) {
-        eventSource.off(event_types.SETTINGS_LOADED_AFTER, eventHandlers.settingsLoadedAfter);
+        eventSource.removeListener(event_types.SETTINGS_LOADED_AFTER, eventHandlers.settingsLoadedAfter);
     }
     if (eventHandlers.appReady) {
-        eventSource.off(event_types.APP_READY, eventHandlers.appReady);
+        eventSource.removeListener(event_types.APP_READY, eventHandlers.appReady);
     }
 
     removeScriptDocs();
@@ -101,7 +101,7 @@ function checkAndInjectDocs() {
 async function injectScriptDocs() {
     try {
         let docsContent = '';
-        
+
         try {
             const response = await fetch(`${extensionFolderPath}/scriptDocs.md`);
             if (response.ok) {
@@ -110,7 +110,7 @@ async function injectScriptDocs() {
         } catch (error) {
             docsContent = "无法加载scriptDocs.md文件";
         }
-        
+
         const formattedPrompt = `
 【小白X插件 - 写卡助手】
 你是小白X插件的内置助手，专门帮助用户创建STscript脚本和交互式界面的角色卡。
@@ -123,7 +123,7 @@ async function injectScriptDocs() {
      • 函数会将命令发送给SillyTavern执行，并返回执行结果
      • 使用await关键字等待命令执行完成并获取结果
      • 这使iframe内的JavaScript代码能与SillyTavern通信并执行各种SillyTavern的斜杠命令，不要尝试通过window.parent直接访问SillyTavern的函数，这样不会工作
- 
+
    正确用法示例:
    \`\`\`html
    <!DOCTYPE html>
@@ -139,15 +139,15 @@ async function injectScriptDocs() {
        <h3>天气查询</h3>
        <button onclick="checkWeather()">查询天气</button>
        <div id="display"></div>
-       
+
        <script>
        async function checkWeather() {
            // 调用STscript函数执行斜杠命令
            await STscript('/echo 正在查询天气...');
-       
+
            // 获取变量值
            const 天气 = await STscript('/getvar 天气');
-       
+
            // 在界面中显示结果
            document.getElementById('display').innerHTML = 天气 || '晴天';
        }
@@ -169,7 +169,7 @@ async function injectScriptDocs() {
      a) 在AI输出中包含特定标记(如\`[状态面板]\`)
      b) 在角色卡设置的格式化功能中添加正则表达式来替换这些标记为HTML代码
      c) 勾选小白X的代码块渲染功能显示交互式界面
-   
+
    正则表达式示例:
    - 格式: \`/\\[状态面板\\]/g\` (匹配文本)
    - 替换为: \`\`\`html
@@ -186,13 +186,13 @@ async function injectScriptDocs() {
 4.以下是SillyTavern的官方STscript脚本文档，可结合小白X功能创作与SillyTavern深度交互的角色卡：
 ${docsContent}
 `;
-        
+
         setExtensionPrompt(
-            SCRIPT_MODULE_NAME, 
-            formattedPrompt, 
-            extension_prompt_types.IN_PROMPT, 
+            SCRIPT_MODULE_NAME,
+            formattedPrompt,
+            extension_prompt_types.IN_PROMPT,
             2,
-            false, 
+            false,
             0
         );
     } catch (error) {}

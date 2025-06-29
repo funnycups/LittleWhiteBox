@@ -12,11 +12,11 @@ import { executeSlashCommand } from "./index.js";
 
 const TASKS_MODULE_NAME = "xiaobaix-tasks";
 const EXT_ID = "LittleWhiteBox";
-const defaultSettings = { 
-    enabled: false, 
-    globalTasks: [], 
-    processedMessages: [], 
-    character_allowed_tasks: [] 
+const defaultSettings = {
+    enabled: false,
+    globalTasks: [],
+    processedMessages: [],
+    character_allowed_tasks: []
 };
 
 const MAX_PROCESSED_MESSAGES = 20;
@@ -54,7 +54,7 @@ function getSettings() {
 
 function scheduleCleanup() {
     if (cleanupTimer) return;
-    
+
     cleanupTimer = setInterval(() => {
         const now = Date.now();
         for (const [taskName, lastTime] of taskLastExecutionTime.entries()) {
@@ -62,7 +62,7 @@ function scheduleCleanup() {
                 taskLastExecutionTime.delete(taskName);
             }
         }
-        
+
         if (taskLastExecutionTime.size > MAX_COOLDOWN_ENTRIES) {
             const entries = Array.from(taskLastExecutionTime.entries());
             entries.sort((a, b) => b[1] - a[1]);
@@ -71,13 +71,13 @@ function scheduleCleanup() {
                 taskLastExecutionTime.set(name, time);
             });
         }
-        
+
         const settings = getSettings();
         if (settings.processedMessages.length > MAX_PROCESSED_MESSAGES) {
             settings.processedMessages = settings.processedMessages.slice(-MAX_PROCESSED_MESSAGES);
             debouncedSave();
         }
-        
+
     }, CLEANUP_INTERVAL);
 }
 
@@ -90,20 +90,20 @@ function setTaskCooldown(taskName) {
     taskLastExecutionTime.set(taskName, Date.now());
 }
 
-function isMessageProcessed(messageKey) { 
-    return getSettings().processedMessages.includes(messageKey); 
+function isMessageProcessed(messageKey) {
+    return getSettings().processedMessages.includes(messageKey);
 }
 
 function markMessageAsProcessed(messageKey) {
     const settings = getSettings();
     if (settings.processedMessages.includes(messageKey)) return;
-    
+
     settings.processedMessages.push(messageKey);
-    
+
     if (settings.processedMessages.length > MAX_PROCESSED_MESSAGES) {
         settings.processedMessages = settings.processedMessages.slice(-Math.floor(MAX_PROCESSED_MESSAGES/2));
     }
-    
+
     debouncedSave();
 }
 
@@ -148,14 +148,14 @@ function calculateFloorByType(floorType) {
     if (!Array.isArray(chat) || chat.length === 0) return 0;
     let count = 0;
     switch (floorType) {
-        case 'user': 
-            count = Math.max(0, chat.filter(msg => msg.is_user && !msg.is_system).length - 1); 
+        case 'user':
+            count = Math.max(0, chat.filter(msg => msg.is_user && !msg.is_system).length - 1);
             break;
-        case 'llm': 
-            count = Math.max(0, chat.filter(msg => !msg.is_user && !msg.is_system).length - 1); 
+        case 'llm':
+            count = Math.max(0, chat.filter(msg => !msg.is_user && !msg.is_system).length - 1);
             break;
-        default: 
-            count = Math.max(0, chat.length - 1); 
+        default:
+            count = Math.max(0, chat.length - 1);
             break;
     }
     return count;
@@ -173,22 +173,22 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     if (!settings.enabled || !globalEnabled || (overrideChatChanged ?? chatJustChanged) ||
         (overrideNewChat ?? isNewChat) || isExecutingTask) return;
-    
+
     const allTasks = [...settings.globalTasks, ...getCharacterTasks()];
     if (allTasks.length === 0) return;
-    
+
     const now = Date.now();
     const currentTurnCount = calculateTurnCount();
-    
+
     const tasksToExecute = allTasks.filter(task => {
         if (task.disabled || task.interval <= 0) return false;
-        
+
         const lastExecution = taskLastExecutionTime.get(task.name);
         if (lastExecution && (now - lastExecution) < TASK_COOLDOWN) return false;
-        
+
         const taskTriggerTiming = task.triggerTiming || 'after_ai';
         if (taskTriggerTiming !== triggerContext && taskTriggerTiming !== 'per_turn') return false;
-        
+
         if (taskTriggerTiming === 'per_turn') {
             return triggerContext === 'after_ai' && currentTurnCount > lastTurnCount && currentTurnCount % task.interval === 0;
         } else {
@@ -196,37 +196,37 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
             return currentFloor % task.interval === 0 && currentFloor > 0;
         }
     });
-    
+
     for (const task of tasksToExecute) {
         taskLastExecutionTime.set(task.name, now);
         await executeCommands(task.commands, task.name);
     }
-    
+
     if (triggerContext === 'after_ai') lastTurnCount = currentTurnCount;
 }
 
 async function onMessageReceived(messageId) {
     if (typeof messageId !== 'number' || messageId < 0 || !chat[messageId]) return;
-    
+
     const message = chat[messageId];
-    if (message.is_user || message.is_system || message.mes === '...' || 
+    if (message.is_user || message.is_system || message.mes === '...' ||
         isCommandGenerated || isExecutingTask) return;
-    
+
     if (message.swipe_id !== undefined && message.swipe_id > 0) {
         console.debug('[Tasks] 跳过swipe消息，不触发任务');
         return;
     }
-    
+
     const settings = getSettings();
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     if (!settings.enabled || !globalEnabled) return;
-    
+
     const messageKey = `${getContext().chatId}_${messageId}_${message.send_date || Date.now()}`;
     if (isMessageProcessed(messageKey)) {
         console.debug(`[Tasks] 消息已处理，跳过: ${messageKey}`);
         return;
     }
-    
+
     console.log(`[Tasks] 处理新消息: ${messageKey}, 当前楼层: ${calculateFloorByType('all')}`);
     markMessageAsProcessed(messageKey);
     await checkAndExecuteTasks('after_ai');
@@ -248,14 +248,14 @@ async function onUserMessage() {
 function onMessageDeleted(data) {
     const settings = getSettings();
     const chatId = getContext().chatId;
-    
-    settings.processedMessages = settings.processedMessages.filter(key => 
+
+    settings.processedMessages = settings.processedMessages.filter(key =>
         !key.startsWith(`${chatId}_`)
     );
-    
+
     isExecutingTask = false;
     isCommandGenerated = false;
-    
+
     debouncedSave();
     console.log('[Tasks] 消息删除后清理状态完成');
 }
@@ -269,11 +269,11 @@ function onChatChanged(chatId) {
     isExecutingTask = false;
     isCommandGenerated = false;
     taskLastExecutionTime.clear();
-    
+
     const settings = getSettings();
     settings.processedMessages = settings.processedMessages.filter(key => !key.startsWith(`${chatId}_`));
     debouncedSave();
-    
+
     checkEmbeddedTasks();
     refreshTaskLists();
     setTimeout(() => { chatJustChanged = isNewChat = false; }, 2000);
@@ -281,7 +281,7 @@ function onChatChanged(chatId) {
 
 function getTasksHash() {
     const allTasks = [...getSettings().globalTasks, ...getCharacterTasks()];
-    return allTasks.map(t => 
+    return allTasks.map(t =>
         `${t.id}_${t.disabled}_${t.name}_${t.interval}_${t.floorType}_${t.triggerTiming}`
     ).join('|');
 }
@@ -299,9 +299,9 @@ function createTaskItem(task, index, isCharacterTask = false) {
     taskElement.find('.disable_task').attr('id', `task_disable_${task.id}`).prop('checked', task.disabled);
     taskElement.find('label.checkbox').attr('for', `task_disable_${task.id}`);
 
-    taskElement.find('.disable_task').on('input', () => { 
-        task.disabled = taskElement.find('.disable_task').prop('checked'); 
-        saveTask(task, index, isCharacterTask); 
+    taskElement.find('.disable_task').on('input', () => {
+        task.disabled = taskElement.find('.disable_task').prop('checked');
+        saveTask(task, index, isCharacterTask);
     });
     taskElement.find('.test_task').on('click', () => testTask(index, taskType));
     taskElement.find('.edit_task').on('click', () => editTask(index, taskType));
@@ -312,21 +312,21 @@ function createTaskItem(task, index, isCharacterTask = false) {
 function refreshTaskLists() {
     const currentHash = getTasksHash();
     if (currentHash === lastTasksHash) return;
-    
+
     lastTasksHash = currentHash;
-    
+
     const $globalList = $('#global_tasks_list');
     const $charList = $('#character_tasks_list');
     const globalTasks = getSettings().globalTasks;
     const characterTasks = getCharacterTasks();
-    
+
     $globalList.empty();
-    globalTasks.forEach((task, i) => 
+    globalTasks.forEach((task, i) =>
         $globalList.append(createTaskItem(task, i, false))
     );
-    
+
     $charList.empty();
-    characterTasks.forEach((task, i) => 
+    characterTasks.forEach((task, i) =>
         $charList.append(createTaskItem(task, i, true))
     );
 }
@@ -400,10 +400,10 @@ function editTask(index, type) {
 function deleteTask(index, type) {
     const task = (type === 'character' ? getCharacterTasks() : getSettings().globalTasks)[index];
     if (!task) return;
-    
+
     $(document).off('keydown.confirmmodal');
     $('.xiaobaix-confirm-modal').remove();
-    
+
     const dialogHtml = `
     <div class="xiaobaix-confirm-modal">
         <div class="xiaobaix-confirm-content">
@@ -414,9 +414,9 @@ function deleteTask(index, type) {
             </div>
         </div>
     </div>`;
-    
+
     $('body').append(dialogHtml);
-    
+
     $('.xiaobaix-confirm-yes').on('click', function() {
         $('.xiaobaix-confirm-modal').remove();
         if (type === 'character') {
@@ -429,11 +429,11 @@ function deleteTask(index, type) {
         }
         refreshTaskLists();
     });
-    
+
     $('.xiaobaix-confirm-no, .xiaobaix-confirm-modal').on('click', function(e) {
         if (e.target === this) $('.xiaobaix-confirm-modal').remove();
     });
-    
+
     $(document).on('keydown.confirmmodal', function(e) {
         if (e.key === 'Escape') {
             $('.xiaobaix-confirm-modal').remove();
@@ -458,11 +458,11 @@ async function checkEmbeddedTasks() {
     if (!this_chid) return;
     const avatar = characters[this_chid]?.avatar;
     const tasks = characters[this_chid]?.data?.extensions?.[TASKS_MODULE_NAME]?.tasks;
-  
+
     if (Array.isArray(tasks) && tasks.length > 0 && avatar) {
         const settings = getSettings();
         if (!settings.character_allowed_tasks) settings.character_allowed_tasks = [];
-      
+
         if (!settings.character_allowed_tasks.includes(avatar)) {
             const checkKey = `AlertTasks_${avatar}`;
             if (!accountStorage.getItem(checkKey)) {
@@ -510,10 +510,10 @@ async function importCharacterTasks(file) {
         const fileText = await getFileText(file);
         const importData = JSON.parse(fileText);
         if (!Array.isArray(importData.tasks)) throw new Error('无效的任务文件格式');
-        const tasksToImport = importData.tasks.map(task => ({ 
-            ...task, 
-            id: uuidv4(), 
-            importedAt: new Date().toISOString() 
+        const tasksToImport = importData.tasks.map(task => ({
+            ...task,
+            id: uuidv4(),
+            importedAt: new Date().toISOString()
         }));
         await saveCharacterTasks([...getCharacterTasks(), ...tasksToImport]);
         refreshTaskLists();
@@ -536,10 +536,10 @@ function getTaskCooldownStatus() {
     const status = {};
     for (const [taskName, lastTime] of taskLastExecutionTime.entries()) {
         const remaining = Math.max(0, TASK_COOLDOWN - (Date.now() - lastTime));
-        status[taskName] = { 
-            lastExecutionTime: lastTime, 
-            remainingCooldown: remaining, 
-            isInCooldown: remaining > 0 
+        status[taskName] = {
+            lastExecutionTime: lastTime,
+            remainingCooldown: remaining,
+            isInCooldown: remaining > 0
         };
     }
     return status;
@@ -562,14 +562,14 @@ function cleanup() {
         cleanupTimer = null;
     }
     taskLastExecutionTime.clear();
-    
-    eventSource.off(event_types.MESSAGE_RECEIVED, onMessageReceived);
-    eventSource.off(event_types.USER_MESSAGE_RENDERED, onUserMessage);
-    eventSource.off(event_types.CHAT_CHANGED, onChatChanged);
-    eventSource.off(event_types.MESSAGE_DELETED, onMessageDeleted);
-    eventSource.off(event_types.MESSAGE_SWIPED);
-    eventSource.off(event_types.CHARACTER_DELETED);
-    
+
+    eventSource.removeListener(event_types.MESSAGE_RECEIVED, onMessageReceived);
+    eventSource.removeListener(event_types.USER_MESSAGE_RENDERED, onUserMessage);
+    eventSource.removeListener(event_types.CHAT_CHANGED, onChatChanged);
+    eventSource.removeListener(event_types.MESSAGE_DELETED, onMessageDeleted);
+    eventSource.removeListener(event_types.MESSAGE_SWIPED);
+    eventSource.removeListener(event_types.CHARACTER_DELETED);
+
     $(window).off('beforeunload', cleanup);
 }
 
@@ -679,7 +679,7 @@ function initTasks() {
     if (window.registerModuleCleanup) {
         window.registerModuleCleanup('scheduledTasks', cleanup);
     }
-    
+
     $('#scheduled_tasks_enabled').on('input', e => {
 
         const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
@@ -700,22 +700,22 @@ function initTasks() {
     $('#import_character_tasks').on('click', () => $('#import_tasks_file').trigger('click'));
     $('#import_tasks_file').on('change', function(e) {
         const file = e.target.files[0];
-        if (file) { 
-            importCharacterTasks(file); 
-            $(this).val(''); 
+        if (file) {
+            importCharacterTasks(file);
+            $(this).val('');
         }
     });
-    
+
     $('#scheduled_tasks_enabled').prop('checked', getSettings().enabled);
     refreshTaskLists();
-    
+
     eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
     eventSource.on(event_types.USER_MESSAGE_RENDERED, onUserMessage);
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
     eventSource.on(event_types.MESSAGE_DELETED, onMessageDeleted);
-    eventSource.on(event_types.MESSAGE_SWIPED, () => { 
-        isExecutingTask = false; 
-        isCommandGenerated = false; 
+    eventSource.on(event_types.MESSAGE_SWIPED, () => {
+        isExecutingTask = false;
+        isCommandGenerated = false;
     });
     eventSource.on(event_types.CHARACTER_DELETED, ({ character }) => {
         const avatar = character?.avatar;
@@ -728,12 +728,12 @@ function initTasks() {
             }
         }
     });
-    
+
     $(window).on('beforeunload', cleanup);
-    
+
     registerSlashCommands();
     setTimeout(() => { checkEmbeddedTasks(); }, 1000);
-    
+
     console.log('[Tasks] 插件已加载，内存优化版本');
 }
 

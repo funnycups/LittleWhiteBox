@@ -349,11 +349,11 @@ function onChatChanged() {
 
 function cleanup() {
     if (isImmersiveModeActive) {
-        stopImmersiveMode();
+        disableImmersiveMode();
     }
 
     if (eventHandlers.chatChanged) {
-        eventSource.off(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
+        eventSource.removeListener(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
     }
     if (eventHandlers.globalStateChange) {
         document.removeEventListener('xiaobaixEnabledChanged', eventHandlers.globalStateChange);

@@ -478,7 +478,7 @@ function addEventListeners() {
 }
 
 function removeEventListeners() {
-    state.eventListeners.forEach(({ event, handler }) => eventSource.off(event, handler));
+    state.eventListeners.forEach(({ event, handler }) => eventSource.removeListener(event, handler));
     state.eventListeners = [];
 }
 
@@ -491,7 +491,6 @@ function cleanup() {
     $('#message_preview_btn').remove();
     cleanupMemory();
 
-    // 重置状态
     Object.assign(state, {
         previewPromiseResolve: null, previewPromiseReject: null,
         isPreviewMode: false, isLongInterceptMode: false,
@@ -592,6 +591,19 @@ async function deleteInterceptedMessages() {
     }
 }
 
+function shouldSetupInterceptor() {
+    const settings = getSettings();
+    return settings.preview.enabled || settings.recorded.enabled;
+}
+
+function updateInterceptorState() {
+    if (shouldSetupInterceptor()) {
+        setupInterceptor();
+    } else {
+        restoreOriginalFetch();
+    }
+}
+
 function initMessagePreview() {
     try {
         cleanup();
@@ -613,6 +625,7 @@ function initMessagePreview() {
                 clearInterval(state.cleanupTimer);
                 state.cleanupTimer = null;
             }
+            updateInterceptorState();
         });
 
         $("#xiaobaix_recorded_enabled").prop("checked", settings.recorded.enabled).on("change", function() {
@@ -626,10 +639,11 @@ function initMessagePreview() {
                 $('.mes_history_preview').remove();
                 state.apiRequestHistory.length = 0;
             }
+            updateInterceptorState();
         });
 
         if (!settings.preview.enabled) $('#message_preview_btn').hide();
-        setupInterceptor();
+        updateInterceptorState();
         if (settings.recorded.enabled) addHistoryButtonsDebounced();
         addEventListeners();
         if (window.registerModuleCleanup) window.registerModuleCleanup('messagePreview', cleanup);
@@ -642,4 +656,6 @@ function initMessagePreview() {
 
 window.addEventListener('beforeunload', cleanup);
 
-export { initMessagePreview, addHistoryButtonsDebounced };
+window.messagePreviewCleanup = cleanup;
+
+export { initMessagePreview, addHistoryButtonsDebounced, cleanup };

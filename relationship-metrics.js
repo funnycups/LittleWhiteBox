@@ -2133,7 +2133,7 @@ class StatsUIManager {
                 <p>该页设定的均为初始内容，不影响当前。支持导出/导入设定，随卡绑定(用户设置内容不会随卡绑定导出)。</p>
                 ${this_chid && characters[this_chid] ? `<p class="current-character">当前角色：<strong>${characters[this_chid].name}</strong></p>` : ''}
             </div>
-            
+
             <div class="user-settings-section">
                 <h3>👤 用户设置</h3>
                 <div class="user-gender-setting">
@@ -2155,9 +2155,9 @@ class StatsUIManager {
                     <p class="setting-desc">添加NPC在对话中称呼用户的各种方式（如：亲爱的、宝贝等，可多项）</p>
                 </div>
             </div>
-            
+
             <hr class="section-divider" />
-          
+
             <div class="tracked-names-section">
                 <h3>📋 追踪人物设置</h3>
                 <p class="section-desc">添加需要追踪关系的人物名称，系统会自动分析与这些人物的互动</p>
@@ -2197,9 +2197,9 @@ class StatsUIManager {
                     <button id="add-tracked-name" class="add-name-button">添加</button>
                 </div>
             </div>
-          
+
             <hr class="section-divider" />
-          
+
             <div class="behavior-stages-selector">`;
 
         const stages = Object.keys(behaviors);
@@ -2540,10 +2540,10 @@ class StatsTracker {
 
     cleanup() {
         if (this.chatChangedHandler) {
-            eventSource.off(event_types.CHAT_CHANGED, this.chatChangedHandler);
+            eventSource.removeListener(event_types.CHAT_CHANGED, this.chatChangedHandler);
         }
         if (this.appReadyHandler) {
-            eventSource.off(event_types.APP_READY, this.appReadyHandler);
+            eventSource.removeListener(event_types.APP_READY, this.appReadyHandler);
         }
 
         this.removeMemoryPrompt();
