@@ -688,10 +688,10 @@ function toggleLongInterceptMode() {
 
     if (isLongInterceptMode) {
         $btn.css('color', 'red');
-        toastr.info('拦截模式已开启', '', { timeOut: 2000 });
+        toastr.info('持续预览已开启', '', { timeOut: 2000 });
     } else {
         $btn.css('color', '');
-        toastr.info('拦截模式已关闭', '', { timeOut: 2000 });
+        toastr.info('持续预览已关闭', '', { timeOut: 2000 });
     }
 }
 
