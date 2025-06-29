@@ -20,29 +20,29 @@ function initImmersiveMode() {
     if (!extension_settings[EXT_ID].immersive) {
         extension_settings[EXT_ID].immersive = structuredClone(defaultSettings);
     }
-    
+
     const settings = extension_settings[EXT_ID].immersive;
-    
+
     for (const key in defaultSettings) {
         if (settings[key] === undefined) {
             settings[key] = defaultSettings[key];
         }
     }
-    
+
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
 
     $('#xiaobaix_immersive_enabled').prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
-    
+
     if (globalEnabled) {
         isImmersiveModeActive = settings.enabled;
-        
+
         if (isImmersiveModeActive) {
             enableImmersiveMode();
         }
-        
+
         bindSettingsEvents();
     }
-    
+
     eventHandlers.chatChanged = onChatChanged;
     eventHandlers.globalStateChange = handleGlobalStateChange;
 
@@ -52,13 +52,13 @@ function initImmersiveMode() {
     if (window.registerModuleCleanup) {
         window.registerModuleCleanup('immersiveMode', cleanup);
     }
-    
+
     console.log(`[${EXT_ID}] 沉浸式显示模式功能已加载`);
 }
 
 function bindSettingsEvents() {
     if (eventsBound) return;
-    
+
     setTimeout(() => {
         const checkbox = document.getElementById('xiaobaix_immersive_enabled');
         if (checkbox && !eventsBound) {
@@ -68,7 +68,7 @@ function bindSettingsEvents() {
             checkbox.addEventListener('change', function() {
                 toggleImmersiveMode();
             });
-            
+
             eventsBound = true;
         }
     }, 500);
@@ -85,19 +85,19 @@ function unbindSettingsEvents() {
 
 function handleGlobalStateChange(event) {
     const globalEnabled = event.detail.enabled;
-    
+
     $('#xiaobaix_immersive_enabled').prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
-    
+
     if (globalEnabled) {
         const settings = getImmersiveSettings();
         isImmersiveModeActive = settings.enabled;
-        
+
         if (isImmersiveModeActive) {
             enableImmersiveMode();
         }
-        
+
         bindSettingsEvents();
-        
+
         setTimeout(() => {
             const checkbox = document.getElementById('xiaobaix_immersive_enabled');
             if (checkbox) {
@@ -109,7 +109,7 @@ function handleGlobalStateChange(event) {
             disableImmersiveMode();
         }
         isImmersiveModeActive = false;
-        
+
         unbindSettingsEvents();
     }
 }
@@ -121,30 +121,30 @@ function getImmersiveSettings() {
 function toggleImmersiveMode() {
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     if (!globalEnabled) return;
-    
+
     const settings = getImmersiveSettings();
     settings.enabled = !settings.enabled;
     isImmersiveModeActive = settings.enabled;
-    
+
     const checkbox = document.getElementById('xiaobaix_immersive_enabled');
     if (checkbox) {
         checkbox.checked = settings.enabled;
     }
-    
+
     if (isImmersiveModeActive) {
         enableImmersiveMode();
     } else {
         disableImmersiveMode();
         cleanup();
     }
-    
+
     saveSettingsDebounced();
 }
 
 function enableImmersiveMode() {
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     if (!globalEnabled) return;
-    
+
     console.log('[小白X] 启用沉浸式显示模式');
     $('body').addClass('immersive-mode');
     updateMessageDisplay();
@@ -164,20 +164,20 @@ function startChatObserver() {
     if (chatObserver) {
         stopChatObserver();
     }
-    
+
     const chatContainer = document.getElementById('chat');
     if (!chatContainer) return;
-    
+
     chatObserver = new MutationObserver((mutations) => {
         let hasValidAIMessage = false;
-        
+
         mutations.forEach((mutation) => {
             if (mutation.type === 'childList') {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE && node.classList && node.classList.contains('mes')) {
                         const isUser = node.getAttribute('is_user') === 'true';
                         const isSystem = node.getAttribute('is_system') === 'true';
-                        
+
                         if (!isUser && !isSystem) {
                             hasValidAIMessage = true;
                             console.log('[小白X] 检测到AI消息，准备切换页面');
@@ -185,7 +185,7 @@ function startChatObserver() {
                     }
                 });
             }
-            
+
             if (mutation.type === 'subtree' || mutation.type === 'characterData') {
                 const target = mutation.target;
                 if (target && target.closest) {
@@ -193,7 +193,7 @@ function startChatObserver() {
                     if (mesElement) {
                         const isUser = mesElement.getAttribute('is_user') === 'true';
                         const isSystem = mesElement.getAttribute('is_system') === 'true';
-                        
+
                         if (!isUser && !isSystem) {
                             hasValidAIMessage = true;
                         }
@@ -201,12 +201,12 @@ function startChatObserver() {
                 }
             }
         });
-        
+
         if (hasValidAIMessage) {
             handleChatUpdate();
         }
     });
-    
+
     chatObserver.observe(chatContainer, {
         childList: true,
         subtree: true,
@@ -223,9 +223,9 @@ function stopChatObserver() {
 
 function handleChatUpdate() {
     if (!isImmersiveModeActive) return;
-    
+
     const settings = getImmersiveSettings();
-    
+
     if (settings.autoJumpOnAI && !settings.showAllMessages) {
         console.log('[小白X] AI消息检测，保持单个消息显示模式');
         updateMessageDisplay();
@@ -237,19 +237,19 @@ function handleChatUpdate() {
 
 function updateMessageDisplay() {
     if (!isImmersiveModeActive) return;
-    
+
     const messages = $('#chat .mes');
     const settings = getImmersiveSettings();
-    
+
     if (messages.length === 0) return;
-    
+
     if (settings.showAllMessages) {
         messages.show();
     } else {
         messages.hide();
         messages.last().show();
     }
-    
+
     updateNavigationButtons();
 }
 
@@ -278,7 +278,7 @@ function showNavigationButtons() {
             </div>
         `;
 
-        $('#chat').after(navigationHtml);
+        $('#chat').append(navigationHtml);
 
         const navActions = {
             '#immersive-swipe-left': () => handleSwipe('.swipe_left'),
@@ -294,16 +294,17 @@ function showNavigationButtons() {
     updateNavigationButtons();
 }
 
+
 function hideNavigationButtons() {
     $('#immersive-navigation').remove();
 }
 
 function updateNavigationButtons() {
     if (!isImmersiveModeActive) return;
-    
+
     const settings = getImmersiveSettings();
     const $toggleBtn = $('#immersive-toggle');
-    
+
     if (settings.showAllMessages) {
         $toggleBtn.find('i').removeClass('fa-expand').addClass('fa-compress');
         $toggleBtn.attr('title', '切换到单层模式');
@@ -315,10 +316,10 @@ function updateNavigationButtons() {
 
 function toggleDisplayMode() {
     if (!isImmersiveModeActive) return;
-    
+
     const settings = getImmersiveSettings();
     settings.showAllMessages = !settings.showAllMessages;
-    
+
     updateMessageDisplay();
     saveSettingsDebounced();
 }
