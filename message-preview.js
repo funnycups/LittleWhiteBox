@@ -25,6 +25,9 @@ let eventListeners = [];
 let previewPromiseResolve = null;
 let previewPromiseReject = null;
 let sendButtonState = { wasDisabled: false };
+let isLongInterceptMode = false;
+let longPressTimer = null;
+let longPressDelay = 1000;
 
 function getSettings() {
     if (!extension_settings[EXT_ID]) {
@@ -64,14 +67,14 @@ function setupInterceptor() {
 
     window.fetch = function(url, options = {}) {
         if (isTargetApiRequest(url, options)) {
-            if (isPreviewMode) {
+            if (isPreviewMode || isLongInterceptMode) {
                 return handlePreviewInterception(url, options)
                     .catch(error => {
                         return new Response(JSON.stringify({
                             error: { message: "预览失败，请手动中止消息生成。" }
-                        }), { 
-                            status: 500, 
-                            headers: { 'Content-Type': 'application/json' } 
+                        }), {
+                            status: 500,
+                            headers: { 'Content-Type': 'application/json' }
                         });
                     });
             } else {
@@ -132,7 +135,7 @@ function recordRealApiRequest(url, options) {
         const requestData = JSON.parse(options.body);
         const context = getContext();
         const userInput = extractUserInputFromMessages(requestData.messages || []);
-    
+
         const historyItem = {
             url,
             method: options.method || 'POST',
@@ -145,18 +148,18 @@ function recordRealApiRequest(url, options) {
             userInput,
             isRealRequest: true
         };
-    
+
         apiRequestHistory.unshift(historyItem);
         if (apiRequestHistory.length > CONSTANTS.MAX_HISTORY_RECORDS) {
             apiRequestHistory = apiRequestHistory.slice(0, CONSTANTS.MAX_HISTORY_RECORDS);
         }
-    
+
         setTimeout(() => {
             if (apiRequestHistory[0] && !apiRequestHistory[0].associatedMessageId) {
                 apiRequestHistory[0].associatedMessageId = context.chat?.length || 0;
             }
         }, CONSTANTS.MESSAGE_ASSOCIATION_DELAY);
-    
+
     } catch (error) {
     }
 }
@@ -165,7 +168,7 @@ async function handlePreviewInterception(url, options) {
     try {
         const requestData = JSON.parse(options.body);
         const userInput = extractUserInputFromMessages(requestData?.messages || []);
-    
+
         capturedPreviewData = {
             url,
             method: options.method || 'POST',
@@ -176,13 +179,17 @@ async function handlePreviewInterception(url, options) {
             userInput,
             isPreview: true
         };
-    
-        if (previewPromiseResolve) {
+
+        if (isLongInterceptMode) {
+            setTimeout(() => {
+                displayPreviewResult(capturedPreviewData, userInput);
+            }, 100);
+        } else if (previewPromiseResolve) {
             previewPromiseResolve({ success: true, data: capturedPreviewData });
             previewPromiseResolve = null;
             previewPromiseReject = null;
         }
-    
+
         return new Response(JSON.stringify({
             choices: [{
                 message: { content: "预览模式" },
@@ -192,7 +199,7 @@ async function handlePreviewInterception(url, options) {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
         });
-    
+
     } catch (error) {
         if (previewPromiseReject) {
             previewPromiseReject(error);
@@ -230,7 +237,7 @@ function interceptMessageCreation() {
     return function restore() {
         context.chat.push = originalPush;
         Element.prototype.appendChild = originalAppendChild;
-    
+
         if (previewMessageIds.size > 0) {
             const idsToDelete = Array.from(previewMessageIds).sort((a, b) => b - a);
             idsToDelete.forEach(id => {
@@ -260,26 +267,26 @@ function waitForPreviewInterception() {
     return new Promise((resolve, reject) => {
         previewPromiseResolve = resolve;
         previewPromiseReject = reject;
-    
+
         const timeoutId = setTimeout(() => {
             if (previewPromiseResolve) {
-                previewPromiseResolve({ 
-                    success: false, 
+                previewPromiseResolve({
+                    success: false,
                     error: `等待超时 (${settings.preview.timeoutSeconds}秒)`
                 });
                 previewPromiseResolve = null;
                 previewPromiseReject = null;
             }
         }, timeoutMs);
-    
+
         const originalResolve = previewPromiseResolve;
         const originalReject = previewPromiseReject;
-    
+
         previewPromiseResolve = (value) => {
             clearTimeout(timeoutId);
             if (originalResolve) originalResolve(value);
         };
-    
+
         previewPromiseReject = (error) => {
             clearTimeout(timeoutId);
             if (originalReject) originalReject(error);
@@ -300,55 +307,55 @@ async function showMessagePreview() {
             toastr.warning('消息预览功能未启用');
             return;
         }
-    
+
         const textareaText = String($('#send_textarea').val()).trim();
         if (!textareaText) {
             toastr.error('请先输入消息内容');
             return;
         }
-    
+
         manageSendButton(true);
         isPreviewMode = true;
         capturedPreviewData = null;
         previewMessageIds.clear();
-    
+
         previewAbortController = new AbortController();
         restoreMessageCreation = interceptMessageCreation();
-    
-        loadingToast = toastr.info(`正在预览请求...（${settings.preview.timeoutSeconds}秒超时）`, '消息预览', { 
-            timeOut: 0, 
-            tapToDismiss: false 
+
+        loadingToast = toastr.info(`正在预览请求...（${settings.preview.timeoutSeconds}秒超时）`, '消息预览', {
+            timeOut: 0,
+            tapToDismiss: false
         });
-    
+
         const sendTriggered = triggerSendSafely();
         if (!sendTriggered) {
             throw new Error('无法触发发送事件');
         }
-    
+
         const result = await waitForPreviewInterception().catch(error => ({
-            success: false, 
-            error: error.message 
+            success: false,
+            error: error.message
         }));
-    
+
         if (loadingToast) {
             toastr.clear(loadingToast);
             loadingToast = null;
         }
-    
+
         if (result.success) {
             await displayPreviewResult(result.data, textareaText);
             toastr.success('预览成功！', '', { timeOut: 3000 });
         } else {
             toastr.error(`预览失败: ${result.error}`, '', { timeOut: 5000 });
         }
-    
+
     } catch (error) {
         if (loadingToast) {
             toastr.clear(loadingToast);
             loadingToast = null;
         }
         toastr.error(`预览异常: ${error.message}`, '', { timeOut: 5000 });
-    
+
     } finally {
         if (previewAbortController) {
             try {
@@ -357,23 +364,23 @@ async function showMessagePreview() {
             }
             previewAbortController = null;
         }
-    
+
         if (previewPromiseResolve) {
-            previewPromiseResolve({ 
-                success: false, 
-                error: '预览已取消' 
+            previewPromiseResolve({
+                success: false,
+                error: '预览已取消'
             });
         }
         previewPromiseResolve = null;
         previewPromiseReject = null;
-    
+
         if (restoreMessageCreation) {
             try {
                 restoreMessageCreation();
             } catch (cleanupError) {
             }
         }
-    
+
         isPreviewMode = false;
         capturedPreviewData = null;
         manageSendButton(false);
@@ -384,12 +391,12 @@ async function displayPreviewResult(data, userInput) {
     try {
         const formattedContent = formatPreviewContent(data, userInput, false);
         const popupContent = `<div class="message-preview-container"><div class="message-preview-content-box">${formattedContent}</div></div>`;
-    
-        await callGenericPopup(popupContent, POPUP_TYPE.TEXT, '消息预览', { 
-            wide: true, 
-            large: true 
+
+        await callGenericPopup(popupContent, POPUP_TYPE.TEXT, '消息预览', {
+            wide: true,
+            large: true
         });
-    
+
     } catch (error) {
         toastr.error('显示预览失败');
     }
@@ -411,8 +418,8 @@ function findApiRequestForMessage(messageId) {
     }
 
     const candidates = apiRequestHistory.filter(record => record.messageId <= messageId + 2);
-    return candidates.length > 0 ? 
-        candidates.sort((a, b) => b.messageId - a.messageId)[0] : 
+    return candidates.length > 0 ?
+        candidates.sort((a, b) => b.messageId - a.messageId)[0] :
         apiRequestHistory[0];
 }
 
@@ -422,7 +429,7 @@ async function showMessageHistoryPreview(messageId) {
         const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
         if (!settings.recorded.enabled || !globalEnabled) return;
         const apiRecord = findApiRequestForMessage(messageId);
-    
+
         if (apiRecord?.messages?.length > 0) {
             const messageData = {
                 ...apiRecord,
@@ -431,11 +438,11 @@ async function showMessageHistoryPreview(messageId) {
             };
             const formattedContent = formatPreviewContent(messageData, messageData.userInput, true);
             const popupContent = `<div class="message-preview-container"><div class="message-preview-content-box">${formattedContent}</div></div>`;
-        
-            await callGenericPopup(popupContent, POPUP_TYPE.TEXT, 
-                `消息历史预览 - 第 ${messageId + 1} 条消息`, { 
-                wide: true, 
-                large: true 
+
+            await callGenericPopup(popupContent, POPUP_TYPE.TEXT,
+                `消息历史预览 - 第 ${messageId + 1} 条消息`, {
+                wide: true,
+                large: true
             });
         } else {
             toastr.warning(`未找到第 ${messageId + 1} 条消息的API请求记录`);
@@ -458,10 +465,10 @@ function formatMessagesArray(messages) {
 
     processedMessages.forEach((msg, index) => {
         const msgContent = msg.content || '';
-        
+
         let roleLabel = '';
         let roleColor = '';
-        
+
         switch (msg.role) {
             case 'system':
                 roleLabel = 'SYSTEM:';
@@ -479,9 +486,9 @@ function formatMessagesArray(messages) {
                 roleLabel = `${msg.role.toUpperCase()}:`;
                 roleColor = '#FFF';
         }
-    
+
         content += `<div style="color: ${roleColor}; font-weight: bold; margin-top: ${index > 0 ? '15px' : '0'};">${roleLabel}</div>`;
-        
+
         if (/<[^>]+>/g.test(msgContent)) {
             content += `<pre style="white-space: pre-wrap; margin: 5px 0; color: ${roleColor};">${highlightXmlTags(msgContent)}</pre>`;
         } else {
@@ -521,7 +528,7 @@ const addHistoryButtonsDebounced = debounce(() => {
                     e.stopPropagation();
                     showMessageHistoryPreview(mesId);
                 });
-        
+
             flexContainer.append(historyButton);
         }
     });
@@ -547,8 +554,8 @@ function addEventListeners() {
         { event: event_types.MESSAGE_RECEIVED, handler: addHistoryButtonsDebounced },
         { event: event_types.CHARACTER_MESSAGE_RENDERED, handler: addHistoryButtonsDebounced },
         { event: event_types.USER_MESSAGE_RENDERED, handler: addHistoryButtonsDebounced },
-        { 
-            event: event_types.CHAT_CHANGED, 
+        {
+            event: event_types.CHAT_CHANGED,
             handler: () => {
                 apiRequestHistory = [];
                 setTimeout(addHistoryButtonsDebounced, CONSTANTS.CHECK_INTERVAL);
@@ -559,7 +566,7 @@ function addEventListeners() {
             handler: (messageId) => {
                 setTimeout(() => {
                     const recentRequest = apiRequestHistory.find(record =>
-                        !record.associatedMessageId && 
+                        !record.associatedMessageId &&
                         (Date.now() - record.timestamp) < CONSTANTS.RECENT_REQUEST_WINDOW
                     );
                     if (recentRequest) {
@@ -598,20 +605,26 @@ function cleanup() {
     previewPromiseResolve = null;
     previewPromiseReject = null;
     isPreviewMode = false;
+    isLongInterceptMode = false;
+    if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+    }
     sendButtonState = { wasDisabled: false };
 }
 
 function initMessagePreview() {
     try {
         cleanup();
-    
+
         const settings = getSettings();
-    
-        const previewButton = $(`<div id="message_preview_btn" class="fa-regular fa-note-sticky interactable" title="预览消息"></div>`)
-            .on('click', showMessagePreview);
-    
+
+        const previewButton = $(`<div id="message_preview_btn" class="fa-regular fa-note-sticky interactable" title="预览消息"></div>`);
+
         $("#send_but").before(previewButton);
-    
+
+        handlePreviewButtonEvents();
+
         $("#xiaobaix_preview_enabled").prop("checked", settings.preview.enabled).on("change", function() {
             const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
             if (!globalEnabled) return;
@@ -643,15 +656,15 @@ function initMessagePreview() {
                 apiRequestHistory.length = 0;
             }
         });
-    
+
         if (!settings.preview.enabled) $('#message_preview_btn').hide();
-    
+
         setupInterceptor();
-    
+
         if (settings.recorded.enabled) {
             addHistoryButtonsDebounced();
         }
-    
+
         addEventListeners();
 
         if (window.registerModuleCleanup) {
@@ -668,5 +681,46 @@ function initMessagePreview() {
 }
 
 window.addEventListener('beforeunload', cleanup);
+
+function toggleLongInterceptMode() {
+    isLongInterceptMode = !isLongInterceptMode;
+    const $btn = $('#message_preview_btn');
+
+    if (isLongInterceptMode) {
+        $btn.css('color', 'red');
+        toastr.info('拦截模式已开启', '', { timeOut: 2000 });
+    } else {
+        $btn.css('color', '');
+        toastr.info('拦截模式已关闭', '', { timeOut: 2000 });
+    }
+}
+
+function handlePreviewButtonEvents() {
+    const $btn = $('#message_preview_btn');
+
+    $btn.on('mousedown touchstart', function(e) {
+        longPressTimer = setTimeout(() => {
+            toggleLongInterceptMode();
+        }, longPressDelay);
+    });
+
+    $btn.on('mouseup touchend mouseleave', function(e) {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+    });
+
+    $btn.on('click', function(e) {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+            return;
+        }
+        if (!isLongInterceptMode) {
+            showMessagePreview();
+        }
+    });
+}
 
 export { initMessagePreview, addHistoryButtonsDebounced };
