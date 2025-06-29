@@ -42,8 +42,8 @@ const tagWeights = {
 const wallhavenTags = {
     characters: {
         // 基础人称
-        "女孩": "anime girl", "少女": "anime girl", "女性": "woman", "女人": "woman", "她": "girl",
-        "男孩": "boy", "少年": "boy", "男性": "man", "男人": "man", "他": "man",
+        "女孩": "anime girl", "少女": "anime girl", "女性": "woman", "女人": "woman",
+        "男孩": "boy", "少年": "boy", "男性": "man", "男人": "man",
         "美女": "beautiful woman", "帅哥": "handsome man", "女生": "girl", "男生": "boy",
         
         // 职业角色
