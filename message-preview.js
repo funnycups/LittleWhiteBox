@@ -14,7 +14,6 @@ const CONSTANTS = {
     RECENT_REQUEST_WINDOW: 30000
 };
 
-// 状态管理
 let state = {
     isPreviewMode: false,
     isLongInterceptMode: false,
@@ -155,10 +154,8 @@ async function handlePreviewInterception(url, options) {
         if (state.isLongInterceptMode) {
             setTimeout(() => {
                 displayPreviewResult(state.capturedPreviewData, userInput);
-                // 长期拦截模式下，立即清理消息
                 if (state.longInterceptRestoreFunction) {
                     try { state.longInterceptRestoreFunction(); } catch (error) {}
-                    // 重新设置拦截，为下一次发送做准备
                     const context = getContext();
                     state.chatLengthBeforeIntercept = context.chat?.length || 0;
                     state.longInterceptRestoreFunction = interceptMessageCreation();
@@ -525,7 +522,6 @@ function toggleLongInterceptMode() {
             try { state.longInterceptRestoreFunction(); } catch (error) {}
             state.longInterceptRestoreFunction = null;
         }
-        // 长期拦截模式下消息已经在每次发送后自动清理，不需要手动删除
         state.interceptedMessageIds = [];
         state.chatLengthBeforeIntercept = 0;
         toastr.info('拦截模式已关闭', '', { timeOut: 2000 });
