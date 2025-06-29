@@ -514,7 +514,7 @@ function toggleLongInterceptMode() {
         state.chatLengthBeforeIntercept = context.chat?.length || 0;
         state.longInterceptRestoreFunction = interceptMessageCreation();
         $btn.css('color', 'red');
-        toastr.info('拦截模式已开启', '', { timeOut: 2000 });
+        toastr.info('持续预览模式已开启', '', { timeOut: 2000 });
     } else {
         $btn.css('color', '');
         if (state.longInterceptRestoreFunction) {
@@ -523,7 +523,7 @@ function toggleLongInterceptMode() {
         }
         state.interceptedMessageIds = [];
         state.chatLengthBeforeIntercept = 0;
-        toastr.info('拦截模式已关闭', '', { timeOut: 2000 });
+        toastr.info('预览预览模式已关闭', '', { timeOut: 2000 });
     }
 }
 
