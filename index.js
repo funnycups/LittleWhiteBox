@@ -443,6 +443,7 @@ function toggleAllFeatures(enabled) {
         restoreSettings();
         saveSettingsDebounced();
         setTimeout(() => processExistingMessages(), 100);
+        setupEventListeners();
 
         if (settings.memoryEnabled && moduleInstances.statsTracker?.updateMemoryPrompt) {
             setTimeout(() => moduleInstances.statsTracker.updateMemoryPrompt(), 200);
@@ -513,6 +514,11 @@ function processCodeBlocks(messageElement) {
         codeBlocks.forEach(codeBlock => {
             const preElement = codeBlock.parentElement;
             if (preElement.dataset.xiaobaixBound === 'true') return;
+
+            const oldIframe = preElement.parentNode.querySelector('iframe.xiaobaix-iframe');
+            if (oldIframe) oldIframe.remove();
+            const oldWrapper = preElement.parentNode.querySelector('.xiaobaix-iframe-wrapper');
+            if (oldWrapper) oldWrapper.remove();
 
             preElement.dataset.xiaobaixBound = 'true';
             const codeContent = codeBlock.textContent || '';
@@ -600,6 +606,90 @@ async function setupSettings() {
 
             if (settings.memoryEnabled && settings.memoryInjectEnabled) {
                 statsTracker.updateMemoryPrompt();
+            }
+        });
+
+        $('#xiaobaix_immersive_enabled').on('change', function() {
+            if (!isXiaobaixEnabled) return;
+            const enabled = $(this).prop('checked');
+            extension_settings[EXT_ID].immersive = extension_settings[EXT_ID].immersive || {};
+            extension_settings[EXT_ID].immersive.enabled = enabled;
+            saveSettingsDebounced();
+            if (moduleCleanupFunctions.has('immersiveMode')) {
+                moduleCleanupFunctions.get('immersiveMode')();
+            }
+            if (enabled) {
+                initImmersiveMode();
+            }
+        });
+
+        $('#xiaobaix_preview_enabled').on('change', function() {
+            if (!isXiaobaixEnabled) return;
+            extension_settings[EXT_ID].preview = extension_settings[EXT_ID].preview || {};
+            const enabled = $(this).prop('checked');
+            extension_settings[EXT_ID].preview.enabled = enabled;
+            saveSettingsDebounced();
+            if (moduleCleanupFunctions.has('messagePreview')) {
+                moduleCleanupFunctions.get('messagePreview')();
+            }
+            if (enabled) {
+                initMessagePreview();
+            }
+        });
+
+        $('#xiaobaix_script_assistant').on('change', function() {
+            if (!isXiaobaixEnabled) return;
+            extension_settings[EXT_ID].scriptAssistant = extension_settings[EXT_ID].scriptAssistant || {};
+            const enabled = $(this).prop('checked');
+            extension_settings[EXT_ID].scriptAssistant.enabled = enabled;
+            saveSettingsDebounced();
+            if (moduleCleanupFunctions.has('scriptAssistant')) {
+                moduleCleanupFunctions.get('scriptAssistant')();
+            }
+            if (enabled) {
+                initScriptAssistant();
+            }
+        });
+
+        $('#scheduled_tasks_enabled').on('change', function() {
+            if (!isXiaobaixEnabled) return;
+            extension_settings[EXT_ID].tasks = extension_settings[EXT_ID].tasks || {};
+            const enabled = $(this).prop('checked');
+            extension_settings[EXT_ID].tasks.enabled = enabled;
+            saveSettingsDebounced();
+            if (moduleCleanupFunctions.has('scheduledTasks')) {
+                moduleCleanupFunctions.get('scheduledTasks')();
+            }
+            if (enabled) {
+                initTasks();
+            }
+        });
+
+        $('#xiaobaix_template_enabled').on('change', function() {
+            if (!isXiaobaixEnabled) return;
+            extension_settings[EXT_ID].templateEditor = extension_settings[EXT_ID].templateEditor || {};
+            const enabled = $(this).prop('checked');
+            extension_settings[EXT_ID].templateEditor.enabled = enabled;
+            saveSettingsDebounced();
+            if (moduleCleanupFunctions.has('templateEditor')) {
+                moduleCleanupFunctions.get('templateEditor')();
+            }
+            if (enabled) {
+                initTemplateEditor();
+            }
+        });
+
+        $('#wallhaven_enabled').on('change', function() {
+            if (!isXiaobaixEnabled) return;
+            extension_settings[EXT_ID].wallhaven = extension_settings[EXT_ID].wallhaven || {};
+            const enabled = $(this).prop('checked');
+            extension_settings[EXT_ID].wallhaven.enabled = enabled;
+            saveSettingsDebounced();
+            if (moduleCleanupFunctions.has('wallhavenBackground')) {
+                moduleCleanupFunctions.get('wallhavenBackground')();
+            }
+            if (enabled) {
+                initWallhavenBackground();
             }
         });
     } catch (err) {}
@@ -754,7 +844,6 @@ jQuery(async () => {
         const timer2 = setTimeout(initMessagePreview, 1500);
         addGlobalTimer(timer2);
 
-        // 注册消息预览模块的清理函数
         setTimeout(() => {
             if (window.messagePreviewCleanup) {
                 registerModuleCleanup('messagePreview', window.messagePreviewCleanup);

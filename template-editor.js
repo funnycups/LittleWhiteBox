@@ -498,7 +498,7 @@ static createWrapper(content) {
             if (typeof window.updateAllData === 'function') {
                 window.updateAllData();
             }
-            
+
             window.dispatchEvent(new Event('contentUpdated'));
             window.STBridge.updateHeight();
         };
@@ -514,7 +514,7 @@ static createWrapper(content) {
                         e.data.type === 'commandResult' ? resolve(e.data.result) : reject(new Error(e.data.error));
                     }
                 };
-                
+
                 window.addEventListener('message', listener);
                 setTimeout(() => {
                     window.removeEventListener('message', listener);
@@ -528,8 +528,8 @@ static createWrapper(content) {
             new MutationObserver(() => window.STBridge.updateHeight())
                 .observe(document.body, { attributes: true, childList: true, subtree: true });
         }
-        
-        document.readyState === 'loading' ? 
+
+        document.readyState === 'loading' ?
             document.addEventListener('DOMContentLoaded', setup) : setup();`;
     }
 

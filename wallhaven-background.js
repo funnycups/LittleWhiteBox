@@ -1896,83 +1896,87 @@ function markMessageProcessed(messageId, messageText) {
 async function handleAIMessage(data) {
     if (!isActive() || isProcessing) return;
 
-    try {
-        isProcessing = true;
+    setTimeout(async () => {
+        if (!isActive() || isProcessing) return;
+        
+        try {
+            isProcessing = true;
 
-        const messageId = data.messageId || data;
-        if (!messageId) return;
+            const messageId = data.messageId || data;
+            if (!messageId) return;
 
-        const messageElement = document.querySelector(`div.mes[mesid="${messageId}"]`);
-        if (!messageElement || messageElement.classList.contains('is_user')) return;
+            const messageElement = document.querySelector(`div.mes[mesid="${messageId}"]`);
+            if (!messageElement || messageElement.classList.contains('is_user')) return;
 
-        let retryCount = 0;
-        const maxRetries = 10;
+            let retryCount = 0;
+            const maxRetries = 10;
 
-        while (retryCount < maxRetries) {
-            if (isMessageComplete(messageElement)) {
-                break;
+            while (retryCount < maxRetries) {
+                if (isMessageComplete(messageElement)) {
+                    break;
+                }
+                retryCount++;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                if (!isActive()) return;
             }
-            retryCount++;
-            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            const mesText = messageElement.querySelector('.mes_text');
+            if (!mesText) return;
+
+            const messageText = mesText.textContent || '';
+            if (!messageText.trim() || messageText.length < 10) return;
+
+            if (!shouldProcessMessage(messageId, messageText)) {
+                return;
+            }
+
+            markMessageProcessed(messageId, messageText);
+
+            const settings = getWallhavenSettings();
+
+            showProgressInMessageHeader(messageElement, '提取标签中...');
+
+            const result = extractTagsFromText(messageText, settings.bgMode);
+            if (result.tags.length === 0) {
+                updateProgressText('未提取到标签');
+                setTimeout(removeProgressFromMessageHeader, 2000);
+                return;
+            }
 
             if (!isActive()) return;
-        }
 
-        const mesText = messageElement.querySelector('.mes_text');
-        if (!mesText) return;
+            const orientation = isLandscapeOrientation() ? '横屏' : '竖屏';
+            const modeText = settings.bgMode ? '背景' : '角色';
+            const totalWeight = result.tags.reduce((sum, tagObj) => sum + tagObj.weight, 0);
+            const customCount = result.tags.filter(t => t.category === 'custom').length;
+            updateProgressText(`${orientation}${modeText}:提取到 ${result.tags.length} 个标签 (自定义${customCount}个,总权重${totalWeight})`);
+            await new Promise(resolve => setTimeout(resolve, 500));
 
-        const messageText = mesText.textContent || '';
-        if (!messageText.trim() || messageText.length < 10) return;
+            if (!isActive()) return;
 
-        if (!shouldProcessMessage(messageId, messageText)) {
-            return;
-        }
+            const selectedImage = await intelligentTagMatching(result.tags, settings);
 
-        markMessageProcessed(messageId, messageText);
+            if (!isActive()) return;
 
-        const settings = getWallhavenSettings();
+            updateProgressText('应用背景中...');
 
-        showProgressInMessageHeader(messageElement, '提取标签中...');
+            const imageUrl = `https://wallhaven.velure.top/?url=${encodeURIComponent(selectedImage.path)}`;
 
-        const result = extractTagsFromText(messageText, settings.bgMode);
-        if (result.tags.length === 0) {
-            updateProgressText('未提取到标签');
+            applyBackgroundToApp(imageUrl, settings);
+
+            const coreTagsCount = selectedImage.matchedTags.filter(t => t.weight >= 2).length;
+            const customMatchCount = selectedImage.matchedTags.filter(t => t.category === 'custom').length;
+            updateProgressText(`${modeText}配图完成! 核心匹配${coreTagsCount}个 自定义${customMatchCount}个 权重${selectedImage.weightedScore}`);
             setTimeout(removeProgressFromMessageHeader, 2000);
-            return;
+
+        } catch (error) {
+            updateProgressText(`配图失败: ${error.message.length > 20 ? error.message.substring(0, 20) + '...' : error.message}`);
+            setTimeout(removeProgressFromMessageHeader, 3000);
+        } finally {
+            isProcessing = false;
         }
-
-        if (!isActive()) return;
-
-        const orientation = isLandscapeOrientation() ? '横屏' : '竖屏';
-        const modeText = settings.bgMode ? '背景' : '角色';
-        const totalWeight = result.tags.reduce((sum, tagObj) => sum + tagObj.weight, 0);
-        const customCount = result.tags.filter(t => t.category === 'custom').length;
-        updateProgressText(`${orientation}${modeText}:提取到 ${result.tags.length} 个标签 (自定义${customCount}个,总权重${totalWeight})`);
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        if (!isActive()) return;
-
-        const selectedImage = await intelligentTagMatching(result.tags, settings);
-
-        if (!isActive()) return;
-
-        updateProgressText('应用背景中...');
-
-        const imageUrl = `https://wallhaven.velure.top/?url=${encodeURIComponent(selectedImage.path)}`;
-
-        applyBackgroundToApp(imageUrl, settings);
-
-        const coreTagsCount = selectedImage.matchedTags.filter(t => t.weight >= 2).length;
-        const customMatchCount = selectedImage.matchedTags.filter(t => t.category === 'custom').length;
-        updateProgressText(`${modeText}配图完成! 核心匹配${coreTagsCount}个 自定义${customMatchCount}个 权重${selectedImage.weightedScore}`);
-        setTimeout(removeProgressFromMessageHeader, 2000);
-
-    } catch (error) {
-        updateProgressText(`配图失败: ${error.message.length > 20 ? error.message.substring(0, 20) + '...' : error.message}`);
-        setTimeout(removeProgressFromMessageHeader, 3000);
-    } finally {
-        isProcessing = false;
-    }
+    }, 50);
 }
 
 function updateSettingsControls() {

@@ -278,7 +278,8 @@ function showNavigationButtons() {
             </div>
         `;
 
-        $('#form_sheld').prepend(navigationHtml);
+        // 改为插入到 form_sheld 的最后
+        $('#form_sheld').append(navigationHtml);
 
         const navActions = {
             '#immersive-swipe-left': () => handleSwipe('.swipe_left'),
@@ -293,6 +294,7 @@ function showNavigationButtons() {
 
     updateNavigationButtons();
 }
+
 
 function hideNavigationButtons() {
     $('#immersive-navigation').remove();
