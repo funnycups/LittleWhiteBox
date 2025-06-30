@@ -278,7 +278,7 @@ function showNavigationButtons() {
             </div>
         `;
 
-        $('#chat').append(navigationHtml);
+        $('#form_sheld').prepend(navigationHtml);
 
         const navActions = {
             '#immersive-swipe-left': () => handleSwipe('.swipe_left'),
@@ -293,7 +293,6 @@ function showNavigationButtons() {
 
     updateNavigationButtons();
 }
-
 
 function hideNavigationButtons() {
     $('#immersive-navigation').remove();
