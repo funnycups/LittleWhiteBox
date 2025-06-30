@@ -1161,7 +1161,7 @@ body.immersive-mode .mes {
     border-radius: 25px;
     width: fit-content;
     max-width: 50%;
-    z-index: 100;
+    z-index: -1;
     height: 25px;
     box-sizing: border-box;
 }
@@ -1334,7 +1334,6 @@ body.immersive-mode .mes {
 }
 
 /* ==================== 响应式样式 ==================== */
-/* 宽屏模式 - 左侧面板 */
 @media screen and (min-width: 1001px) {
     .memory-modal.behavior-modal,
     .memory-modal.main-menu-modal {
