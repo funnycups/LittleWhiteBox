@@ -58,17 +58,11 @@ function initImmersiveMode() {
 
 function bindSettingsEvents() {
     if (eventsBound) return;
-
     setTimeout(() => {
         const checkbox = document.getElementById('xiaobaix_immersive_enabled');
         if (checkbox && !eventsBound) {
             const settings = getImmersiveSettings();
             checkbox.checked = settings.enabled;
-
-            checkbox.addEventListener('change', function() {
-                toggleImmersiveMode();
-            });
-
             eventsBound = true;
         }
     }, 500);
@@ -278,7 +272,6 @@ function showNavigationButtons() {
             </div>
         `;
 
-        // 改为插入到 form_sheld 的最后
         $('#form_sheld').append(navigationHtml);
 
         const navActions = {

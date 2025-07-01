@@ -20,7 +20,8 @@ const DEFAULT_CHAR_SETTINGS = {
     template: "",
     customRegex: "\\[([^\\]]+)\\]([\\s\\S]*?)\\[\\/\\1\\]",
     limitToRecentMessages: false,
-    recentMessageCount: 5
+    recentMessageCount: 5,
+    skipFirstMessage: false
 };
 
 const state = {
@@ -51,9 +52,9 @@ const state = {
 const utils = {
     getCharAvatar: msg => msg?.original_avatar ||
         (msg?.name && findChar({ name: msg.name, allowAvatar: true })?.avatar) ||
-        (!selected_group && this_chid >= 0 && characters[this_chid]?.avatar) || null,
+        (!selected_group && this_chid !== undefined && Number(this_chid) >= 0 && characters[Number(this_chid)]?.avatar) || null,
 
-    isEnabled: () => (window.isXiaobaixEnabled ?? true) && TemplateSettings.get().enabled,
+    isEnabled: () => (window['isXiaobaixEnabled'] ?? true) && TemplateSettings.get().enabled,
 
     isCustomTemplate: content => ['<html', '<!DOCTYPE', '<script'].some(tag => content?.includes(tag)),
 
@@ -561,8 +562,9 @@ static createWrapper(content) {
        return new Promise((resolve) => {
            const checkIframe = () => {
                const iframe = document.querySelector(selector);
-               if (iframe?.contentWindow) {
-                   if (iframe.contentDocument?.readyState === 'complete') {
+               if (iframe?.contentWindow && iframe instanceof HTMLIFrameElement) {
+                   var doc = iframe.contentDocument;
+                   if (doc && doc.readyState === 'complete') {
                        resolve(iframe);
                    } else {
                        iframe.addEventListener('load', () => resolve(iframe), { once: true });
@@ -618,11 +620,13 @@ class MessageHandler {
 
         const ctx = getContext();
         const msg = ctx.chat?.[messageId];
-        if (!msg || msg.is_user || msg.is_system) return;
+        if (!msg || msg.force_avatar || msg.is_user || msg.is_system) return;
 
         const avatar = utils.getCharAvatar(msg);
         const tmplSettings = TemplateSettings.getCharTemplate(avatar);
         if (!tmplSettings) return;
+
+        if (tmplSettings.skipFirstMessage && messageId === 0) return;
 
         if (tmplSettings.limitToRecentMessages) {
             const recentCount = tmplSettings.recentMessageCount || 5;
@@ -666,7 +670,7 @@ class MessageHandler {
 
         for (let i = currentMessageId - 1; i >= 0; i--) {
             const msg = ctx.chat[i];
-            if (!msg || msg.is_user || msg.is_system) continue;
+            if (!msg || msg.is_system || msg.is_user) continue;
 
             const msgAvatar = utils.getCharAvatar(msg);
             if (msgAvatar !== currentAvatar) continue;
@@ -720,7 +724,7 @@ class MessageHandler {
         this.clearAll();
 
         const messagesToProcess = ctx.chat.reduce((acc, msg, id) => {
-            if (msg.is_user || msg.is_system) return acc;
+            if (msg.is_system || msg.is_user) return acc;
 
             const avatar = utils.getCharAvatar(msg);
             const tmplSettings = TemplateSettings.getCharTemplate(avatar);
@@ -795,7 +799,7 @@ class MessageHandler {
 
             const lastMsg = ctx.chat[lastId];
 
-            if (lastMsg && !lastMsg.is_user && !lastMsg.is_system) {
+            if (lastMsg && !lastMsg.is_system && !lastMsg.is_user) {
                 const avatar = utils.getCharAvatar(lastMsg);
                 const tmplSettings = TemplateSettings.getCharTemplate(avatar);
 
@@ -836,9 +840,13 @@ const interceptor = {
                             const ctx = getContext();
                             const msg = ctx.chat?.[id];
 
-                            if (msg && !msg.is_user && !msg.is_system) {
+                            if (msg && !msg.is_system && !msg.is_user) {
                                 const avatar = utils.getCharAvatar(msg);
                                 const tmplSettings = TemplateSettings.getCharTemplate(avatar);
+
+                                if (tmplSettings && tmplSettings.skipFirstMessage && id === 0) {
+                                    return;
+                                }
 
                                 if (tmplSettings) {
                                     if (tmplSettings.limitToRecentMessages) {
@@ -894,7 +902,7 @@ const eventHandlers = {
             MessageHandler.process(id);
             const ctx = getContext();
             const msg = ctx.chat?.[id];
-            if (msg && !msg.is_user && !msg.is_system) {
+            if (msg && !msg.is_system && !msg.is_user) {
                 const avatar = utils.getCharAvatar(msg);
                 const tmplSettings = TemplateSettings.getCharTemplate(avatar);
                 if (tmplSettings) {
@@ -947,9 +955,13 @@ function updateStatus() {
     const name = characters[this_chid].name;
     const charSettings = TemplateSettings.getCurrentChar();
 
-    $status.removeClass('no-character')
-        .toggleClass('has-settings', charSettings.enabled && charSettings.template)
-        .text(`${name} - ${charSettings.enabled && charSettings.template ? '已启用模板功能' : '未设置模板'}`);
+    if (charSettings.enabled && charSettings.template) {
+        $status.removeClass('no-character').addClass('has-settings')
+            .text(`${name} - 已启用模板功能`);
+    } else {
+        $status.removeClass('has-settings').addClass('no-character')
+            .text(`${name} - 未设置模板`);
+    }
 }
 
 async function openEditor() {
@@ -969,38 +981,45 @@ async function openEditor() {
     $html.find('#fixed_text_custom_regex').val(charSettings.customRegex || DEFAULT_CHAR_SETTINGS.customRegex);
     $html.find('#limit_to_recent_messages').prop('checked', charSettings.limitToRecentMessages || false);
     $html.find('#recent_message_count').val(charSettings.recentMessageCount || 5);
+    $html.find('#skip_first_message').prop('checked', charSettings.skipFirstMessage || false);
 
     $html.find('#export_character_settings').on('click', () => {
         const data = {
             template: $html.find('#fixed_text_template').val() || '',
             customRegex: $html.find('#fixed_text_custom_regex').val() || DEFAULT_CHAR_SETTINGS.customRegex,
             limitToRecentMessages: $html.find('#limit_to_recent_messages').prop('checked'),
-            recentMessageCount: parseInt($html.find('#recent_message_count').val()) || 5
+            recentMessageCount: parseInt(String($html.find('#recent_message_count').val())) || 5,
+            skipFirstMessage: $html.find('#skip_first_message').prop('checked')
         };
 
-        download(`xiaobai-template-${characters[this_chid].name}.json`, JSON.stringify(data, null, 2));
+        download(`xiaobai-template-${characters[this_chid].name}.json`, JSON.stringify(data, null, 2), 'text/plain');
         toastr.success('模板设置已导出');
     });
 
-    $html.find('#import_character_settings').on('change', e => {
-        const file = e.target.files[0];
+    $html.find('#import_character_settings').on('change', function(e) {
+        var file = null;
+        if (e.target && e.target instanceof HTMLInputElement && e.target.files) {
+            file = e.target.files[0];
+        }
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = e => {
+        var reader = new FileReader();
+        reader.onload = function(e) {
             try {
-                const data = JSON.parse(e.target.result);
+                var result = e.target.result;
+                var data = JSON.parse(typeof result === 'string' ? result : '');
                 $html.find('#fixed_text_template').val(data.template || '');
                 $html.find('#fixed_text_custom_regex').val(data.customRegex || DEFAULT_CHAR_SETTINGS.customRegex);
                 $html.find('#limit_to_recent_messages').prop('checked', data.limitToRecentMessages || false);
                 $html.find('#recent_message_count').val(data.recentMessageCount || 5);
+                $html.find('#skip_first_message').prop('checked', data.skipFirstMessage || false);
                 toastr.success('模板设置已导入');
             } catch {
                 toastr.error('文件格式错误');
             }
         };
         reader.readAsText(file);
-        e.target.value = '';
+        if (e.target && e.target instanceof HTMLInputElement) e.target.value = '';
     });
 
     const result = await callGenericPopup($html, POPUP_TYPE.CONFIRM, '', { okButton: '保存', cancelButton: '取消' });
@@ -1011,7 +1030,8 @@ async function openEditor() {
             template: $html.find('#fixed_text_template').val() || '',
             customRegex: $html.find('#fixed_text_custom_regex').val() || DEFAULT_CHAR_SETTINGS.customRegex,
             limitToRecentMessages: $html.find('#limit_to_recent_messages').prop('checked'),
-            recentMessageCount: parseInt($html.find('#recent_message_count').val()) || 5
+            recentMessageCount: parseInt(String($html.find('#recent_message_count').val())) || 5,
+            skipFirstMessage: $html.find('#skip_first_message').prop('checked')
         });
 
         updateStatus();
@@ -1021,7 +1041,7 @@ async function openEditor() {
 }
 
 function exportGlobal() {
-    download('xiaobai-template-global-settings.json', JSON.stringify(TemplateSettings.get(), null, 2));
+    download('xiaobai-template-global-settings.json', JSON.stringify(TemplateSettings.get(), null, 2), 'text/plain');
     toastr.success('全局模板设置已导出');
 }
 
@@ -1032,7 +1052,7 @@ function importGlobal(event) {
     const reader = new FileReader();
     reader.onload = e => {
         try {
-            const data = JSON.parse(e.target.result);
+            const data = JSON.parse(typeof e.target.result === 'string' ? e.target.result : '');
             Object.assign(TemplateSettings.get(), data);
             saveSettingsDebounced();
             $("#xiaobaix_template_enabled").prop("checked", data.enabled);
@@ -1093,12 +1113,12 @@ function initTemplateEditor() {
         state.observers.message = new MutationObserver(mutations => {
             if (!TemplateSettings.get().enabled) return;
 
-            const newMessages = mutations.flatMap(mutation =>
-                Array.from(mutation.addedNodes)
-                    .filter(node => node.nodeType === Node.ELEMENT_NODE && node.classList?.contains('mes'))
-                    .map(node => parseInt(node.getAttribute('mesid')))
-                    .filter(id => !isNaN(id))
-            );
+            const newMessages = mutations.flatMap(function(mutation) {
+                return Array.from(mutation.addedNodes)
+                    .filter(function(node) { return node.nodeType === Node.ELEMENT_NODE && node instanceof Element && node.classList && node.classList.contains('mes'); })
+                    .map(function(node) { return node instanceof Element && node.getAttribute && node.getAttribute('mesid') ? parseInt(node.getAttribute('mesid')) : NaN; })
+                    .filter(function(id) { return !isNaN(id); });
+            });
 
             if (newMessages.length > 0) {
                 MessageHandler.processBatch(newMessages);
@@ -1114,14 +1134,14 @@ function initTemplateEditor() {
         }
     });
 
-    document.addEventListener('xiaobaixEnabledChanged', event => {
-        const enabled = event.detail.enabled;
+    document.addEventListener('xiaobaixEnabledChanged', function(event) {
+        var enabled = (event && event['detail']) ? event['detail'].enabled : undefined;
         console.log(`[LittleWhiteBox] State changed: ${enabled}`);
 
         if (!enabled) {
             cleanup();
         } else {
-            setTimeout(() => {
+            setTimeout(function() {
                 if (TemplateSettings.get().enabled) {
                     interceptor.setup();
                     setupObserver();
@@ -1154,8 +1174,8 @@ function initTemplateEditor() {
     $("#xiaobaix_template_enabled").prop("checked", TemplateSettings.get().enabled);
     updateStatus();
 
-    if (window.registerModuleCleanup) {
-        window.registerModuleCleanup('templateEditor', cleanup);
+    if (typeof window['registerModuleCleanup'] === 'function') {
+        window['registerModuleCleanup']('templateEditor', cleanup);
     }
 
     if (utils.isEnabled()) {

@@ -11,13 +11,6 @@ pre:has(+ .xiaobaix-iframe) {
     margin: 10px 0;
 }
 
-.dark-number-input {
-   background-color: rgba(0, 0, 0, 0.3) !important;
-   color: var(--SmartThemeText) !important;
-   border-color: var(--SmartThemeBorderColor) !important;
-   width: 10% !important;
-}
-
 /* ==================== 动画效果 ==================== */
 @keyframes fadeIn {
     from { opacity: 0; }
@@ -447,7 +440,7 @@ pre:has(+ .xiaobaix-iframe) {
     padding-left: 8px;
 }
 
-.intimacy-value, 
+.intimacy-value,
 .initial-intimacy-value,
 .interactions-value {
     font-size: 0.85em;
@@ -751,7 +744,7 @@ pre:has(+ .xiaobaix-iframe) {
     top: 0 !important;
     left: 0 !important;
     width: 100% !important;
-    height: 100vh !important; 
+    height: 100vh !important;
     background: var(--black50a) !important;
     backdrop-filter: blur(calc(var(--SmartThemeBlurStrength) * 3)) !important;
     -webkit-backdrop-filter: blur(calc(var(--SmartThemeBlurStrength) * 3)) !important;
@@ -1360,22 +1353,22 @@ body.immersive-mode .mes {
         animation: slideInLeft 0.3s ease;
         pointer-events: all;
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-header,
     .memory-modal.main-menu-modal .memory-modal-header {
         border-radius: 0 10px 0 0;
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-footer,
     .memory-modal.main-menu-modal .memory-modal-footer {
         border-radius: 0 0 10px 0;
     }
-    
+
     .memory-modal.behavior-modal .memory-tab-content,
     .memory-modal.main-menu-modal .memory-tab-content {
         max-height: calc(100vh - var(--topBarBlockSize) - 120px);
     }
-    
+
     .debug-log-content {
         width: 85% !important;
         max-width: 900px !important;
@@ -1389,12 +1382,12 @@ body.immersive-mode .mes {
         grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
         gap: 4px;
     }
-    
+
     .behavior-stage-tab {
         padding: 6px 8px;
         font-size: calc(var(--mainFontSize) * 0.8);
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-content,
     .memory-modal.main-menu-modal .memory-modal-content {
         width: 100vw !important;
@@ -1409,13 +1402,13 @@ body.immersive-mode .mes {
         border-top: none;
         animation: slideInTop 0.3s ease;
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-header,
     .memory-modal.main-menu-modal .memory-modal-header {
         border-radius: 0;
         position: relative;
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-close,
     .memory-modal.main-menu-modal .memory-modal-close {
         position: absolute;
@@ -1430,13 +1423,13 @@ body.immersive-mode .mes {
         border-radius: 50%;
         background: var(--black30a);
     }
-    
+
     .memory-modal.behavior-modal .memory-tab-content,
     .memory-modal.main-menu-modal .memory-tab-content {
         max-height: calc(100vh - var(--topBarBlockSize) - 140px);
         padding: 6px 10px;
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-footer,
     .memory-modal.main-menu-modal .memory-modal-footer {
         border-radius: 0;
@@ -1444,52 +1437,52 @@ body.immersive-mode .mes {
         justify-content: center;
         padding: 8px 4px;
     }
-    
+
     .main-menu-footer-buttons {
         width: 100%;
-        justify-content: space-evenly; 
-        flex-direction: row; 
+        justify-content: space-evenly;
+        flex-direction: row;
         flex-wrap: nowrap;
     }
-    
+
     .main-menu-footer-buttons .memory-action-button {
-        width: auto; 
-        min-width: 0; 
+        width: auto;
+        min-width: 0;
         max-width: none;
-        padding: 6px 8px; 
-        margin: 0 2px; 
-        white-space: nowrap; 
+        padding: 6px 8px;
+        margin: 0 2px;
+        white-space: nowrap;
     }
-    
+
     .tracked-name-item {
         flex-wrap: nowrap !important;
         padding: 8px 10px;
         width: 100%;
         position: relative !important;
     }
-    
+
     .tracked-name-stats {
         width: auto !important;
         border-left: 1px solid rgba(255, 255, 255, 0.2) !important;
         padding-left: 8px !important;
         margin-right: 50px !important;
     }
-    
+
     .tracked-name-actions {
         position: absolute !important;
-        top: 50% !important; 
+        top: 50% !important;
         right: 8px !important;
         transform: translateY(-50%) !important;
     }
-    
+
     .add-name-container {
         flex-direction: column;
     }
-    
+
     .tracked-intimacy-input {
         width: 100%;
     }
-    
+
     .debug-log-content {
         width: 95% !important;
         height: calc(100vh - var(--topBarBlockSize) - 20px) !important;
@@ -1498,17 +1491,17 @@ body.immersive-mode .mes {
         left: 50% !important;
         transform: translateX(-50%) !important;
     }
-    
+
     .debug-log-text {
         padding: 12px !important;
         font-size: calc(var(--mainFontSize) * 0.8) !important;
     }
-    
+
     .immersive-navigation {
         gap: 8px;
         height: 30px;
     }
-    
+
     .immersive-nav-btn {
         min-width: 20px;
         font-size: 10px;
@@ -1521,12 +1514,12 @@ body.immersive-mode .mes {
         grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
         gap: 4px;
     }
-    
+
     .behavior-stage-tab {
         padding: 6px 8px;
         font-size: calc(var(--mainFontSize) * 0.8);
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-content,
     .memory-modal.main-menu-modal .memory-modal-content {
         width: 100vw !important;
@@ -1541,13 +1534,13 @@ body.immersive-mode .mes {
         border-top: none;
         animation: slideInTop 0.3s ease;
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-header,
     .memory-modal.main-menu-modal .memory-modal-header {
         border-radius: 0;
         position: relative;
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-close,
     .memory-modal.main-menu-modal .memory-modal-close {
         position: absolute;
@@ -1562,13 +1555,13 @@ body.immersive-mode .mes {
         border-radius: 50%;
         background: var(--black30a);
     }
-    
+
     .memory-modal.behavior-modal .memory-tab-content,
     .memory-modal.main-menu-modal .memory-tab-content {
         max-height: calc(100vh - var(--topBarBlockSize) - 140px);
         padding: 6px 10px;
     }
-    
+
     .memory-modal.behavior-modal .memory-modal-footer,
     .memory-modal.main-menu-modal .memory-modal-footer {
         border-radius: 0;
@@ -1576,79 +1569,79 @@ body.immersive-mode .mes {
         justify-content: center;
         padding: 8px 4px;
     }
-    
+
     .main-menu-footer-buttons {
         width: 100%;
-        justify-content: space-evenly; 
-        flex-direction: row; 
+        justify-content: space-evenly;
+        flex-direction: row;
         flex-wrap: nowrap;
     }
-    
+
     .main-menu-footer-buttons .memory-action-button {
-        width: auto; 
-        min-width: 0; 
+        width: auto;
+        min-width: 0;
         max-width: none;
-        padding: 6px 8px; 
-        margin: 0 2px; 
-        white-space: nowrap; 
+        padding: 6px 8px;
+        margin: 0 2px;
+        white-space: nowrap;
     }
-    
+
     .tracked-name-item {
         flex-wrap: nowrap !important;
         padding: 8px 10px;
         width: 100%;
         position: relative !important;
     }
-    
+
     .tracked-name-stats {
         width: auto !important;
         border-left: 1px solid rgba(255, 255, 255, 0.2) !important;
         padding-left: 8px !important;
         margin-right: 50px !important;
     }
-    
+
     .tracked-name-actions {
         position: absolute !important;
-        top: 50% !important; 
+        top: 50% !important;
         right: 8px !important;
         transform: translateY(-50%) !important;
     }
-    
+
     .add-name-container {
         flex-direction: column;
     }
-    
+
     .tracked-intimacy-input {
         width: 100%;
     }
-    
+
     .user-gender-setting {
         flex-direction: column;
         align-items: flex-start;
     }
-    
+
     .user-gender-setting label {
         margin-bottom: 6px;
     }
-    
+
     .user-gender-select {
         width: 100%;
     }
-    
+
     .add-alias-container {
         flex-direction: column;
     }
-    
+
     .alias-input,
     .add-alias-button {
         width: 100%;
     }
-    
+
     .tracked-gender-select {
         width: 100%;
         margin: 5px 0;
     }
-    
+
     .debug-log-content {
         width: 100vw !important;
         height: calc(100vh - var(--topBarBlockSize)) !important;
@@ -1659,7 +1652,7 @@ body.immersive-mode .mes {
         border-top: none !important;
         animation: slideInTop 0.3s ease !important;
     }
-    
+
     .debug-log-close {
         position: absolute !important;
         top: 8px !important;
@@ -1669,17 +1662,17 @@ body.immersive-mode .mes {
         border-radius: 50% !important;
         background: var(--black30a) !important;
     }
-    
+
     .debug-log-text {
         padding: 10px !important;
         font-size: calc(var(--mainFontSize) * 0.75) !important;
     }
-    
+
     .debug-log-footer {
         justify-content: space-between !important;
         padding: 10px 16px !important;
     }
-    
+
     .debug-log-button {
         flex: 1 !important;
         padding: 10px 12px !important;
