@@ -118,9 +118,11 @@ class TemplateProcessor {
         const extractors = [
             () => this.extractRegex(content, customRegex),
             () => this.extractFromCodeBlocks(content, 'json', this.parseJsonProgressive),
+            () => this.extractJsonFromIncompleteXml(content),
             () => this.isJsonFormat(content) ? this.parseJsonProgressive(content) : null,
             () => this.extractFromCodeBlocks(content, 'ya?ml', this.parseYamlProgressive),
-            () => this.isYamlFormat(content) ? this.parseYamlProgressive(content) : null
+            () => this.isYamlFormat(content) ? this.parseYamlProgressive(content) : null,
+            () => this.extractJsonFromXmlWrapper(content)
         ];
 
         for (const extractor of extractors) {
@@ -128,6 +130,71 @@ class TemplateProcessor {
             if (vars && Object.keys(vars).length) return vars;
         }
         return {};
+    }
+
+    static extractJsonFromIncompleteXml(content) {
+        const vars = {};
+        
+        const incompleteXmlPattern = /<[^>]+>([^<]*(?:\{[\s\S]*|\w+\s*:[\s\S]*))/g;
+        let match;
+        
+        while ((match = incompleteXmlPattern.exec(content))) {
+            const innerContent = match[1]?.trim();
+            if (!innerContent) continue;
+
+            if (innerContent.startsWith('{')) {
+                try {
+                    const jsonVars = this.parseJsonProgressive(innerContent);
+                    if (jsonVars && Object.keys(jsonVars).length) {
+                        Object.assign(vars, jsonVars);
+                        continue;
+                    }
+                } catch (e) {}
+            }
+
+            if (this.isYamlFormat(innerContent)) {
+                try {
+                    const yamlVars = this.parseYamlProgressive(innerContent);
+                    if (yamlVars && Object.keys(yamlVars).length) {
+                        Object.assign(vars, yamlVars);
+                    }
+                } catch (e) {}
+            }
+        }
+
+        return Object.keys(vars).length ? vars : null;
+    }
+
+    static extractJsonFromXmlWrapper(content) {
+        const vars = {};
+        const xmlPattern = /<[^>]+>([\s\S]*?)<\/[^>]+>/g;
+        let match;
+        
+        while ((match = xmlPattern.exec(content))) {
+            const innerContent = match[1]?.trim();
+            if (!innerContent) continue;
+
+            if (innerContent.startsWith('{') && innerContent.includes('}')) {
+                try {
+                    const jsonVars = this.parseJsonProgressive(innerContent);
+                    if (jsonVars && Object.keys(jsonVars).length) {
+                        Object.assign(vars, jsonVars);
+                        continue;
+                    }
+                } catch (e) {}
+            }
+
+            if (this.isYamlFormat(innerContent)) {
+                try {
+                    const yamlVars = this.parseYamlProgressive(innerContent);
+                    if (yamlVars && Object.keys(yamlVars).length) {
+                        Object.assign(vars, yamlVars);
+                    }
+                } catch (e) {}
+            }
+        }
+
+        return Object.keys(vars).length ? vars : null;
     }
 
     static extractRegex(content, customRegex) {
@@ -149,11 +216,9 @@ class TemplateProcessor {
             try {
                 const parsed = parser.call(this, match[1].trim());
                 if (parsed) Object.assign(vars, parsed);
-            } catch (e) {
-                if (!state.isGenerating) console.warn(`[LittleWhiteBox] ${language} parsing error:`, e);
-            }
+            } catch (e) {}
         }
-        return vars;
+        return Object.keys(vars).length ? vars : null;
     }
 
     static parseJsonProgressive(jsonContent) {
@@ -165,8 +230,357 @@ class TemplateProcessor {
     }
 
     static parseYamlProgressive(yamlContent) {
-        const completeVars = this.parseYaml(yamlContent);
-        return Object.keys(completeVars).length > 0 ? completeVars : this.parsePartialYaml(yamlContent);
+        const completeVars = this.parseYamlAdvanced(yamlContent);
+        return Object.keys(completeVars).length > 0 ? completeVars : this.parsePartialYamlAdvanced(yamlContent);
+    }
+
+    static parseYamlAdvanced(yamlContent) {
+        const vars = {};
+        const lines = yamlContent.split('\n');
+        let i = 0;
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            
+            if (!trimmed || trimmed.startsWith('#')) {
+                i++;
+                continue;
+            }
+
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex <= 0) {
+                i++;
+                continue;
+            }
+
+            const key = trimmed.substring(0, colonIndex).trim();
+            const afterColon = trimmed.substring(colonIndex + 1).trim();
+            const currentIndent = line.length - line.trimStart().length;
+
+            if (afterColon === '|' || afterColon === '>') {
+                const result = this.parseMultilineString(lines, i, currentIndent, afterColon === '|');
+                vars[key] = result.value;
+                i = result.nextIndex;
+            } else if (afterColon === '' || afterColon === '{}') {
+                const result = this.parseNestedObject(lines, i, currentIndent);
+                if (result.value && Object.keys(result.value).length > 0) {
+                    vars[key] = JSON.stringify(result.value);
+                    Object.assign(vars, this.flattenObject(result.value, key));
+                } else {
+                    vars[key] = '';
+                }
+                i = result.nextIndex;
+            } else if (afterColon.startsWith('-') || (afterColon === '' && i + 1 < lines.length && lines[i + 1].trim().startsWith('-'))) {
+                const result = this.parseArray(lines, i, currentIndent, afterColon.startsWith('-') ? afterColon : '');
+                vars[key] = JSON.stringify(result.value);
+                if (Array.isArray(result.value)) {
+                    result.value.forEach((item, index) => {
+                        if (typeof item === 'object' && item !== null) {
+                            Object.assign(vars, this.flattenObject(item, `${key}.${index}`));
+                        } else {
+                            vars[`${key}.${index}`] = String(item);
+                        }
+                    });
+                }
+                i = result.nextIndex;
+            } else {
+                vars[key] = afterColon.replace(/^["']|["']$/g, '');
+                i++;
+            }
+        }
+
+        return vars;
+    }
+
+    static parsePartialYamlAdvanced(yamlContent) {
+        const vars = {};
+        const lines = yamlContent.split('\n');
+        let i = 0;
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            
+            if (!trimmed || trimmed.startsWith('#')) {
+                i++;
+                continue;
+            }
+
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex <= 0) {
+                i++;
+                continue;
+            }
+
+            const key = trimmed.substring(0, colonIndex).trim();
+            const afterColon = trimmed.substring(colonIndex + 1).trim();
+            const currentIndent = line.length - line.trimStart().length;
+
+            if (afterColon === '|' || afterColon === '>') {
+                const result = this.parsePartialMultilineString(lines, i, currentIndent, afterColon === '|');
+                vars[key] = result.value;
+                i = result.nextIndex;
+            } else if (afterColon === '' || afterColon === '{}') {
+                const result = this.parsePartialNestedObject(lines, i, currentIndent);
+                if (result.value && Object.keys(result.value).length > 0) {
+                    vars[key] = JSON.stringify(result.value);
+                    Object.assign(vars, this.flattenObject(result.value, key));
+                } else {
+                    vars[key] = '';
+                }
+                i = result.nextIndex;
+            } else if (afterColon.startsWith('-') || (afterColon === '' && i + 1 < lines.length && lines[i + 1].trim().startsWith('-'))) {
+                const result = this.parsePartialArray(lines, i, currentIndent, afterColon.startsWith('-') ? afterColon : '');
+                vars[key] = JSON.stringify(result.value);
+                if (Array.isArray(result.value)) {
+                    result.value.forEach((item, index) => {
+                        if (typeof item === 'object' && item !== null) {
+                            Object.assign(vars, this.flattenObject(item, `${key}.${index}`));
+                        } else {
+                            vars[`${key}.${index}`] = String(item);
+                        }
+                    });
+                }
+                i = result.nextIndex;
+            } else {
+                vars[key] = afterColon.replace(/^["']|["']$/g, '');
+                i++;
+            }
+        }
+
+        return vars;
+    }
+
+    static parseMultilineString(lines, startIndex, baseIndent, preserveNewlines) {
+        const contentLines = [];
+        let i = startIndex + 1;
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const lineIndent = line.length - line.trimStart().length;
+            
+            if (line.trim() === '') {
+                contentLines.push('');
+                i++;
+                continue;
+            }
+            
+            if (lineIndent <= baseIndent && line.trim() !== '') {
+                break;
+            }
+            
+            contentLines.push(line.substring(baseIndent + 2));
+            i++;
+        }
+
+        const value = preserveNewlines ? contentLines.join('\n') : contentLines.join(' ').replace(/\s+/g, ' ');
+        return { value: value.trim(), nextIndex: i };
+    }
+
+    static parsePartialMultilineString(lines, startIndex, baseIndent, preserveNewlines) {
+        const contentLines = [];
+        let i = startIndex + 1;
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const lineIndent = line.length - line.trimStart().length;
+            
+            if (line.trim() === '') {
+                contentLines.push('');
+                i++;
+                continue;
+            }
+            
+            if (lineIndent <= baseIndent && line.trim() !== '') {
+                break;
+            }
+            
+            contentLines.push(line.substring(Math.min(baseIndent + 2, line.length)));
+            i++;
+        }
+
+        const value = preserveNewlines ? contentLines.join('\n') : contentLines.join(' ').replace(/\s+/g, ' ');
+        return { value: value.trim(), nextIndex: i };
+    }
+
+    static parseNestedObject(lines, startIndex, baseIndent) {
+        const obj = {};
+        let i = startIndex + 1;
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            const lineIndent = line.length - line.trimStart().length;
+
+            if (!trimmed || trimmed.startsWith('#')) {
+                i++;
+                continue;
+            }
+
+            if (lineIndent <= baseIndent) {
+                break;
+            }
+
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex > 0) {
+                const key = trimmed.substring(0, colonIndex).trim();
+                const value = trimmed.substring(colonIndex + 1).trim();
+                
+                if (value === '|' || value === '>') {
+                    const result = this.parseMultilineString(lines, i, lineIndent, value === '|');
+                    obj[key] = result.value;
+                    i = result.nextIndex;
+                } else if (value === '' || value === '{}') {
+                    const result = this.parseNestedObject(lines, i, lineIndent);
+                    obj[key] = result.value;
+                    i = result.nextIndex;
+                } else {
+                    obj[key] = value.replace(/^["']|["']$/g, '');
+                    i++;
+                }
+            } else {
+                i++;
+            }
+        }
+
+        return { value: obj, nextIndex: i };
+    }
+
+    static parsePartialNestedObject(lines, startIndex, baseIndent) {
+        const obj = {};
+        let i = startIndex + 1;
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            const lineIndent = line.length - line.trimStart().length;
+
+            if (!trimmed || trimmed.startsWith('#')) {
+                i++;
+                continue;
+            }
+
+            if (lineIndent <= baseIndent) {
+                break;
+            }
+
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex > 0) {
+                const key = trimmed.substring(0, colonIndex).trim();
+                const value = trimmed.substring(colonIndex + 1).trim();
+                
+                if (value === '|' || value === '>') {
+                    const result = this.parsePartialMultilineString(lines, i, lineIndent, value === '|');
+                    obj[key] = result.value;
+                    i = result.nextIndex;
+                } else if (value === '' || value === '{}') {
+                    const result = this.parsePartialNestedObject(lines, i, lineIndent);
+                    obj[key] = result.value;
+                    i = result.nextIndex;
+                } else {
+                    obj[key] = value.replace(/^["']|["']$/g, '');
+                    i++;
+                }
+            } else {
+                i++;
+            }
+        }
+
+        return { value: obj, nextIndex: i };
+    }
+
+    static parseArray(lines, startIndex, baseIndent, firstItem) {
+        const arr = [];
+        let i = startIndex;
+
+        if (firstItem.startsWith('-')) {
+            const value = firstItem.substring(1).trim();
+            if (value) arr.push(value.replace(/^["']|["']$/g, ''));
+            i++;
+        }
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            const lineIndent = line.length - line.trimStart().length;
+
+            if (!trimmed || trimmed.startsWith('#')) {
+                i++;
+                continue;
+            }
+
+            if (lineIndent <= baseIndent && !trimmed.startsWith('-')) {
+                break;
+            }
+
+            if (trimmed.startsWith('-')) {
+                const value = trimmed.substring(1).trim();
+                if (value) {
+                    arr.push(value.replace(/^["']|["']$/g, ''));
+                }
+            }
+            i++;
+        }
+
+        return { value: arr, nextIndex: i };
+    }
+
+    static parsePartialArray(lines, startIndex, baseIndent, firstItem) {
+        const arr = [];
+        let i = startIndex;
+
+        if (firstItem.startsWith('-')) {
+            const value = firstItem.substring(1).trim();
+            if (value) arr.push(value.replace(/^["']|["']$/g, ''));
+            i++;
+        }
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            const lineIndent = line.length - line.trimStart().length;
+
+            if (!trimmed || trimmed.startsWith('#')) {
+                i++;
+                continue;
+            }
+
+            if (lineIndent <= baseIndent && !trimmed.startsWith('-')) {
+                break;
+            }
+
+            if (trimmed.startsWith('-')) {
+                const value = trimmed.substring(1).trim();
+                if (value) {
+                    arr.push(value.replace(/^["']|["']$/g, ''));
+                }
+            }
+            i++;
+        }
+
+        return { value: arr, nextIndex: i };
+    }
+
+    static flattenObject(obj, prefix = '') {
+        const vars = {};
+        Object.entries(obj).forEach(([key, value]) => {
+            const fullKey = prefix ? `${prefix}.${key}` : key;
+            if (Array.isArray(value)) {
+                value.forEach((item, index) => {
+                    if (typeof item === 'object' && item !== null) {
+                        Object.assign(vars, this.flattenObject(item, `${fullKey}.${index}`));
+                    } else {
+                        vars[`${fullKey}.${index}`] = String(item);
+                    }
+                });
+            } else if (value && typeof value === 'object') {
+                Object.assign(vars, this.flattenObject(value, fullKey));
+            } else {
+                vars[fullKey] = String(value);
+            }
+        });
+        return vars;
     }
 
     static parsePartialJson(jsonContent) {
@@ -211,6 +625,22 @@ class TemplateProcessor {
                         currentKey = null;
                         objectContent = '';
                     }
+                } else if (afterColon.startsWith('[')) {
+                    let arrayContent = afterColon;
+                    let bracketLevel = (arrayContent.match(/\[/g) || []).length - (arrayContent.match(/\]/g) || []).length;
+                    
+                    if (bracketLevel === 0) {
+                        try {
+                            vars[currentKey] = JSON.stringify(JSON.parse(arrayContent.replace(/,$/, '')));
+                        } catch {
+                            vars[currentKey] = arrayContent.replace(/,$/, '');
+                        }
+                        currentKey = null;
+                    } else {
+                        inObject = true;
+                        objectContent = arrayContent;
+                        braceLevel = bracketLevel;
+                    }
                 } else if (afterColon.startsWith('"')) {
                     const stringMatch = afterColon.match(/^"([^"]*)"(?:,\s*)?$/);
                     if (stringMatch) {
@@ -226,7 +656,11 @@ class TemplateProcessor {
                 }
             } else if (inObject) {
                 objectContent += '\n' + line;
-                braceLevel += (trimmed.match(/\{/g) || []).length - (trimmed.match(/\}/g) || []).length;
+                if (objectContent.includes('{')) {
+                    braceLevel += (trimmed.match(/\{/g) || []).length - (trimmed.match(/\}/g) || []).length;
+                } else if (objectContent.includes('[')) {
+                    braceLevel += (trimmed.match(/\[/g) || []).length - (trimmed.match(/\]/g) || []).length;
+                }
 
                 if (braceLevel <= 0) {
                     try {
@@ -258,7 +692,7 @@ class TemplateProcessor {
                 vars[currentKey] = currentValue;
             } else if (inObject && objectContent) {
                 try {
-                    const attempts = [objectContent + '}', objectContent.replace(/,\s*$/, '') + '}'];
+                    const attempts = [objectContent + '}', objectContent + ']', objectContent.replace(/,\s*$/, '') + '}', objectContent.replace(/,\s*$/, '') + ']'];
                     for (const attempt of attempts) {
                         try {
                             vars[currentKey] = JSON.stringify(JSON.parse(attempt));
@@ -280,59 +714,7 @@ class TemplateProcessor {
     }
 
     static parsePartialYaml(yamlContent) {
-        const vars = {};
-        const lines = yamlContent.split('\n');
-        let currentObject = null, currentKey = null, indentLevel = 0;
-
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) continue;
-
-            const colonIndex = trimmed.indexOf(':');
-            if (colonIndex <= 0) {
-                if (!currentObject) break;
-                continue;
-            }
-
-            const key = trimmed.substring(0, colonIndex).trim();
-            let value = trimmed.substring(colonIndex + 1).trim();
-            const currentIndent = line.length - line.trimStart().length;
-
-            if (!value || value === '{}') {
-                if (currentObject && currentIndent <= indentLevel && currentKey) {
-                    if (Object.keys(currentObject).length > 0) {
-                        vars[currentKey] = JSON.stringify(currentObject);
-                    }
-                }
-                currentObject = {};
-                currentKey = key;
-                indentLevel = currentIndent;
-                vars[key] = '';
-                continue;
-            }
-
-            if (currentObject && currentIndent > indentLevel) {
-                value = value.replace(/^["']|["']$/g, '');
-                currentObject[key] = value;
-                vars[currentKey] = JSON.stringify(currentObject);
-            } else {
-                if (currentObject && currentIndent <= indentLevel && currentKey) {
-                    if (Object.keys(currentObject).length > 0) {
-                        vars[currentKey] = JSON.stringify(currentObject);
-                    }
-                    currentObject = null;
-                    currentKey = null;
-                    indentLevel = 0;
-                }
-                vars[key] = value.replace(/^["']|["']$/g, '') || '';
-            }
-        }
-
-        if (currentObject && currentKey && Object.keys(currentObject).length > 0) {
-            vars[currentKey] = JSON.stringify(currentObject);
-        }
-
-        return vars;
+        return this.parsePartialYamlAdvanced(yamlContent);
     }
 
     static isYamlFormat(content) {
@@ -352,51 +734,23 @@ class TemplateProcessor {
     }
 
     static parseYaml(yamlContent) {
-        const vars = {};
-        const lines = yamlContent.split('\n');
-        let currentObject = null, currentKey = null, indentLevel = 0;
-
-        lines.forEach(line => {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) return;
-
-            const colonIndex = trimmed.indexOf(':');
-            if (colonIndex <= 0) return;
-
-            const key = trimmed.substring(0, colonIndex).trim();
-            let value = trimmed.substring(colonIndex + 1).trim();
-            const currentIndent = line.length - line.trimStart().length;
-
-            if (!value || value === '{}') {
-                currentObject = {};
-                currentKey = key;
-                indentLevel = currentIndent;
-                vars[key] = '';
-                return;
-            }
-
-            if (currentObject && currentIndent > indentLevel) {
-                value = value.replace(/^["']|["']$/g, '');
-                currentObject[key] = value;
-                vars[currentKey] = JSON.stringify(currentObject);
-            } else {
-                if (currentIndent <= indentLevel) {
-                    currentObject = null;
-                    currentKey = null;
-                    indentLevel = 0;
-                }
-                vars[key] = value.replace(/^["']|["']$/g, '') || '';
-            }
-        });
-
-        return vars;
+        return this.parseYamlAdvanced(yamlContent);
     }
 
     static flattenJson(obj, prefix = '') {
         const vars = {};
         Object.entries(obj).forEach(([key, value]) => {
             const fullKey = prefix ? `${prefix}.${key}` : key;
-            if (value && typeof value === 'object' && !Array.isArray(value)) {
+            if (Array.isArray(value)) {
+                vars[key] = JSON.stringify(value);
+                value.forEach((item, index) => {
+                    if (item && typeof item === 'object') {
+                        Object.assign(vars, this.flattenJson(item, `${fullKey}.${index}`));
+                    } else {
+                        vars[`${fullKey}.${index}`] = String(item);
+                    }
+                });
+            } else if (value && typeof value === 'object') {
                 vars[key] = JSON.stringify(value);
                 Object.assign(vars, this.flattenJson(value, fullKey));
             } else {
