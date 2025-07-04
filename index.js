@@ -169,7 +169,7 @@ function createIframeApi() {
                 setTimeout(() => {
                     window.removeEventListener('message', listener);
                     reject(new Error('Command timeout'));
-                }, 30000);
+                }, 90000);
             } catch(e) {
                 reject(e);
             }
