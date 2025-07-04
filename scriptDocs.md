@@ -1,3 +1,339 @@
+---------------------
+关于小白X插件核心功能:
+1. 代码块渲染功能:
+   - SillyTavern原生只支持显示静态代码块，无法执行JavaScript或渲染HTML
+   - 小白X将聊天中包含HTML标签(完整的<html>, <!DOCTYPE>或单独的<script>)的代码块自动转换为交互式iframe
+   - 小白X提供了特殊的桥接API: STscript()函数
+     • 这是一个异步函数，接受斜杠命令字符串作为参数
+     • 函数会将命令发送给SillyTavern执行，并返回执行结果
+     • 使用await关键字等待命令执行完成并获取结果
+     • 这使iframe内的JavaScript代码能与SillyTavern通信并执行各种SillyTavern的斜杠命令，不要尝试通过window.parent直接访问SillyTavern的函数，这样不会工作
+ 
+   正确用法示例:
+   \`\`\`html
+   <!DOCTYPE html>
+   <html>
+   <head>
+       <title>交互式界面</title>
+       <style>
+           body { font-family: Arial; padding: 10px; }
+           button { margin: 5px; }
+       </style>
+   </head>
+   <body>
+       <h3>天气查询</h3>
+       <button onclick="checkWeather()">查询天气</button>
+       <div id="display"></div>
+       
+       <script>
+       async function checkWeather() {
+           // 调用STscript函数执行斜杠命令
+           await STscript('/echo 正在查询天气...');
+       
+           // 获取变量值
+           const 天气 = await STscript('/getvar 天气');
+       
+           // 在界面中显示结果
+           document.getElementById('display').innerHTML = 天气 || '晴天';
+       }
+       </script>
+   </body>
+   </html>
+   \`\`\`
+2. 定时任务模块:
+   - 拓展菜单中允许设置"在对话中自动执行"的斜杠命令
+   - 可以设置触发频率(每几楼层)、触发条件(AI消息后/用户消息前/每轮对话)
+   - 每个任务包含:名称、要执行的命令、触发间隔、触发类型
+   - 注册了/xbqte命令手动触发任务: \`/xbqte 任务名称\`
+   - 注册了/xbset命令调整任务间隔: \`/xbset 任务名称 间隔数字\`
+   - 任务命令可以使用所有标准STscript斜杠命令
+3. 与SillyTavern正则表达式功能的配合:
+   - SillyTavern提供了原生的正则设置功能，用于自动转换AI的消息输出
+   - 当设计包含交互界面的角色卡时，你应该教导用户如何使用这一功能
+   - 正确的工作流是:
+     a) 在AI输出中包含特定标记(如\`[状态面板]\`)
+     b) 在角色卡设置的格式化功能中添加正则表达式来替换这些标记为HTML代码
+     c) 勾选小白X的代码块渲染功能显示交互式界面
+   
+   正则表达式示例:
+   - 格式: \`/\\[状态面板\\]/g\` (匹配文本)
+   - 替换为: \`\`\`html
+<div id="status">
+  <h3>角色状态</h3>
+  <p>HP: <span id="hp">100</span>/100</p>
+  <script>
+    // 脚本代码
+  </script>
+</div>
+\`\`\`
+   这样设置后，每当AI输出包含[状态面板]时，SillyTavern会自动将其替换为HTML代码块，
+   然后小白X会将其渲染为可交互的界面。
+4.  沉浸式模板功能 (Template Editor):
+
+    核心概念：沉浸式界面
+    -   工作原理：当AI开始回复时，插件会立即创建你的HTML模板作为该回合的聊天消息。AI流式输出的原始文本对用户不可见；插件会拦截这些文本，提取占位符数据，并用这些数据动态渲染你的HTML界面。
+
+    生命周期：跨回合的状态管理
+    -   iframe的重建：每次AI回复，都会用你的模板创建一个全新的、独立的iframe。iframe本身是无状态的，不继承上一层楼的任何JavaScript数据或DOM状态。
+    -   状态持久化：所有需要跨楼层保存的状态（如金币、等级、物品）必须存储在SillyTavern的变量系统中。
+    -   关键原则：“仅在首次运行时初始化，在每次加载时从SillyTavern同步状态”。
+
+    占位符提取机制
+    -   插件会自动从AI的回复中提取结构化数据。支持以下三种格式：
+    -   1. JSON格式: 可以是独立的JSON对象 `{...}` 或被代码块包裹 ` ```json {...} ``` `。推荐用于复杂数据。
+    -   2. YAML格式: AI可以直接输出 `key: value` 格式的文本。
+    -   3. 自定义正则标签 (默认): 默认的正则表达式是 `\[([^\]]+)\]([\s\S]*?)\[\/\1\]`，也可在设置页面修改。这意味着AI可以输出 `[键]值[/键]` 的格式来传递数据。例如：`[money]100[/money]`。
+
+    数据流：双向通信
+    -   从AI到UI（数据更新）: 1. AI输出上述任一格式的数据。 2. 插件自动提取数据。 3. 插件调用模板内定义的`window.updateTemplateVariables(vars)`函数，将数据传递给你的界面。
+    -   从UI到SillyTavern（用户操作）: 1. 用户点击界面按钮。 2. 你的JS代码调用`async STscript()`函数。 3. 使用`/setvar`或`/addvar`命令更新SillyTavern中的变量，持久化操作结果。
+
+    实施步骤
+
+    步骤 1：HTML模板结构
+    -   你有两种方式显示数据：
+    -   A. 简单占位符 `[[placeholder]]`: 插件在渲染前会进行一次性文本替换。适用于纯静态、当回合内不变的文本（如故事剧情、内容总结）。
+    -   B. JavaScript动态渲染 (推荐用于交互式UI): 在HTML中为元素设置`id`，然后在`<script>`中通过JS更新。适用于所有交互式、需要计算或在流式输出中实时更新的数据。
+    -   对于复杂的游戏界面，必须使用方法B。
+
+    步骤 2：AI的输出格式
+    -   AI应根据你选择的占位符提取机制输出对应格式的数据（JSON、YAML或正则标签）。
+    -   JSON示例: `{"money": 150, "level": 2}`
+    -   正则标签示例: `[money]150[/money][level]2[/level]`
+    -   应给出根据你的模板html，在角色卡中指导AI输出格式的prompt，首条消息示例等
+
+    步骤 3：JavaScript核心逻辑
+    -   a) 首次初始化与状态加载:
+        ```javascript
+        async function initializeOrSync() {
+            const isInitialized = await STscript('/getvar game_initialized');
+            if (!isInitialized) {
+                await STscript('/setvar key=money 100');
+                await STscript('/setvar key=game_initialized true');
+            }
+            await syncGameStateFromST(); // 每次加载都同步
+        }
+        ```
+    -   b) 响应用户操作:
+        ```javascript
+        async function buyItem() {
+            let currentMoney = parseInt(document.getElementById('money-display').textContent);
+            const newMoney = currentMoney - 50;
+            // 立即更新UI
+            document.getElementById('money-display').textContent = newMoney;
+            // 再保存到SillyTavern
+            await STscript(`/setvar key=money ${newMoney}`);
+        }
+        ```
+
+    关键函数参考
+
+    -   `window.updateTemplateVariables(vars)`
+        -   作用: 这是UI与插件通信的核心。插件在AI流式输出期间，会大约每两秒调用一次此函数，将最新解析到的占位符(`vars`对象)传递给你的iframe。
+        -   技术细节: 因为它会被重复调用，所以此函数内的代码需要被设计成可以安全地多次执行。
+    -   `async STscript(command)`
+        -   作用: 在UI中执行任何SillyTavern的斜杠命令，用于持久化状态。
+        -   用法: `const playerName = await STscript('/getvar user');`
+
+    ⚠️  扁平化规则--AI必读     
+    -   通过自定义正则被正则提取的数据一律保存为字符串，不扁平化。
+    -   注意：**从JSON/YAML解析的数据中，当顶层结构是对象 `{}` 或数组 `[]` 时会进行扁平化处理。**
+    -   扁平化的数据有两种结果**：  
+          ① 原键 `key` 保存为完整JSON字符串 (`JSON.stringify`)；  
+          ② 对象成员展开为 `key.prop`，数组成员展开为 `key.0`、`key.1` 等形式，值为字符串。
+> 示例：`{"items":["A","B"],"profile":{"name":"Anna"},"score":88}`  
+展开为 →  
+- `vars.items = '["A","B"]'`, `vars["items.0"]="A"`, `vars["items.1"]="B"`  
+- `vars.profile = '{"name":"Anna"}'`, `vars["profile.name"]="Anna"`  
+- `vars.score = "88"` (不扁平化，直接保存字符串)
+    常见陷阱与最佳实践
+    -   陷阱：重复初始化。使用标志变量（如`game_initialized`）检测避免每层楼重复初始化。
+    -   实践：UI即时反馈。用户操作后，立即在JS中更新UI，然后再调用`STscript`保存。
+    -   陷阱：JSON转义问题。
+    -   实践：对复杂的JSON数据使用Base64编码存储，可以完美避免转义问题。
+        ```javascript
+        // 保存
+        const dataStr = JSON.stringify(inventory);
+        const encodedData = btoa(unescape(encodeURIComponent(dataStr)));
+        await STscript(`/setvar key=inventory_encoded "${encodedData}"`);
+        // 读取
+        const encodedData = await STscript('/getvar inventory_encoded');
+        const dataStr = decodeURIComponent(escape(atob(encodedData)));
+        const inventory = JSON.parse(dataStr);
+        ```
+    -   实践：逻辑分离。让UI JS负责状态显示和即时更新；SillyTavern变量负责持久化存储；AI负责故事叙述和高级逻辑响应。
+    案例：
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动态角色面板</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f0f2f5;
+            color: #333;
+            margin: 0;
+            padding: 15px;
+            max-width: 600px;
+            max-height: 480px;
+            box-sizing: border-box;
+        }
+
+        .panel {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            background: #fafafa;
+            border-bottom: 1px solid #e8e8e8;
+            padding: 12px 20px;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .panel-content {
+            padding: 20px;
+        }
+  
+        /* 状态显示样式 */
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .status-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .status-label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .status-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        .progress-bar-inner {
+            height: 100%;
+            background: linear-gradient(90deg, #1890ff, #40a9ff);
+            border-radius: 4px;
+            transition: width 0.5s ease-in-out;
+        }
+
+        /* 故事日志样式 */
+        #story-log-content {
+            min-height: 50px;
+            background: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            padding: 10px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+  
+        /* 按钮样式 */
+        .action-button {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-top: 15px;
+            border: none;
+            background: #1890ff;
+            color: white;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .action-button:hover {
+            background: #40a9ff;
+        }
+        .action-button:disabled {
+            background: #b0b0b0;
+            cursor: not-allowed;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- 角色状态面板 -->
+    <div class="panel">
+        <div class="panel-header">角色状态</div>
+        <div class="panel-content">
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="status-label">生命值 (HP)</span>
+                    <span id="hp-value" class="status-value">--/--</span>
+                    <div class="progress-bar"><div id="hp-bar" class="progress-bar-inner" style="width: 100%;"></div></div>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">心情</span>
+                    <span id="mood-value" class="status-value">未知</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 故事日志面板 -->
+    <div class="panel">
+        <div class="panel-header">
+            <span>剧情日志</span>
+            <span id="game-time-display" style="float: right; font-size: 14px; color: #888;"></span>
+        </div>
+        <div class="panel-content">
+            <div id="story-log-content">等待故事发生...</div>
+        </div>
+    </div>
+
+    <script>
+document.addEventListener('DOMContentLoaded', function() {
+   window.updateTemplateVariables = function(vars) {
+       // 更新血量
+       let profile = { hp: 0, max_hp: 100, mood: '平静' };
+       if (vars.profile) {
+           try {
+               profile = { ...profile, ...(typeof vars.profile === 'string' ? JSON.parse(vars.profile) : vars.profile) };
+           } catch (e) {}
+       }
+       const hpPercentage = (profile.hp / profile.max_hp) * 100;
+       document.getElementById('hp-value').textContent = `${profile.hp} / ${profile.max_hp}`;
+       document.getElementById('hp-bar').style.width = `${hpPercentage}%`;
+       document.getElementById('mood-value').textContent = profile.mood;
+
+       // 更新日志
+       const logElement = document.getElementById('story-log-content');
+       logElement.textContent = vars.story_log?.trim() ? vars.story_log : '等待故事发生...';
+
+       // 更新时间
+       document.getElementById('game-time-display').textContent = 
+           vars.game_time?.trim() ? `游戏时间: ${vars.game_time}` : '游戏时间: 未知';
+   };
+
+   // 初始化
+   window.updateTemplateVariables({});
+});
+    </script>
+</body>
+</html>
+5.  以下是SillyTavern的官方STscript脚本文档，可结合小白X功能创作深度定制的SillyTavern角色卡。
+----------------------
 # STscript 语言参考
 
 ## 什么是STscript？
