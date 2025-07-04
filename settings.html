@@ -19,7 +19,11 @@
                     <div class="section-divider">总开关<hr class="sysHR" /></div>
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_enabled" />
-                        <label for="xiaobaix_enabled">启用小白X</label>
+                        <label for="xiaobaix_enabled" class="has-tooltip" data-tooltip="渲染被```包裹的html、!DOCTYPE、script的代码块内容为交互式界面
+
+                        提供STscript(command)异步函数执行酒馆命令:
+
+                        await STscript('/echo 你好世界！')">启用小白X</label>
                     </div>
                     <br>
                     <div class="section-divider">内容隔离与布局控制<hr class="sysHR" /></div>
@@ -29,13 +33,13 @@
                     </div>
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_immersive_enabled" />
-                        <label for="xiaobaix_immersive_enabled">启用沉浸式显示模式</label>
+                        <label for="xiaobaix_immersive_enabled" class="has-tooltip" data-tooltip="优化聊天视图，提升沉浸感，尤其是手机的显示">启用沉浸式显示模式</label>
                     </div>
                     <br>
                     <div class="section-divider">模板功能<hr class="sysHR" /></div>
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_template_enabled" />
-                        <label for="xiaobaix_template_enabled">启用沉浸式模板</label>
+                        <label for="xiaobaix_template_enabled" class="has-tooltip" data-tooltip="将你的UI界面作为AI消息提前展示，再从流式文本中动态渲染。">启用沉浸式模板</label>
                     </div>
 
                     <div id="current_template_settings">
@@ -52,6 +56,11 @@
                             请选择一个角色
                         </div>
                     </div>
+                    <div class="section-divider">功能说明<hr class="sysHR" /></div>
+                    <div class="flex-container">
+                        <p>沉浸式模板教学文档⮕<a href="https://littlewhitebox.pages.dev" class="download-link" target="_blank">教学文档</a></p>
+                    </div>
+
                 </div>
                 <div class="wallhaven settings-section" style="display: none;">
                     <div class="section-divider">自动消息配图<hr class="sysHR" /></div>
@@ -101,7 +110,9 @@
                     <div class="section-divider">循环任务<hr class="sysHR" /></div>
                     <div class="flex-container">
                         <input type="checkbox" id="scheduled_tasks_enabled" />
-                        <label for="scheduled_tasks_enabled">启用循环任务</label>
+                        <label for="scheduled_tasks_enabled" class="has-tooltip" data-tooltip="自动执行设定好的斜杠命令
+                        输入/xbqte {{任务名称}}可以手动激活任务
+                        导出/入角色卡时, 角色任务会随角色卡一起导出/入">启用循环任务</label>
                     </div>
                     <div class="flex-container">
                         <div id="add_global_task" class="menu_button menu_button_icon" title="添加全局任务">
