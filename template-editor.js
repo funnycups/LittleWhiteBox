@@ -874,7 +874,7 @@ static createWrapper(content) {
                 setTimeout(() => {
                     window.removeEventListener('message', listener);
                     reject(new Error('timeout'));
-                }, 30000);
+                }, 90000);
             });
         };
 
