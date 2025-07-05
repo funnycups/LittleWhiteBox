@@ -85,7 +85,12 @@
     -   3. 自定义正则标签 (默认): 默认的正则表达式是 `\[([^\]]+)\]([\s\S]*?)\[\/\1\]`，也可在设置页面修改。这意味着AI可以输出 `[键]值[/键]` 的格式来传递数据。例如：`[money]100[/money]`。
 
     数据流：双向通信
-    -   从AI到UI（数据更新）: 1. AI输出上述任一格式的数据。 2. 插件自动提取数据。 3. 插件调用模板内定义的`window.updateTemplateVariables(vars)`函数，将数据传递给你的界面。
+    -   从AI到UI（数据更新）:
+        1.AI输出结构化数据（JSON/YAML/自定义标签）
+        2.插件解析并保持数据的原始对象结构
+        3.解析后的数据对象传递给 `window.updateTemplateVariables` 函数
+        4.支持标准JavaScript对象访问：点号访问、数组索引等
+        5.技术细节：传递的是原生JavaScript对象，保留所有嵌套关系。
     -   从UI到SillyTavern（用户操作）: 1. 用户点击界面按钮。 2. 你的JS代码调用`async STscript()`函数。 3. 使用`/setvar`或`/addvar`命令更新SillyTavern中的变量，持久化操作结果。
 
     实施步骤
@@ -135,17 +140,6 @@
         -   作用: 在UI中执行任何SillyTavern的斜杠命令，用于持久化状态。
         -   用法: `const playerName = await STscript('/getvar user');`
 
-    ⚠️  扁平化规则--AI必读     
-    -   通过自定义正则被正则提取的数据一律保存为字符串，不扁平化。
-    -   注意：**从JSON/YAML解析的数据中，当顶层结构是对象 `{}` 或数组 `[]` 时会进行扁平化处理。**
-    -   扁平化的数据有两种结果**：  
-          ① 原键 `key` 保存为完整JSON字符串 (`JSON.stringify`)；  
-          ② 对象成员展开为 `key.prop`，数组成员展开为 `key.0`、`key.1` 等形式，值为字符串。
-> 示例：`{"items":["A","B"],"profile":{"name":"Anna"},"score":88}`  
-展开为 →  
-- `vars.items = '["A","B"]'`, `vars["items.0"]="A"`, `vars["items.1"]="B"`  
-- `vars.profile = '{"name":"Anna"}'`, `vars["profile.name"]="Anna"`  
-- `vars.score = "88"` (不扁平化，直接保存字符串)
     常见陷阱与最佳实践
     -   陷阱：重复初始化。使用标志变量（如`game_initialized`）检测避免每层楼重复初始化。
     -   实践：UI即时反馈。用户操作后，立即在JS中更新UI，然后再调用`STscript`保存。
@@ -162,6 +156,20 @@
         const inventory = JSON.parse(dataStr);
         ```
     -   实践：逻辑分离。让UI JS负责状态显示和即时更新；SillyTavern变量负责持久化存储；AI负责故事叙述和高级逻辑响应。
+    // 复杂嵌套数据示例
+    {
+    "character": {
+        "name": "Alice",
+        "stats": {"hp": 100, "mp": 50}
+    },
+    "inventory": ["sword", "potion"],
+    "game_time": "下午"
+    }
+    // 在模板中的使用
+    vars.character.name        // "Alice"
+    vars.character.stats.hp    // 100
+    vars.inventory[0]          // "sword"
+    vars.game_time            // "下午"
     案例：
 <!DOCTYPE html>
 <html lang="zh-CN">

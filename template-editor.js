@@ -117,11 +117,11 @@ class TemplateProcessor {
 
         const extractors = [
             () => this.extractRegex(content, customRegex),
-            () => this.extractFromCodeBlocks(content, 'json', this.parseJsonProgressive),
+            () => this.extractFromCodeBlocks(content, 'json', this.parseJsonDirect),
             () => this.extractJsonFromIncompleteXml(content),
-            () => this.isJsonFormat(content) ? this.parseJsonProgressive(content) : null,
-            () => this.extractFromCodeBlocks(content, 'ya?ml', this.parseYamlProgressive),
-            () => this.isYamlFormat(content) ? this.parseYamlProgressive(content) : null,
+            () => this.isJsonFormat(content) ? this.parseJsonDirect(content) : null,
+            () => this.extractFromCodeBlocks(content, 'ya?ml', this.parseYamlDirect),
+            () => this.isYamlFormat(content) ? this.parseYamlDirect(content) : null,
             () => this.extractJsonFromXmlWrapper(content)
         ];
 
@@ -144,7 +144,7 @@ class TemplateProcessor {
 
             if (innerContent.startsWith('{')) {
                 try {
-                    const jsonVars = this.parseJsonProgressive(innerContent);
+                    const jsonVars = this.parseJsonDirect(innerContent);
                     if (jsonVars && Object.keys(jsonVars).length) {
                         Object.assign(vars, jsonVars);
                         continue;
@@ -154,7 +154,7 @@ class TemplateProcessor {
 
             if (this.isYamlFormat(innerContent)) {
                 try {
-                    const yamlVars = this.parseYamlProgressive(innerContent);
+                    const yamlVars = this.parseYamlDirect(innerContent);
                     if (yamlVars && Object.keys(yamlVars).length) {
                         Object.assign(vars, yamlVars);
                     }
@@ -176,7 +176,7 @@ class TemplateProcessor {
 
             if (innerContent.startsWith('{') && innerContent.includes('}')) {
                 try {
-                    const jsonVars = this.parseJsonProgressive(innerContent);
+                    const jsonVars = this.parseJsonDirect(innerContent);
                     if (jsonVars && Object.keys(jsonVars).length) {
                         Object.assign(vars, jsonVars);
                         continue;
@@ -186,7 +186,7 @@ class TemplateProcessor {
 
             if (this.isYamlFormat(innerContent)) {
                 try {
-                    const yamlVars = this.parseYamlProgressive(innerContent);
+                    const yamlVars = this.parseYamlDirect(innerContent);
                     if (yamlVars && Object.keys(yamlVars).length) {
                         Object.assign(vars, yamlVars);
                     }
@@ -221,20 +221,188 @@ class TemplateProcessor {
         return Object.keys(vars).length ? vars : null;
     }
 
-    static parseJsonProgressive(jsonContent) {
+    static parseJsonDirect(jsonContent) {
         try {
-            return this.flattenJson(JSON.parse(jsonContent.trim()));
+            return JSON.parse(jsonContent.trim());
         } catch {
-            return this.parsePartialJson(jsonContent.trim());
+            return this.parsePartialJsonDirect(jsonContent.trim());
         }
     }
 
-    static parseYamlProgressive(yamlContent) {
-        const completeVars = this.parseYamlAdvanced(yamlContent);
-        return Object.keys(completeVars).length > 0 ? completeVars : this.parsePartialYamlAdvanced(yamlContent);
+    static parsePartialJsonDirect(jsonContent) {
+        const vars = {};
+        if (!jsonContent.startsWith('{')) return vars;
+
+        try {
+            const parsed = JSON.parse(jsonContent);
+            return parsed;
+        } catch {}
+
+        const lines = jsonContent.split('\n');
+        let currentKey = null;
+        let currentValue = '';
+        let braceLevel = 0;
+        let bracketLevel = 0;
+        let inString = false;
+        let inObject = false;
+        let inArray = false;
+        let objectContent = '';
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed === '{' || trimmed === '}') continue;
+
+            const stringMatch = trimmed.match(/^"([^"]+)"\s*:\s*"([^"]*)"[,]?$/);
+            if (stringMatch && !inObject && !inArray) {
+                vars[stringMatch[1]] = stringMatch[2];
+                continue;
+            }
+
+            const numMatch = trimmed.match(/^"([^"]+)"\s*:\s*(\d+)[,]?$/);
+            if (numMatch && !inObject && !inArray) {
+                vars[numMatch[1]] = parseInt(numMatch[2]);
+                continue;
+            }
+
+            const arrayStartMatch = trimmed.match(/^"([^"]+)"\s*:\s*\[(.*)$/);
+            if (arrayStartMatch && !inObject && !inArray) {
+                currentKey = arrayStartMatch[1];
+                objectContent = '[' + arrayStartMatch[2];
+                inArray = true;
+                bracketLevel = 1;
+                
+                const openBrackets = (arrayStartMatch[2].match(/\[/g) || []).length;
+                const closeBrackets = (arrayStartMatch[2].match(/\]/g) || []).length;
+                bracketLevel += openBrackets - closeBrackets;
+                
+                if (bracketLevel === 0) {
+                    try {
+                        vars[currentKey] = JSON.parse(objectContent);
+                    } catch {}
+                    inArray = false;
+                    currentKey = null;
+                    objectContent = '';
+                }
+                continue;
+            }
+
+            const objStartMatch = trimmed.match(/^"([^"]+)"\s*:\s*\{(.*)$/);
+            if (objStartMatch && !inObject && !inArray) {
+                currentKey = objStartMatch[1];
+                objectContent = '{' + objStartMatch[2];
+                inObject = true;
+                braceLevel = 1;
+                
+                const openBraces = (objStartMatch[2].match(/\{/g) || []).length;
+                const closeBraces = (objStartMatch[2].match(/\}/g) || []).length;
+                braceLevel += openBraces - closeBraces;
+                
+                if (braceLevel === 0) {
+                    try {
+                        vars[currentKey] = JSON.parse(objectContent);
+                    } catch {}
+                    inObject = false;
+                    currentKey = null;
+                    objectContent = '';
+                }
+                continue;
+            }
+
+            if (inArray) {
+                objectContent += '\n' + line;
+                const openBrackets = (trimmed.match(/\[/g) || []).length;
+                const closeBrackets = (trimmed.match(/\]/g) || []).length;
+                bracketLevel += openBrackets - closeBrackets;
+
+                if (bracketLevel <= 0) {
+                    try {
+                        vars[currentKey] = JSON.parse(objectContent);
+                    } catch {
+                        const cleaned = objectContent.replace(/,\s*$/, '');
+                        try {
+                            vars[currentKey] = JSON.parse(cleaned);
+                        } catch {
+                            const attempts = [
+                                cleaned + '"]',
+                                cleaned + ']'
+                            ];
+                            for (const attempt of attempts) {
+                                try {
+                                    vars[currentKey] = JSON.parse(attempt);
+                                    break;
+                                } catch {}
+                            }
+                        }
+                    }
+                    inArray = false;
+                    currentKey = null;
+                    objectContent = '';
+                    bracketLevel = 0;
+                }
+            }
+
+            if (inObject) {
+                objectContent += '\n' + line;
+                const openBraces = (trimmed.match(/\{/g) || []).length;
+                const closeBraces = (trimmed.match(/\}/g) || []).length;
+                braceLevel += openBraces - closeBraces;
+
+                if (braceLevel <= 0) {
+                    try {
+                        vars[currentKey] = JSON.parse(objectContent);
+                    } catch {
+                        const cleaned = objectContent.replace(/,\s*$/, '');
+                        try {
+                            vars[currentKey] = JSON.parse(cleaned);
+                        } catch {
+                            vars[currentKey] = objectContent;
+                        }
+                    }
+                    inObject = false;
+                    currentKey = null;
+                    objectContent = '';
+                    braceLevel = 0;
+                }
+            }
+        }
+
+        if (inArray && currentKey && objectContent) {
+            try {
+                const attempts = [
+                    objectContent + ']',
+                    objectContent.replace(/,\s*$/, '') + ']',
+                    objectContent + '"]'
+                ];
+                
+                for (const attempt of attempts) {
+                    try {
+                        vars[currentKey] = JSON.parse(attempt);
+                        break;
+                    } catch {}
+                }
+            } catch {}
+        }
+
+        if (inObject && currentKey && objectContent) {
+            try {
+                const attempts = [
+                    objectContent + '}',
+                    objectContent.replace(/,\s*$/, '') + '}'
+                ];
+                
+                for (const attempt of attempts) {
+                    try {
+                        vars[currentKey] = JSON.parse(attempt);
+                        break;
+                    } catch {}
+                }
+            } catch {}
+        }
+
+        return vars;
     }
 
-    static parseYamlAdvanced(yamlContent) {
+    static parseYamlDirect(yamlContent) {
         const vars = {};
         const lines = yamlContent.split('\n');
         let i = 0;
@@ -265,35 +433,32 @@ class TemplateProcessor {
             } else if (afterColon === '' || afterColon === '{}') {
                 const result = this.parseNestedObject(lines, i, currentIndent);
                 if (result.value && Object.keys(result.value).length > 0) {
-                    vars[key] = JSON.stringify(result.value);
-                    Object.assign(vars, this.flattenObject(result.value, key));
+                    vars[key] = result.value;
                 } else {
                     vars[key] = '';
                 }
                 i = result.nextIndex;
             } else if (afterColon.startsWith('-') || (afterColon === '' && i + 1 < lines.length && lines[i + 1].trim().startsWith('-'))) {
                 const result = this.parseArray(lines, i, currentIndent, afterColon.startsWith('-') ? afterColon : '');
-                vars[key] = JSON.stringify(result.value);
-                if (Array.isArray(result.value)) {
-                    result.value.forEach((item, index) => {
-                        if (typeof item === 'object' && item !== null) {
-                            Object.assign(vars, this.flattenObject(item, `${key}.${index}`));
-                        } else {
-                            vars[`${key}.${index}`] = String(item);
-                        }
-                    });
-                }
+                vars[key] = result.value;
                 i = result.nextIndex;
             } else {
-                vars[key] = afterColon.replace(/^["']|["']$/g, '');
+                let value = afterColon.replace(/^["']|["']$/g, '');
+                if (/^\d+$/.test(value)) {
+                    vars[key] = parseInt(value);
+                } else if (/^\d+\.\d+$/.test(value)) {
+                    vars[key] = parseFloat(value);
+                } else {
+                    vars[key] = value;
+                }
                 i++;
             }
         }
 
-        return vars;
+        return Object.keys(vars).length ? vars : null;
     }
 
-    static parsePartialYamlAdvanced(yamlContent) {
+    static parsePartialYamlDirect(yamlContent) {
         const vars = {};
         const lines = yamlContent.split('\n');
         let i = 0;
@@ -324,27 +489,24 @@ class TemplateProcessor {
             } else if (afterColon === '' || afterColon === '{}') {
                 const result = this.parsePartialNestedObject(lines, i, currentIndent);
                 if (result.value && Object.keys(result.value).length > 0) {
-                    vars[key] = JSON.stringify(result.value);
-                    Object.assign(vars, this.flattenObject(result.value, key));
+                    vars[key] = result.value;
                 } else {
                     vars[key] = '';
                 }
                 i = result.nextIndex;
             } else if (afterColon.startsWith('-') || (afterColon === '' && i + 1 < lines.length && lines[i + 1].trim().startsWith('-'))) {
                 const result = this.parsePartialArray(lines, i, currentIndent, afterColon.startsWith('-') ? afterColon : '');
-                vars[key] = JSON.stringify(result.value);
-                if (Array.isArray(result.value)) {
-                    result.value.forEach((item, index) => {
-                        if (typeof item === 'object' && item !== null) {
-                            Object.assign(vars, this.flattenObject(item, `${key}.${index}`));
-                        } else {
-                            vars[`${key}.${index}`] = String(item);
-                        }
-                    });
-                }
+                vars[key] = result.value;
                 i = result.nextIndex;
             } else {
-                vars[key] = afterColon.replace(/^["']|["']$/g, '');
+                let value = afterColon.replace(/^["']|["']$/g, '');
+                if (/^\d+$/.test(value)) {
+                    vars[key] = parseInt(value);
+                } else if (/^\d+\.\d+$/.test(value)) {
+                    vars[key] = parseFloat(value);
+                } else {
+                    vars[key] = value;
+                }
                 i++;
             }
         }
@@ -435,8 +597,19 @@ class TemplateProcessor {
                     const result = this.parseNestedObject(lines, i, lineIndent);
                     obj[key] = result.value;
                     i = result.nextIndex;
+                } else if (value.startsWith('-') || (value === '' && i + 1 < lines.length && lines[i + 1].trim().startsWith('-'))) {
+                    const result = this.parseArray(lines, i, lineIndent, value.startsWith('-') ? value : '');
+                    obj[key] = result.value;
+                    i = result.nextIndex;
                 } else {
-                    obj[key] = value.replace(/^["']|["']$/g, '');
+                    let cleanValue = value.replace(/^["']|["']$/g, '');
+                    if (/^\d+$/.test(cleanValue)) {
+                        obj[key] = parseInt(cleanValue);
+                    } else if (/^\d+\.\d+$/.test(cleanValue)) {
+                        obj[key] = parseFloat(cleanValue);
+                    } else {
+                        obj[key] = cleanValue;
+                    }
                     i++;
                 }
             } else {
@@ -478,8 +651,19 @@ class TemplateProcessor {
                     const result = this.parsePartialNestedObject(lines, i, lineIndent);
                     obj[key] = result.value;
                     i = result.nextIndex;
+                } else if (value.startsWith('-') || (value === '' && i + 1 < lines.length && lines[i + 1].trim().startsWith('-'))) {
+                    const result = this.parsePartialArray(lines, i, lineIndent, value.startsWith('-') ? value : '');
+                    obj[key] = result.value;
+                    i = result.nextIndex;
                 } else {
-                    obj[key] = value.replace(/^["']|["']$/g, '');
+                    let cleanValue = value.replace(/^["']|["']$/g, '');
+                    if (/^\d+$/.test(cleanValue)) {
+                        obj[key] = parseInt(cleanValue);
+                    } else if (/^\d+\.\d+$/.test(cleanValue)) {
+                        obj[key] = parseFloat(cleanValue);
+                    } else {
+                        obj[key] = cleanValue;
+                    }
                     i++;
                 }
             } else {
@@ -496,7 +680,16 @@ class TemplateProcessor {
 
         if (firstItem.startsWith('-')) {
             const value = firstItem.substring(1).trim();
-            if (value) arr.push(value.replace(/^["']|["']$/g, ''));
+            if (value) {
+                let cleanValue = value.replace(/^["']|["']$/g, '');
+                if (/^\d+$/.test(cleanValue)) {
+                    arr.push(parseInt(cleanValue));
+                } else if (/^\d+\.\d+$/.test(cleanValue)) {
+                    arr.push(parseFloat(cleanValue));
+                } else {
+                    arr.push(cleanValue);
+                }
+            }
             i++;
         }
 
@@ -517,7 +710,14 @@ class TemplateProcessor {
             if (trimmed.startsWith('-')) {
                 const value = trimmed.substring(1).trim();
                 if (value) {
-                    arr.push(value.replace(/^["']|["']$/g, ''));
+                    let cleanValue = value.replace(/^["']|["']$/g, '');
+                    if (/^\d+$/.test(cleanValue)) {
+                        arr.push(parseInt(cleanValue));
+                    } else if (/^\d+\.\d+$/.test(cleanValue)) {
+                        arr.push(parseFloat(cleanValue));
+                    } else {
+                        arr.push(cleanValue);
+                    }
                 }
             }
             i++;
@@ -532,7 +732,16 @@ class TemplateProcessor {
 
         if (firstItem.startsWith('-')) {
             const value = firstItem.substring(1).trim();
-            if (value) arr.push(value.replace(/^["']|["']$/g, ''));
+            if (value) {
+                let cleanValue = value.replace(/^["']|["']$/g, '');
+                if (/^\d+$/.test(cleanValue)) {
+                    arr.push(parseInt(cleanValue));
+                } else if (/^\d+\.\d+$/.test(cleanValue)) {
+                    arr.push(parseFloat(cleanValue));
+                } else {
+                    arr.push(cleanValue);
+                }
+            }
             i++;
         }
 
@@ -553,168 +762,20 @@ class TemplateProcessor {
             if (trimmed.startsWith('-')) {
                 const value = trimmed.substring(1).trim();
                 if (value) {
-                    arr.push(value.replace(/^["']|["']$/g, ''));
+                    let cleanValue = value.replace(/^["']|["']$/g, '');
+                    if (/^\d+$/.test(cleanValue)) {
+                        arr.push(parseInt(cleanValue));
+                    } else if (/^\d+\.\d+$/.test(cleanValue)) {
+                        arr.push(parseFloat(cleanValue));
+                    } else {
+                        arr.push(cleanValue);
+                    }
                 }
             }
             i++;
         }
 
         return { value: arr, nextIndex: i };
-    }
-
-    static flattenObject(obj, prefix = '') {
-        const vars = {};
-        Object.entries(obj).forEach(([key, value]) => {
-            const fullKey = prefix ? `${prefix}.${key}` : key;
-            if (Array.isArray(value)) {
-                value.forEach((item, index) => {
-                    if (typeof item === 'object' && item !== null) {
-                        Object.assign(vars, this.flattenObject(item, `${fullKey}.${index}`));
-                    } else {
-                        vars[`${fullKey}.${index}`] = String(item);
-                    }
-                });
-            } else if (value && typeof value === 'object') {
-                Object.assign(vars, this.flattenObject(value, fullKey));
-            } else {
-                vars[fullKey] = String(value);
-            }
-        });
-        return vars;
-    }
-
-    static parsePartialJson(jsonContent) {
-        const vars = {};
-        if (!jsonContent.startsWith('{')) return vars;
-
-        try {
-            const parsed = JSON.parse(jsonContent);
-            return this.flattenJson(parsed);
-        } catch {}
-
-        const lines = jsonContent.split('\n');
-        let currentKey = null, currentValue = '', inStringValue = false;
-        let braceLevel = 0, inObject = false, objectContent = '';
-
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed === '{' || trimmed === '}') continue;
-
-            const keyMatch = trimmed.match(/^"([^"]+)"\s*:\s*/);
-            if (keyMatch && !inStringValue && !inObject) {
-                if (currentKey && currentValue) {
-                    vars[currentKey] = this.cleanValue(currentValue);
-                    currentValue = '';
-                }
-
-                currentKey = keyMatch[1];
-                const afterColon = trimmed.substring(keyMatch[0].length);
-
-                if (afterColon.startsWith('{')) {
-                    inObject = true;
-                    objectContent = afterColon;
-                    braceLevel = (objectContent.match(/\{/g) || []).length - (objectContent.match(/\}/g) || []).length;
-
-                    if (braceLevel === 0) {
-                        try {
-                            vars[currentKey] = JSON.stringify(JSON.parse(objectContent.replace(/,$/, '')));
-                        } catch {
-                            vars[currentKey] = objectContent.replace(/,$/, '');
-                        }
-                        inObject = false;
-                        currentKey = null;
-                        objectContent = '';
-                    }
-                } else if (afterColon.startsWith('[')) {
-                    let arrayContent = afterColon;
-                    let bracketLevel = (arrayContent.match(/\[/g) || []).length - (arrayContent.match(/\]/g) || []).length;
-                    
-                    if (bracketLevel === 0) {
-                        try {
-                            vars[currentKey] = JSON.stringify(JSON.parse(arrayContent.replace(/,$/, '')));
-                        } catch {
-                            vars[currentKey] = arrayContent.replace(/,$/, '');
-                        }
-                        currentKey = null;
-                    } else {
-                        inObject = true;
-                        objectContent = arrayContent;
-                        braceLevel = bracketLevel;
-                    }
-                } else if (afterColon.startsWith('"')) {
-                    const stringMatch = afterColon.match(/^"([^"]*)"(?:,\s*)?$/);
-                    if (stringMatch) {
-                        vars[currentKey] = stringMatch[1];
-                        currentKey = null;
-                    } else {
-                        currentValue = afterColon.replace(/^"/, '');
-                        inStringValue = true;
-                    }
-                } else {
-                    vars[currentKey] = this.cleanValue(afterColon);
-                    currentKey = null;
-                }
-            } else if (inObject) {
-                objectContent += '\n' + line;
-                if (objectContent.includes('{')) {
-                    braceLevel += (trimmed.match(/\{/g) || []).length - (trimmed.match(/\}/g) || []).length;
-                } else if (objectContent.includes('[')) {
-                    braceLevel += (trimmed.match(/\[/g) || []).length - (trimmed.match(/\]/g) || []).length;
-                }
-
-                if (braceLevel <= 0) {
-                    try {
-                        const cleaned = objectContent.replace(/,\s*$/, '');
-                        vars[currentKey] = JSON.stringify(JSON.parse(cleaned));
-                    } catch {
-                        vars[currentKey] = this.cleanValue(objectContent);
-                    }
-                    inObject = false;
-                    currentKey = null;
-                    objectContent = '';
-                    braceLevel = 0;
-                }
-            } else if (inStringValue && currentKey) {
-                if (trimmed.endsWith('"') || trimmed.endsWith('",')) {
-                    currentValue += (currentValue ? '\n' : '') + trimmed.replace(/,$/, '').replace(/"$/, '');
-                    vars[currentKey] = currentValue;
-                    currentKey = null;
-                    currentValue = '';
-                    inStringValue = false;
-                } else {
-                    currentValue += (currentValue ? '\n' : '') + trimmed;
-                }
-            }
-        }
-
-        if (currentKey) {
-            if (inStringValue && currentValue) {
-                vars[currentKey] = currentValue;
-            } else if (inObject && objectContent) {
-                try {
-                    const attempts = [objectContent + '}', objectContent + ']', objectContent.replace(/,\s*$/, '') + '}', objectContent.replace(/,\s*$/, '') + ']'];
-                    for (const attempt of attempts) {
-                        try {
-                            vars[currentKey] = JSON.stringify(JSON.parse(attempt));
-                            break;
-                        } catch {}
-                    }
-                    if (!vars[currentKey]) vars[currentKey] = this.cleanValue(objectContent);
-                } catch {
-                    vars[currentKey] = this.cleanValue(objectContent);
-                }
-            }
-        }
-
-        return vars;
-    }
-
-    static cleanValue(value) {
-        return value.replace(/,$/, '').replace(/^"|"$/g, '').trim();
-    }
-
-    static parsePartialYaml(yamlContent) {
-        return this.parsePartialYamlAdvanced(yamlContent);
     }
 
     static isYamlFormat(content) {
@@ -731,33 +792,6 @@ class TemplateProcessor {
     static isJsonFormat(content) {
         const trimmed = content.trim();
         return (trimmed.startsWith('{') || trimmed.startsWith('['));
-    }
-
-    static parseYaml(yamlContent) {
-        return this.parseYamlAdvanced(yamlContent);
-    }
-
-    static flattenJson(obj, prefix = '') {
-        const vars = {};
-        Object.entries(obj).forEach(([key, value]) => {
-            const fullKey = prefix ? `${prefix}.${key}` : key;
-            if (Array.isArray(value)) {
-                vars[key] = JSON.stringify(value);
-                value.forEach((item, index) => {
-                    if (item && typeof item === 'object') {
-                        Object.assign(vars, this.flattenJson(item, `${fullKey}.${index}`));
-                    } else {
-                        vars[`${fullKey}.${index}`] = String(item);
-                    }
-                });
-            } else if (value && typeof value === 'object') {
-                vars[key] = JSON.stringify(value);
-                Object.assign(vars, this.flattenJson(value, fullKey));
-            } else {
-                vars[key] = String(value);
-            }
-        });
-        return vars;
     }
 
     static replaceVars(tmpl, vars) {
@@ -799,8 +833,6 @@ static createWrapper(content) {
 
     return wrapperHtml;
 }
-
-
 
    static writeContentToIframe(iframe, content) {
        try {
@@ -887,7 +919,6 @@ static createWrapper(content) {
         document.readyState === 'loading' ?
             document.addEventListener('DOMContentLoaded', setup) : setup();`;
     }
-
 
    static async sendUpdate(messageId, vars) {
        const iframe = await this.waitForIframe(messageId);
@@ -1066,8 +1097,6 @@ class MessageHandler {
         });
         state.variableHistory.set(messageId, history);
     }
-
-
 
     static reapplyAll() {
         if (!TemplateSettings.get().enabled) return;
