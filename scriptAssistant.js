@@ -12,8 +12,13 @@ function initScriptAssistant() {
         extension_settings[EXT_ID].scriptAssistant = { enabled: false };
     }
 
+    if (window['registerModuleCleanup']) {
+        window['registerModuleCleanup']('scriptAssistant', cleanup);
+    }
+
     $('#xiaobaix_script_assistant').on('change', function() {
-        const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
+        let globalEnabled = true;
+        try { if ('isXiaobaixEnabled' in window) globalEnabled = Boolean(window['isXiaobaixEnabled']); } catch {}
         if (!globalEnabled) return;
 
         const enabled = $(this).prop('checked');
@@ -21,9 +26,9 @@ function initScriptAssistant() {
         saveSettingsDebounced();
 
         if (enabled) {
-            injectScriptDocs();
+            if (typeof window['injectScriptDocs'] === 'function') window['injectScriptDocs']();
         } else {
-            removeScriptDocs();
+            if (typeof window['removeScriptDocs'] === 'function') window['removeScriptDocs']();
             cleanup();
         }
     });
@@ -32,12 +37,8 @@ function initScriptAssistant() {
 
     setupEventListeners();
 
-    if (window.registerModuleCleanup) {
-        window.registerModuleCleanup('scriptAssistant', cleanup);
-    }
-
     if (extension_settings[EXT_ID].scriptAssistant.enabled) {
-        setTimeout(() => injectScriptDocs(), 1000);
+        setTimeout(() => { if (typeof window['injectScriptDocs'] === 'function') window['injectScriptDocs'](); }, 1000);
     }
 }
 
@@ -84,7 +85,7 @@ function cleanup() {
         eventSource.removeListener(event_types.APP_READY, eventHandlers.appReady);
     }
 
-    removeScriptDocs();
+    if (typeof window['removeScriptDocs'] === 'function') window['removeScriptDocs']();
 
     eventHandlers = {};
 }
@@ -130,7 +131,7 @@ ${docsContent}
 }
 
 function removeScriptDocs() {
-    setExtensionPrompt(SCRIPT_MODULE_NAME, '', extension_prompt_types.IN_PROMPT);
+    setExtensionPrompt(SCRIPT_MODULE_NAME, '', extension_prompt_types.IN_PROMPT, 2, false, 0);
 }
 
 window.injectScriptDocs = injectScriptDocs;

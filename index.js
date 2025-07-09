@@ -17,8 +17,15 @@ extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     enabled: true,
     sandboxMode: false,
     memoryEnabled: true,
-    memoryInjectEnabled: true,
-    memoryInjectDepth: 2
+    memoryInjectEnabled: false,
+    memoryInjectDepth: 4,
+    recorded: { enabled: true },
+    templateEditor: { enabled: true, characterBindings: {} },
+    tasks: { enabled: true, globalTasks: [], processedMessages: [], character_allowed_tasks: [] },
+    scriptAssistant: { enabled: false },
+    preview: { enabled: false },
+    wallhaven: { enabled: false },
+    immersive: { enabled: false }
 };
 
 const settings = extension_settings[EXT_ID];
@@ -609,11 +616,21 @@ async function setupSettings() {
             }
         });
 
-        $('#xiaobaix_immersive_enabled').on('change', function() {
+        $("#xiaobaix_recorded_enabled").prop("checked", settings.recorded?.enabled || false).on("change", function() {
             if (!isXiaobaixEnabled) return;
             const enabled = $(this).prop('checked');
-            extension_settings[EXT_ID].immersive = extension_settings[EXT_ID].immersive || {};
-            extension_settings[EXT_ID].immersive.enabled = enabled;
+            settings.recorded = extension_settings[EXT_ID].recorded || {};
+            settings.recorded.enabled = enabled;
+            extension_settings[EXT_ID].recorded = settings.recorded;
+            saveSettingsDebounced();
+        });
+
+        $('#xiaobaix_immersive_enabled').prop("checked", settings.immersive?.enabled || false).on('change', function() {
+            if (!isXiaobaixEnabled) return;
+            const enabled = $(this).prop('checked');
+            settings.immersive = extension_settings[EXT_ID].immersive || {};
+            settings.immersive.enabled = enabled;
+            extension_settings[EXT_ID].immersive = settings.immersive;
             saveSettingsDebounced();
             if (moduleCleanupFunctions.has('immersiveMode')) {
                 moduleCleanupFunctions.get('immersiveMode')();
@@ -623,11 +640,12 @@ async function setupSettings() {
             }
         });
 
-        $('#xiaobaix_preview_enabled').on('change', function() {
+        $('#xiaobaix_preview_enabled').prop("checked", settings.preview?.enabled || false).on('change', function() {
             if (!isXiaobaixEnabled) return;
-            extension_settings[EXT_ID].preview = extension_settings[EXT_ID].preview || {};
             const enabled = $(this).prop('checked');
-            extension_settings[EXT_ID].preview.enabled = enabled;
+            settings.preview = extension_settings[EXT_ID].preview || {};
+            settings.preview.enabled = enabled;
+            extension_settings[EXT_ID].preview = settings.preview;
             saveSettingsDebounced();
             if (moduleCleanupFunctions.has('messagePreview')) {
                 moduleCleanupFunctions.get('messagePreview')();
@@ -637,11 +655,12 @@ async function setupSettings() {
             }
         });
 
-        $('#xiaobaix_script_assistant').on('change', function() {
+        $('#xiaobaix_script_assistant').prop("checked", settings.scriptAssistant?.enabled || false).on('change', function() {
             if (!isXiaobaixEnabled) return;
-            extension_settings[EXT_ID].scriptAssistant = extension_settings[EXT_ID].scriptAssistant || {};
             const enabled = $(this).prop('checked');
-            extension_settings[EXT_ID].scriptAssistant.enabled = enabled;
+            settings.scriptAssistant = extension_settings[EXT_ID].scriptAssistant || {};
+            settings.scriptAssistant.enabled = enabled;
+            extension_settings[EXT_ID].scriptAssistant = settings.scriptAssistant;
             saveSettingsDebounced();
             if (moduleCleanupFunctions.has('scriptAssistant')) {
                 moduleCleanupFunctions.get('scriptAssistant')();
@@ -651,11 +670,12 @@ async function setupSettings() {
             }
         });
 
-        $('#scheduled_tasks_enabled').on('change', function() {
+        $('#scheduled_tasks_enabled').prop("checked", settings.tasks?.enabled || extension_settings[EXT_ID].tasks?.enabled || false).on('change', function() {
             if (!isXiaobaixEnabled) return;
-            extension_settings[EXT_ID].tasks = extension_settings[EXT_ID].tasks || {};
             const enabled = $(this).prop('checked');
-            extension_settings[EXT_ID].tasks.enabled = enabled;
+            settings.tasks = extension_settings[EXT_ID].tasks || {};
+            settings.tasks.enabled = enabled;
+            extension_settings[EXT_ID].tasks = settings.tasks;
             saveSettingsDebounced();
             if (moduleCleanupFunctions.has('scheduledTasks')) {
                 moduleCleanupFunctions.get('scheduledTasks')();
@@ -665,11 +685,12 @@ async function setupSettings() {
             }
         });
 
-        $('#xiaobaix_template_enabled').on('change', function() {
+        $('#xiaobaix_template_enabled').prop("checked", settings.templateEditor?.enabled || extension_settings[EXT_ID].templateEditor?.enabled || false).on('change', function() {
             if (!isXiaobaixEnabled) return;
-            extension_settings[EXT_ID].templateEditor = extension_settings[EXT_ID].templateEditor || {};
             const enabled = $(this).prop('checked');
-            extension_settings[EXT_ID].templateEditor.enabled = enabled;
+            settings.templateEditor = extension_settings[EXT_ID].templateEditor || {};
+            settings.templateEditor.enabled = enabled;
+            extension_settings[EXT_ID].templateEditor = settings.templateEditor;
             saveSettingsDebounced();
             if (moduleCleanupFunctions.has('templateEditor')) {
                 moduleCleanupFunctions.get('templateEditor')();
@@ -679,11 +700,12 @@ async function setupSettings() {
             }
         });
 
-        $('#wallhaven_enabled').on('change', function() {
+        $('#wallhaven_enabled').prop("checked", settings.wallhaven?.enabled || false).on('change', function() {
             if (!isXiaobaixEnabled) return;
-            extension_settings[EXT_ID].wallhaven = extension_settings[EXT_ID].wallhaven || {};
             const enabled = $(this).prop('checked');
-            extension_settings[EXT_ID].wallhaven.enabled = enabled;
+            settings.wallhaven = extension_settings[EXT_ID].wallhaven || {};
+            settings.wallhaven.enabled = enabled;
+            extension_settings[EXT_ID].wallhaven = settings.wallhaven;
             saveSettingsDebounced();
             if (moduleCleanupFunctions.has('wallhavenBackground')) {
                 moduleCleanupFunctions.get('wallhavenBackground')();
@@ -832,17 +854,20 @@ jQuery(async () => {
 
         await setupSettings();
         setupEventListeners();
-        initTasks();
-        initScriptAssistant();
-        initImmersiveMode();
-        initTemplateEditor();
-        initWallhavenBackground();
+
+        // 根據 extension_settings 狀態自動初始化所有功能
+        if (settings.tasks?.enabled) initTasks();
+        if (settings.scriptAssistant?.enabled) initScriptAssistant();
+        if (settings.immersive?.enabled) initImmersiveMode();
+        if (settings.templateEditor?.enabled) initTemplateEditor();
+        if (settings.wallhaven?.enabled) initWallhavenBackground();
+        if (settings.preview?.enabled || settings.recorded?.enabled) {
+            const timer2 = setTimeout(initMessagePreview, 1500);
+            addGlobalTimer(timer2);
+        }
 
         const timer1 = setTimeout(setupMenuTabs, 500);
         addGlobalTimer(timer1);
-
-        const timer2 = setTimeout(initMessagePreview, 1500);
-        addGlobalTimer(timer2);
 
         setTimeout(() => {
             if (window.messagePreviewCleanup) {
@@ -854,7 +879,6 @@ jQuery(async () => {
         const timer3 = setTimeout(async () => {
             if (isXiaobaixEnabled) {
                 processExistingMessages();
-
                 if (settings.memoryEnabled) {
                     const messages = await statsTracker.dataManager.processMessageHistory();
                     if (messages?.length > 0) {
@@ -862,7 +886,6 @@ jQuery(async () => {
                         messages.forEach(message => {
                             statsTracker.textAnalysis.updateStatsFromText(stats, message.content, message.name);
                         });
-
                         await executeSlashCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(stats)}`);
                         if (settings.memoryInjectEnabled) statsTracker.updateMemoryPrompt();
                     }

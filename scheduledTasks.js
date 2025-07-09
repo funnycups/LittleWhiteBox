@@ -13,7 +13,7 @@ import { executeSlashCommand } from "./index.js";
 const TASKS_MODULE_NAME = "xiaobaix-tasks";
 const EXT_ID = "LittleWhiteBox";
 const defaultSettings = {
-    enabled: false,
+    enabled: true,
     globalTasks: [],
     processedMessages: [],
     character_allowed_tasks: []

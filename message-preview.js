@@ -38,11 +38,13 @@ let state = {
 function getSettings() {
     if (!extension_settings[EXT_ID]) {
         extension_settings[EXT_ID] = {
-            preview: { enabled: true, timeoutSeconds: CONSTANTS.DEFAULT_TIMEOUT_SECONDS },
+            preview: { enabled: false, timeoutSeconds: CONSTANTS.DEFAULT_TIMEOUT_SECONDS },
             recorded: { enabled: true }
         };
     }
     const settings = extension_settings[EXT_ID];
+    if (!settings.preview) settings.preview = { enabled: false, timeoutSeconds: CONSTANTS.DEFAULT_TIMEOUT_SECONDS };
+    if (!settings.recorded) settings.recorded = { enabled: true };
     settings.preview.timeoutSeconds = CONSTANTS.DEFAULT_TIMEOUT_SECONDS;
     return settings;
 }
@@ -104,7 +106,7 @@ function manageSendButton(disable = true) {
 function triggerSendSafely() {
     const $sendBtn = $('#send_but');
     const $textarea = $('#send_textarea');
-    if (!$textarea.val().trim()) return false;
+    if (typeof $textarea.val() === 'string' && !$textarea.val().trim()) return false;
 
     const wasDisabled = $sendBtn.prop('disabled');
     $sendBtn.prop('disabled', false);
@@ -264,7 +266,8 @@ async function showMessagePreview() {
 
     try {
         const settings = getSettings();
-        const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
+        let globalEnabled = true;
+        try { if ('isXiaobaixEnabled' in window) globalEnabled = Boolean(window['isXiaobaixEnabled']); } catch {}
         if (!settings.preview.enabled || !globalEnabled) {
             toastr.warning('消息预览功能未启用');
             return;
@@ -355,7 +358,8 @@ function findApiRequestForMessage(messageId) {
 async function showMessageHistoryPreview(messageId) {
     try {
         const settings = getSettings();
-        const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
+        let globalEnabled = true;
+        try { if ('isXiaobaixEnabled' in window) globalEnabled = Boolean(window['isXiaobaixEnabled']); } catch {}
         if (!settings.recorded.enabled || !globalEnabled) return;
 
         const apiRecord = findApiRequestForMessage(messageId);
@@ -411,7 +415,8 @@ function debounce(func, wait) {
 
 const addHistoryButtonsDebounced = debounce(() => {
     const settings = getSettings();
-    const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
+    let globalEnabled = true;
+    try { if ('isXiaobaixEnabled' in window) globalEnabled = Boolean(window['isXiaobaixEnabled']); } catch {}
     if (!settings.recorded.enabled || !globalEnabled) return;
 
     $('.mes_history_preview').remove();
@@ -447,6 +452,9 @@ function cleanupMemory() {
 }
 
 function addEventListeners() {
+    // 先移除现有的事件监听器，避免重复注册
+    removeEventListeners();
+
     const listeners = [
         { event: event_types.MESSAGE_RECEIVED, handler: addHistoryButtonsDebounced },
         { event: event_types.CHARACTER_MESSAGE_RENDERED, handler: addHistoryButtonsDebounced },
@@ -597,9 +605,12 @@ function shouldSetupInterceptor() {
 }
 
 function updateInterceptorState() {
-    if (shouldSetupInterceptor()) {
+    const settings = getSettings();
+    const shouldSetup = settings.preview.enabled || settings.recorded.enabled;
+
+    if (shouldSetup && !state.isInterceptorActive) {
         setupInterceptor();
-    } else {
+    } else if (!shouldSetup && state.isInterceptorActive) {
         restoreOriginalFetch();
     }
 }
@@ -614,7 +625,8 @@ function initMessagePreview() {
 
         // 设置事件绑定
         $("#xiaobaix_preview_enabled").prop("checked", settings.preview.enabled).on("change", function() {
-            const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
+            let globalEnabled = true;
+            try { if ('isXiaobaixEnabled' in window) globalEnabled = Boolean(window['isXiaobaixEnabled']); } catch {}
             if (!globalEnabled) return;
             settings.preview.enabled = $(this).prop("checked");
             saveSettingsDebounced();
@@ -626,18 +638,29 @@ function initMessagePreview() {
                 state.cleanupTimer = null;
             }
             updateInterceptorState();
+            if (!settings.preview.enabled && settings.recorded.enabled) {
+                addEventListeners();
+                addHistoryButtonsDebounced();
+            }
         });
 
         $("#xiaobaix_recorded_enabled").prop("checked", settings.recorded.enabled).on("change", function() {
-            const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
+            let globalEnabled = true;
+            try { if ('isXiaobaixEnabled' in window) globalEnabled = Boolean(window['isXiaobaixEnabled']); } catch {}
             if (!globalEnabled) return;
             settings.recorded.enabled = $(this).prop("checked");
             saveSettingsDebounced();
             if (settings.recorded.enabled) {
+                // 重新添加事件监听器以确保历史按钮功能正常工作
+                addEventListeners();
                 addHistoryButtonsDebounced();
             } else {
                 $('.mes_history_preview').remove();
                 state.apiRequestHistory.length = 0;
+                // 只有当两个功能都关闭时才移除事件监听器
+                if (!settings.preview.enabled) {
+                    removeEventListeners();
+                }
             }
             updateInterceptorState();
         });
@@ -645,8 +668,11 @@ function initMessagePreview() {
         if (!settings.preview.enabled) $('#message_preview_btn').hide();
         updateInterceptorState();
         if (settings.recorded.enabled) addHistoryButtonsDebounced();
-        addEventListeners();
-        if (window.registerModuleCleanup) window.registerModuleCleanup('messagePreview', cleanup);
+        // 只有在任一功能启用时才添加事件监听器
+        if (settings.preview.enabled || settings.recorded.enabled) {
+            addEventListeners();
+        }
+        if (window['registerModuleCleanup']) window['registerModuleCleanup']('messagePreview', cleanup);
         if (settings.preview.enabled) state.cleanupTimer = setInterval(cleanupMemory, CONSTANTS.CLEANUP_INTERVAL);
 
     } catch (error) {
@@ -656,6 +682,6 @@ function initMessagePreview() {
 
 window.addEventListener('beforeunload', cleanup);
 
-window.messagePreviewCleanup = cleanup;
+window['messagePreviewCleanup'] = cleanup;
 
 export { initMessagePreview, addHistoryButtonsDebounced, cleanup };

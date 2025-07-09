@@ -64,7 +64,7 @@ const utils = {
 class TemplateSettings {
     static get() {
         const settings = extension_settings[EXT_ID] = extension_settings[EXT_ID] || {};
-        settings.templateEditor = settings.templateEditor || { enabled: true, characterBindings: {} };
+        settings.templateEditor = settings.templateEditor || { enabled: false, characterBindings: {} };
         return settings.templateEditor;
     }
 
@@ -134,10 +134,10 @@ class TemplateProcessor {
 
     static extractJsonFromIncompleteXml(content) {
         const vars = {};
-        
+
         const incompleteXmlPattern = /<[^>]+>([^<]*(?:\{[\s\S]*|\w+\s*:[\s\S]*))/g;
         let match;
-        
+
         while ((match = incompleteXmlPattern.exec(content))) {
             const innerContent = match[1]?.trim();
             if (!innerContent) continue;
@@ -169,7 +169,7 @@ class TemplateProcessor {
         const vars = {};
         const xmlPattern = /<[^>]+>([\s\S]*?)<\/[^>]+>/g;
         let match;
-        
+
         while ((match = xmlPattern.exec(content))) {
             const innerContent = match[1]?.trim();
             if (!innerContent) continue;
@@ -270,11 +270,11 @@ class TemplateProcessor {
                 objectContent = '[' + arrayStartMatch[2];
                 inArray = true;
                 bracketLevel = 1;
-                
+
                 const openBrackets = (arrayStartMatch[2].match(/\[/g) || []).length;
                 const closeBrackets = (arrayStartMatch[2].match(/\]/g) || []).length;
                 bracketLevel += openBrackets - closeBrackets;
-                
+
                 if (bracketLevel === 0) {
                     try {
                         vars[currentKey] = JSON.parse(objectContent);
@@ -292,11 +292,11 @@ class TemplateProcessor {
                 objectContent = '{' + objStartMatch[2];
                 inObject = true;
                 braceLevel = 1;
-                
+
                 const openBraces = (objStartMatch[2].match(/\{/g) || []).length;
                 const closeBraces = (objStartMatch[2].match(/\}/g) || []).length;
                 braceLevel += openBraces - closeBraces;
-                
+
                 if (braceLevel === 0) {
                     try {
                         vars[currentKey] = JSON.parse(objectContent);
@@ -373,7 +373,7 @@ class TemplateProcessor {
                     objectContent.replace(/,\s*$/, '') + ']',
                     objectContent + '"]'
                 ];
-                
+
                 for (const attempt of attempts) {
                     try {
                         vars[currentKey] = JSON.parse(attempt);
@@ -389,7 +389,7 @@ class TemplateProcessor {
                     objectContent + '}',
                     objectContent.replace(/,\s*$/, '') + '}'
                 ];
-                
+
                 for (const attempt of attempts) {
                     try {
                         vars[currentKey] = JSON.parse(attempt);
@@ -410,7 +410,7 @@ class TemplateProcessor {
         while (i < lines.length) {
             const line = lines[i];
             const trimmed = line.trim();
-            
+
             if (!trimmed || trimmed.startsWith('#')) {
                 i++;
                 continue;
@@ -466,7 +466,7 @@ class TemplateProcessor {
         while (i < lines.length) {
             const line = lines[i];
             const trimmed = line.trim();
-            
+
             if (!trimmed || trimmed.startsWith('#')) {
                 i++;
                 continue;
@@ -521,17 +521,17 @@ class TemplateProcessor {
         while (i < lines.length) {
             const line = lines[i];
             const lineIndent = line.length - line.trimStart().length;
-            
+
             if (line.trim() === '') {
                 contentLines.push('');
                 i++;
                 continue;
             }
-            
+
             if (lineIndent <= baseIndent && line.trim() !== '') {
                 break;
             }
-            
+
             contentLines.push(line.substring(baseIndent + 2));
             i++;
         }
@@ -547,17 +547,17 @@ class TemplateProcessor {
         while (i < lines.length) {
             const line = lines[i];
             const lineIndent = line.length - line.trimStart().length;
-            
+
             if (line.trim() === '') {
                 contentLines.push('');
                 i++;
                 continue;
             }
-            
+
             if (lineIndent <= baseIndent && line.trim() !== '') {
                 break;
             }
-            
+
             contentLines.push(line.substring(Math.min(baseIndent + 2, line.length)));
             i++;
         }
@@ -588,7 +588,7 @@ class TemplateProcessor {
             if (colonIndex > 0) {
                 const key = trimmed.substring(0, colonIndex).trim();
                 const value = trimmed.substring(colonIndex + 1).trim();
-                
+
                 if (value === '|' || value === '>') {
                     const result = this.parseMultilineString(lines, i, lineIndent, value === '|');
                     obj[key] = result.value;
@@ -642,7 +642,7 @@ class TemplateProcessor {
             if (colonIndex > 0) {
                 const key = trimmed.substring(0, colonIndex).trim();
                 const value = trimmed.substring(colonIndex + 1).trim();
-                
+
                 if (value === '|' || value === '>') {
                     const result = this.parsePartialMultilineString(lines, i, lineIndent, value === '|');
                     obj[key] = result.value;
