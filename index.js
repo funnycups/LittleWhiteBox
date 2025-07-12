@@ -36,7 +36,7 @@ extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
 const settings = extension_settings[EXT_ID];
 let isXiaobaixEnabled = settings.enabled;
 let moduleInstances = { statsTracker: null };
-let savedSettings = {};
+
 let globalEventListeners = [];
 let globalTimers = [];
 let moduleCleanupFunctions = new Map();
@@ -569,65 +569,69 @@ function toggleSettingsControls(enabled) {
     }
 }
 
-function saveCurrentSettings() {
-    savedSettings = {
-        sandboxMode: settings.sandboxMode,
-        memoryEnabled: settings.memoryEnabled,
-        memoryInjectEnabled: settings.memoryInjectEnabled,
-        memoryInjectDepth: settings.memoryInjectDepth,
-        recordedEnabled: extension_settings[EXT_ID].recorded?.enabled,
-        previewEnabled: extension_settings[EXT_ID].preview?.enabled,
-        scriptAssistantEnabled: extension_settings[EXT_ID].scriptAssistant?.enabled,
-        scheduledTasksEnabled: extension_settings[EXT_ID].tasks?.enabled,
-        templateEnabled: extension_settings[EXT_ID].templateEditor?.enabled,
-        characterUpdaterEnabled: extension_settings[EXT_ID].characterUpdater?.enabled
-    };
-}
+function setDefaultSettings() {
+    settings.sandboxMode = false;
+    settings.memoryEnabled = false;
+    settings.memoryInjectEnabled = false;
+    settings.memoryInjectDepth = 5;
 
-function restoreSettings() {
-    if (savedSettings.sandboxMode !== undefined) $("#xiaobaix_sandbox").prop("checked", savedSettings.sandboxMode);
-    if (savedSettings.memoryEnabled !== undefined) $("#xiaobaix_memory_enabled").prop("checked", savedSettings.memoryEnabled);
-    if (savedSettings.memoryInjectEnabled !== undefined) $("#xiaobaix_memory_inject").prop("checked", savedSettings.memoryInjectEnabled);
-    if (savedSettings.memoryInjectDepth !== undefined) $("#xiaobaix_memory_depth").val(savedSettings.memoryInjectDepth);
-
-    const moduleSettings = [
-        { key: 'recordedEnabled', module: 'recorded', control: 'xiaobaix_recorded_enabled' },
-        { key: 'previewEnabled', module: 'preview', control: 'xiaobaix_preview_enabled' },
-        { key: 'scriptAssistantEnabled', module: 'scriptAssistant', control: 'xiaobaix_script_assistant' },
-        { key: 'scheduledTasksEnabled', module: 'tasks', control: 'scheduled_tasks_enabled' },
-        { key: 'templateEnabled', module: 'templateEditor', control: 'xiaobaix_template_enabled' },
-        { key: 'characterUpdaterEnabled', module: 'characterUpdater', control: 'character_updater_enabled' }
+    const defaultModules = [
+        { module: 'templateEditor', control: 'xiaobaix_template_enabled', enabled: true },
+        { module: 'tasks', control: 'scheduled_tasks_enabled', enabled: true },
+        { module: 'recorded', control: 'xiaobaix_recorded_enabled', enabled: true },
+        { module: 'characterUpdater', control: 'character_updater_enabled', enabled: true },
+        { module: 'preview', control: 'xiaobaix_preview_enabled', enabled: false },
+        { module: 'scriptAssistant', control: 'xiaobaix_script_assistant', enabled: false }
     ];
 
-    moduleSettings.forEach(({ key, module, control }) => {
-        if (savedSettings[key] !== undefined) {
-            if (!extension_settings[EXT_ID][module]) extension_settings[EXT_ID][module] = {};
-            extension_settings[EXT_ID][module].enabled = savedSettings[key];
-            $(`#${control}`).prop("checked", savedSettings[key]);
-        }
+    defaultModules.forEach(({ module, control, enabled }) => {
+        if (!extension_settings[EXT_ID][module]) extension_settings[EXT_ID][module] = {};
+        extension_settings[EXT_ID][module].enabled = enabled;
+        $(`#${control}`).prop("checked", enabled);
     });
+
+    $("#xiaobaix_sandbox").prop("checked", settings.sandboxMode);
+    $("#xiaobaix_memory_enabled").prop("checked", settings.memoryEnabled);
+    $("#xiaobaix_memory_inject").prop("checked", settings.memoryInjectEnabled);
+    $("#xiaobaix_memory_depth").val(settings.memoryInjectDepth);
 }
 
 function toggleAllFeatures(enabled) {
     if (enabled) {
-        restoreSettings();
+        setDefaultSettings();
         toggleSettingsControls(true);
         saveSettingsDebounced();
         setTimeout(() => processExistingMessages(), 100);
         setupEventListeners();
 
-        if (settings.memoryEnabled && moduleInstances.statsTracker?.updateMemoryPrompt) 
-            setTimeout(() => moduleInstances.statsTracker.updateMemoryPrompt(), 200);
-        if (extension_settings[EXT_ID].scriptAssistant?.enabled && window.injectScriptDocs) 
-            setTimeout(() => window.injectScriptDocs(), 300);
-        if (extension_settings[EXT_ID].preview?.enabled) 
-            setTimeout(() => { document.querySelectorAll('#message_preview_btn').forEach(btn => btn.style.display = ''); }, 400);
-        if (extension_settings[EXT_ID].recorded?.enabled) 
-            setTimeout(() => addHistoryButtonsDebounced(), 500);
+        const moduleInits = [
+            { condition: extension_settings[EXT_ID].tasks?.enabled, init: initTasks },
+            { condition: extension_settings[EXT_ID].scriptAssistant?.enabled, init: initScriptAssistant },
+            { condition: extension_settings[EXT_ID].immersive?.enabled, init: initImmersiveMode },
+            { condition: extension_settings[EXT_ID].templateEditor?.enabled, init: initTemplateEditor },
+            { condition: extension_settings[EXT_ID].wallhaven?.enabled, init: initWallhavenBackground },
+            { condition: extension_settings[EXT_ID].characterUpdater?.enabled, init: initCharacterUpdater }
+        ];
+
+        moduleInits.forEach(({ condition, init }) => {
+            if (condition) init();
+        });
+
+        if (extension_settings[EXT_ID].preview?.enabled || extension_settings[EXT_ID].recorded?.enabled) {
+            setTimeout(initMessagePreview, 200);
+        }
+
+        if (settings.memoryEnabled && moduleInstances.statsTracker?.updateMemoryPrompt)
+            setTimeout(() => moduleInstances.statsTracker.updateMemoryPrompt(), 300);
+        if (extension_settings[EXT_ID].scriptAssistant?.enabled && window.injectScriptDocs)
+            setTimeout(() => window.injectScriptDocs(), 400);
+        if (extension_settings[EXT_ID].preview?.enabled)
+            setTimeout(() => { document.querySelectorAll('#message_preview_btn').forEach(btn => btn.style.display = ''); }, 500);
+        if (extension_settings[EXT_ID].recorded?.enabled)
+            setTimeout(() => addHistoryButtonsDebounced(), 600);
 
         document.dispatchEvent(new CustomEvent('xiaobaixEnabledChanged', { detail: { enabled: true } }));
     } else {
-        saveCurrentSettings();
         cleanupAllResources();
 
         if (window.messagePreviewCleanup) try { window.messagePreviewCleanup(); } catch (e) { }
