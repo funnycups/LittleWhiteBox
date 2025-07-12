@@ -1374,13 +1374,12 @@ body.immersive-mode .mes {
 }
 
 /* ==================== 角色卡自动更新样式 (Character Updater) ==================== */
-/* 当前角色显示 - 在 settings.html 中 */
 .littlewhitebox .current-character-info {
     background: var(--SmartThemeBlurTintColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 5px;
     padding: 10px;
-    margin: 15px 0 0 0;
+    margin: 0px;
     display: flex;
     justify-content: space-between;
     align-items: center;
