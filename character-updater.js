@@ -248,33 +248,30 @@ const dataCache = {
 
 const longPressManager = {
     start: (element, onLongPress, onShortPress) => {
-        let isPressed = false, timer = null, startTime;
+        let longPressTimer = null;
 
-        const handleStart = () => {
-            isPressed = true;
-            startTime = Date.now();
-            timer = setTimeout(() => {
-                if (isPressed) {
-                    isPressed = false;
-                    onLongPress();
-                }
+        element.on('mousedown touchstart', () => {
+            longPressTimer = setTimeout(() => {
+                longPressTimer = null;
+                onLongPress();
             }, 3000);
-        };
+        });
 
-        const handleEnd = () => {
-            if (timer) {
-                clearTimeout(timer);
-                timer = null;
+        element.on('mouseup touchend mouseleave', () => {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
             }
-            if (isPressed) {
-                const pressDuration = Date.now() - startTime;
-                isPressed = false;
-                if (pressDuration < 3000) onShortPress();
-            }
-        };
+        });
 
-        element.on('mousedown touchstart', handleStart);
-        element.on('mouseup mouseleave touchend touchcancel', handleEnd);
+        element.on('click', () => {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+                return;
+            }
+            onShortPress();
+        });
     }
 };
 
