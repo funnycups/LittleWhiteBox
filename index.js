@@ -59,7 +59,6 @@ window.testRemoveUpdateUI = () => {
 async function checkLittleWhiteBoxUpdate() {
     try {
         const requestBody = { extensionName: 'LittleWhiteBox', global: true };
-        console.log('[小白X] 发送版本检查请求:', requestBody);
 
         const response = await fetch('/api/extensions/version', {
             method: 'POST',
@@ -76,7 +75,6 @@ async function checkLittleWhiteBoxUpdate() {
         }
 
         const data = await response.json();
-        console.log('[小白X] 版本检查结果:', data);
         return data;
     } catch (error) {
         console.warn('[小白X] 更新检查失败:', error);
@@ -87,7 +85,6 @@ async function checkLittleWhiteBoxUpdate() {
 async function updateLittleWhiteBoxExtension() {
     try {
         const requestBody = { extensionName: 'LittleWhiteBox', global: true };
-        console.log('[小白X] 发送更新请求:', requestBody);
 
         const response = await fetch('/api/extensions/update', {
             method: 'POST',
@@ -103,7 +100,7 @@ async function updateLittleWhiteBoxExtension() {
         }
 
         const data = await response.json();
-        const message = data.isUpToDate ? '小白X已是最新版本' : `小白X已更新到 ${data.shortCommitHash}`;
+        const message = data.isUpToDate ? '小白X已是最新版本' : `小白X已更新`;
         const title = data.isUpToDate ? '' : '请刷新页面以应用更新';
 
         toastr.success(message, title);
@@ -134,7 +131,6 @@ function addUpdateTextNotice() {
         for (const element of elements) {
             if (element.textContent && element.textContent.includes('小白X')) {
                 headerElement = element;
-                console.log('[小白X] 找到标题元素:', selector, element);
                 break;
             }
         }
@@ -169,13 +165,11 @@ function addUpdateDownloadButton() {
     }
 
     if (!totalSwitchDivider) {
-        console.warn('[小白X] 未找到总开关标题元素');
         setTimeout(() => addUpdateDownloadButton(), 1000);
         return;
     }
 
     if (document.querySelector('#littlewhitebox-update-extension')) {
-        console.log('[小白X] 下载按钮已存在');
         return;
     }
 
@@ -194,7 +188,6 @@ function addUpdateDownloadButton() {
     }
 
     totalSwitchDivider.appendChild(updateButton);
-    console.log('[小白X] 已添加下载按钮到总开关标题旁边');
 
     try {
         if (window.setupUpdateButtonInSettings) {
@@ -211,24 +204,19 @@ function removeAllUpdateNotices() {
 
     if (textNotice) textNotice.remove();
     if (downloadButton) downloadButton.remove();
-
-    console.log('[小白X] 已移除所有更新提示');
 }
 
 async function performExtensionUpdateCheck() {
     if (updateCheckPerformed) {
-        console.log('[小白X] 更新检查已执行过，跳过');
         return;
     }
 
     updateCheckPerformed = true;
 
     try {
-        console.log('[小白X] 开始检查扩展更新...');
         const versionData = await checkLittleWhiteBoxUpdate();
 
         if (versionData && versionData.isUpToDate === false) {
-            console.log('[小白X] 发现可用更新，准备更新UI');
             updateExtensionHeaderWithUpdateNotice();
         } else if (versionData && versionData.isUpToDate === true) {
             console.log('[小白X] 扩展已是最新版本');
