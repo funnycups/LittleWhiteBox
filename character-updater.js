@@ -510,7 +510,6 @@ const uiManager = {
 
             const cloudData = dataCache.getCloudData(this_chid);
             if (!cloudData) {
-                console.log('[小白X] 缓存已过期或不存在，使用本地数据');
                 return;
             }
 
@@ -642,7 +641,6 @@ const popupManager = {
         let cloudData = dataCache.getCloudData(this_chid);
 
         if (!cloudData) {
-            console.log('[小白X] 没有缓存数据，显示本地信息');
         }
 
         await popupManager.showUpdatePopup({
@@ -660,11 +658,8 @@ const startupManager = {
         try {
             const boundCharacters = characterManager.getAllBound();
             if (boundCharacters.length === 0) {
-                console.log('[小白X] 没有绑定的角色，跳过云端检查');
                 return;
             }
-
-            console.log(`[小白X] 强制云端更新检查，共 ${boundCharacters.length} 个绑定角色`);
 
             const charactersToCheck = [];
             const characterMap = new Map();
@@ -683,7 +678,6 @@ const startupManager = {
             });
 
             if (charactersToCheck.length === 0) {
-                console.log('[小白X] 没有有效的角色数据，跳过云端检查');
                 return;
             }
 
@@ -730,7 +724,7 @@ const startupManager = {
                     }
                 }
 
-                console.log(`[小白X] 云端检查完成，发现 ${updates.length} 个角色有更新，缓存已更新`);
+                console.log(`[小白X] 云端检查完成，发现 ${updates.length} 个角色有更新`);
             }
         } catch (error) {
             console.error('[小白X] 云端检查失败:', error);
@@ -789,7 +783,6 @@ async function initCharacterUpdater() {
 
     uiManager.updateDisplay();
     moduleState.isInitialized = true;
-    console.log('[小白X] 角色卡更新模块已初始化');
 }
 
 function cleanup() {
@@ -801,7 +794,6 @@ function cleanup() {
     $('.character-menu-overlay, #character-updater-edit-button, .character-update-notification').remove();
     dataCache.clear();
     moduleState.isInitialized = false;
-    console.log('[小白X] 角色卡更新模块已清理');
 }
 
 async function addMenusHTML() {
@@ -836,7 +828,6 @@ function bindEvents() {
 
     const eventHandlers = {
         [event_types.APP_READY]: async () => {
-            console.log('[小白X] 应用就绪，开始强制云端更新检查');
             await startupManager.performStartupCheck();
         },
         [event_types.CHAT_CHANGED]: async () => {
