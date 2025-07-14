@@ -66,8 +66,6 @@ async function checkLittleWhiteBoxUpdate() {
             body: JSON.stringify(requestBody),
         });
 
-        console.log('[小白X] 响应状态:', response.status, response.statusText);
-
         if (!response.ok) {
             const errorText = await response.text();
             console.warn('[小白X] 版本检查失败:', response.statusText, '详细错误:', errorText);
@@ -219,7 +217,6 @@ async function performExtensionUpdateCheck() {
         if (versionData && versionData.isUpToDate === false) {
             updateExtensionHeaderWithUpdateNotice();
         } else if (versionData && versionData.isUpToDate === true) {
-            console.log('[小白X] 扩展已是最新版本');
         } else {
             console.log('[小白X] 版本检查返回空结果');
         }
