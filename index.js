@@ -105,7 +105,7 @@ async function updateLittleWhiteBoxExtension() {
         const data = await response.json();
         const message = data.isUpToDate ? '小白X已是最新版本' : `小白X已更新到 ${data.shortCommitHash}`;
         const title = data.isUpToDate ? '' : '请刷新页面以应用更新';
-        
+
         toastr.success(message, title);
         return true;
     } catch (error) {
@@ -208,10 +208,10 @@ function addUpdateDownloadButton() {
 function removeAllUpdateNotices() {
     const textNotice = document.querySelector('.littlewhitebox-update-text');
     const downloadButton = document.querySelector('#littlewhitebox-update-extension');
-    
+
     if (textNotice) textNotice.remove();
     if (downloadButton) downloadButton.remove();
-    
+
     console.log('[小白X] 已移除所有更新提示');
 }
 
@@ -599,6 +599,9 @@ function setDefaultSettings() {
 function toggleAllFeatures(enabled) {
     if (enabled) {
         setDefaultSettings();
+        settings.memoryEnabled = true;
+        $("#xiaobaix_memory_enabled").prop("checked", true);
+        statsTracker.init(EXT_ID, MODULE_NAME, settings, executeSlashCommand);
         toggleSettingsControls(true);
         saveSettingsDebounced();
         setTimeout(() => processExistingMessages(), 100);
@@ -778,7 +781,7 @@ async function setupSettings() {
                 }
                 extension_settings[EXT_ID][key] = settings[key];
                 saveSettingsDebounced();
-                
+
                 if (moduleCleanupFunctions.has(key)) {
                     moduleCleanupFunctions.get(key)();
                     moduleCleanupFunctions.delete(key);
