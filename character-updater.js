@@ -595,10 +595,9 @@ const popupManager = {
     formatSimpleDate: timestamp => timestamp ? new Date(timestamp).toLocaleDateString() : 'Unknown',
 
     showUpdatePopup: async updateInfo => {
-        // 只显示角色卡 data.character_book.name
         let charBookName = null;
-        if (updateInfo?.characterId != null && typeof characters !== 'undefined') {
-            const char = characters[updateInfo.characterId];
+        if (this_chid != null && typeof characters !== 'undefined') {
+            const char = characters[this_chid];
             charBookName = char?.data?.character_book?.name || null;
         }
         const hasUpdate = updateInfo?.latestTimestamp && updateInfo.latestTimestamp !== updateInfo.currentTimestamp;
@@ -607,7 +606,6 @@ const popupManager = {
         const isValidUrl = linkAddress && utils.validateUrl(linkAddress);
         const sanitizedLinkAddress = isValidUrl ? utils.sanitizeContent(linkAddress) : '';
 
-        // 用jQuery对象构造弹窗内容
         const $popup = $('<div class="character-update-popup"></div>');
         $popup.append(`<h3>${utils.sanitizeContent(updateInfo?.characterName || 'Unknown')} 更新信息</h3>`);
         $popup.append(`
@@ -637,38 +635,32 @@ const popupManager = {
             <hr class="sysHR" style="margin-top: 15px;">
         `);
 
-        $popup.append($lorebookInfo);
-
-
-        if (isValidUrl) {
-            $popup.append(`
-<div class="update-container" style="display: flex; align-items: center; gap: 15px;">
-    <div class="update-status" style="flex: 1;">
-        <div style="margin-top: 20px; "class="status-message ${hasUpdate ? 'status-update' : 'status-success'}">
-            <i class="fa-solid ${hasUpdate ? 'fa-exclamation-circle' : 'fa-check-circle'}"></i>
-            ${hasUpdate ? '有可用更新' : '已是最新版本'}
-        </div>
-    </div>
-    ${hasUpdate ? `
-        <button class="menu_button" onclick="window.open('${linkAddress}', '_blank', 'noopener,noreferrer')" style="margin-top: 10px;">
-            <i class="fa-solid fa-external-link-alt"></i>
-            更新地址
-        </button>
+        $popup.append(`
+            <div class="update-container" style="display: flex; align-items: center; gap: 15px;">
+                <div class="update-status" style="flex: 1;">
+                    <div style="margin-top: 20px;" class="status-message ${hasUpdate ? 'status-update' : 'status-success'}">
+                        <i class="fa-solid ${hasUpdate ? 'fa-exclamation-circle' : 'fa-check-circle'}"></i>
+                        ${hasUpdate ? '有可用更新' : '已是最新版本'}
+                    </div>
+                </div>
+                ${isValidUrl ? `
+                    <button class="menu_button" onclick="window.open('${linkAddress}', '_blank', 'noopener,noreferrer')" style="margin-top: 10px;">
+                        <i class="fa-solid fa-external-link-alt"></i>
+                        更新地址
+                    </button>
                 ` : ''}
-</div>
-
-
+            </div>
             <hr class="sysHR" style="margin-bottom: 15px;">
-            `);
+        `);
+
         $popup.append(`
             <div class="update-timestamps" style="color: #666;">
                 <div><strong style="color: #666;">上次更新时间:</strong> ${popupManager.formatSimpleDate(updateInfo?.currentTimestamp)}</div>
                 <div><strong style="color: #666;">最新更新时间:</strong> ${popupManager.formatSimpleDate(updateInfo?.latestTimestamp)}</div>
             </div>
-`);
+        `);
 
-        }
-        // 按钮区
+
         const $buttons = $(
             '<div class="xiaobaix-confirm-buttons">' +
             '  <button class="xiaobaix-confirm-yes" style="background-color: var(--crimson70a);">确认</button>' +
@@ -677,18 +669,14 @@ const popupManager = {
         );
         $popup.append($buttons);
 
-
-        // 弹窗插入body
         const $modal = $('<div class="xiaobaix-confirm-modal"></div>').append(
             $('<div class="xiaobaix-confirm-content"></div>').append($popup)
         );
         $('body').append($modal);
 
-        // 事件绑定
         $buttons.find('.xiaobaix-confirm-yes').on('click', function () {
             const checked = $lorebookInfo.find('#xiaobaix_lorebook_info_delete').prop('checked');
             if (checked) {
-                // 只保留模拟select和按钮点击的方案
                 const $select = $('#world_editor_select');
                 const $deleteBtn = $('#world_popup_delete');
                 if ($select.length && $deleteBtn.length) {
@@ -731,7 +719,6 @@ const popupManager = {
         }
 
         await popupManager.showUpdatePopup({
-            characterId: this_chid,
             characterName,
             currentTimestamp: characterData?.timestamp || new Date().toISOString(),
             latestTimestamp: cloudData?.timestamp || characterData?.timestamp || new Date().toISOString(),
