@@ -22,7 +22,7 @@ const defaultSettings = {
 const MAX_PROCESSED_MESSAGES = 20;
 const MAX_COOLDOWN_ENTRIES = 10;
 const CLEANUP_INTERVAL = 30000;
-const TASK_COOLDOWN = 3000;
+const TASK_COOLDOWN = 0;
 const DEBOUNCE_DELAY = 1000;
 
 let currentEditingTask = null;
