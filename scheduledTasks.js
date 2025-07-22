@@ -145,6 +145,7 @@ async function executeCommands(commands, taskName) {
 }
 
 async function processTaskCommands(commands) {
+
     const jsTagRegex = /<<taskjs>>([\s\S]*?)<<\/taskjs>>/g;
     let lastIndex = 0;
     let result = null;
@@ -168,13 +169,13 @@ async function processTaskCommands(commands) {
         lastIndex = match.index + match[0].length;
     }
 
-    const remaining = commands.slice(lastIndex).trim();
-    if (remaining) {
-        result = await executeSlashCommand(remaining);
-    }
-
     if (lastIndex === 0) {
         result = await executeSlashCommand(commands);
+    } else {
+        const remaining = commands.slice(lastIndex).trim();
+        if (remaining) {
+            result = await executeSlashCommand(remaining);
+        }
     }
 
     return result;
