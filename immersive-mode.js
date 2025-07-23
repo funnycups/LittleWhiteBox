@@ -6,256 +6,245 @@ const EXT_ID = "LittleWhiteBox";
 const MODULE_NAME = "immersive";
 
 const defaultSettings = {
-    enabled: false,
-    showAllMessages: false,
-    autoJumpOnAI: true
+   enabled: false,
+   showAllMessages: false,
+   autoJumpOnAI: true
 };
 
-let isImmersiveModeActive = false;
-let chatObserver = null;
-let eventsBound = false;
-let eventHandlers = {};
+let state = {
+   isActive: false,
+   chatObserver: null,
+   eventsBound: false,
+   eventHandlers: {}
+};
 
+// Initialize and settings management
 function initImmersiveMode() {
-    if (!extension_settings[EXT_ID].immersive) {
-        extension_settings[EXT_ID].immersive = structuredClone(defaultSettings);
-    }
+   initSettings();
+   setupEventListeners();
 
-    const settings = extension_settings[EXT_ID].immersive;
+   if (isGlobalEnabled()) {
+       state.isActive = getSettings().enabled;
+       if (state.isActive) enableImmersiveMode();
+       bindSettingsEvents();
+   }
 
-    for (const key in defaultSettings) {
-        if (settings[key] === undefined) {
-            settings[key] = defaultSettings[key];
-        }
-    }
-
-    const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-
-    $('#xiaobaix_immersive_enabled').prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
-
-    if (globalEnabled) {
-        isImmersiveModeActive = settings.enabled;
-
-        if (isImmersiveModeActive) {
-            enableImmersiveMode();
-        }
-
-        bindSettingsEvents();
-    }
-
-    eventHandlers.chatChanged = onChatChanged;
-    eventHandlers.globalStateChange = handleGlobalStateChange;
-
-    eventSource.on(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
-    document.addEventListener('xiaobaixEnabledChanged', eventHandlers.globalStateChange);
-
-    if (window.registerModuleCleanup) {
-        window.registerModuleCleanup('immersiveMode', cleanup);
-    }
-
-    console.log(`[${EXT_ID}] 沉浸式显示模式功能已加载`);
+   console.log(`[${EXT_ID}] 沉浸式显示模式功能已加载`);
 }
 
+function initSettings() {
+   if (!extension_settings[EXT_ID].immersive) {
+       extension_settings[EXT_ID].immersive = structuredClone(defaultSettings);
+   }
+
+   const settings = extension_settings[EXT_ID].immersive;
+   Object.keys(defaultSettings).forEach(key => {
+       settings[key] = settings[key] ?? defaultSettings[key];
+   });
+
+   updateControlState();
+}
+
+function setupEventListeners() {
+   state.eventHandlers = {
+       chatChanged: onChatChanged,
+       globalStateChange: handleGlobalStateChange
+   };
+
+   eventSource.on(event_types.CHAT_CHANGED, state.eventHandlers.chatChanged);
+   document.addEventListener('xiaobaixEnabledChanged', state.eventHandlers.globalStateChange);
+
+   if (window.registerModuleCleanup) {
+       window.registerModuleCleanup('immersiveMode', cleanup);
+   }
+}
+
+// Helper functions
+const isGlobalEnabled = () => window.isXiaobaixEnabled ?? true;
+const getSettings = () => extension_settings[EXT_ID].immersive;
+const isInChat = () => this_chid !== undefined || selected_group || getCurrentChatId() !== undefined;
+
+function updateControlState() {
+   const enabled = isGlobalEnabled();
+   $('#xiaobaix_immersive_enabled')
+       .prop('disabled', !enabled)
+       .toggleClass('disabled-control', !enabled);
+}
+
+// Settings event handlers
 function bindSettingsEvents() {
-    if (eventsBound) return;
-    setTimeout(() => {
-        const checkbox = document.getElementById('xiaobaix_immersive_enabled');
-        if (checkbox && !eventsBound) {
-            const settings = getImmersiveSettings();
-            checkbox.checked = settings.enabled;
-            checkbox.addEventListener('change', () => setImmersiveMode(checkbox.checked));
-            eventsBound = true;
-        }
-    }, 500);
+   if (state.eventsBound) return;
+
+   setTimeout(() => {
+       const checkbox = document.getElementById('xiaobaix_immersive_enabled');
+       if (checkbox && !state.eventsBound) {
+           checkbox.checked = getSettings().enabled;
+           checkbox.addEventListener('change', () => setImmersiveMode(checkbox.checked));
+           state.eventsBound = true;
+       }
+   }, 500);
 }
 
 function unbindSettingsEvents() {
-    const checkbox = document.getElementById('xiaobaix_immersive_enabled');
-    if (checkbox) {
-        const newCheckbox = checkbox.cloneNode(true);
-        checkbox.parentNode.replaceChild(newCheckbox, checkbox);
-    }
-    eventsBound = false;
+   const checkbox = document.getElementById('xiaobaix_immersive_enabled');
+   if (checkbox) {
+       const newCheckbox = checkbox.cloneNode(true);
+       checkbox.parentNode.replaceChild(newCheckbox, checkbox);
+   }
+   state.eventsBound = false;
 }
 
-function handleGlobalStateChange(event) {
-    const globalEnabled = event.detail.enabled;
-
-    $('#xiaobaix_immersive_enabled').prop('disabled', !globalEnabled).toggleClass('disabled-control', !globalEnabled);
-
-    if (globalEnabled) {
-        const settings = getImmersiveSettings();
-        isImmersiveModeActive = settings.enabled;
-
-        if (isImmersiveModeActive) {
-            enableImmersiveMode();
-        }
-
-        bindSettingsEvents();
-
-        setTimeout(() => {
-            const checkbox = document.getElementById('xiaobaix_immersive_enabled');
-            if (checkbox) {
-                checkbox.checked = settings.enabled;
-            }
-        }, 100);
-    } else {
-        if (isImmersiveModeActive) {
-            disableImmersiveMode();
-        }
-        isImmersiveModeActive = false;
-
-        unbindSettingsEvents();
-    }
-}
-
-function getImmersiveSettings() {
-    return extension_settings[EXT_ID].immersive;
-}
-
+// Mode management
 function setImmersiveMode(enabled) {
-    const settings = getImmersiveSettings();
-    settings.enabled = enabled;
-    isImmersiveModeActive = enabled;
+   const settings = getSettings();
+   settings.enabled = enabled;
+   state.isActive = enabled;
 
-    const checkbox = document.getElementById('xiaobaix_immersive_enabled');
-    if (checkbox) {
-        checkbox.checked = enabled;
-    }
+   const checkbox = document.getElementById('xiaobaix_immersive_enabled');
+   if (checkbox) checkbox.checked = enabled;
 
-    if (enabled) {
-        enableImmersiveMode();
-    } else {
-        disableImmersiveMode();
-        cleanup();
-    }
+   enabled ? enableImmersiveMode() : disableImmersiveMode();
+   if (!enabled) cleanup();
 
-    saveSettingsDebounced();
+   saveSettingsDebounced();
 }
 
 function toggleImmersiveMode() {
-    const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-    if (!globalEnabled) return;
-
-    const settings = getImmersiveSettings();
-    setImmersiveMode(!settings.enabled);
+   if (!isGlobalEnabled()) return;
+   setImmersiveMode(!getSettings().enabled);
 }
 
 function enableImmersiveMode() {
-    const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-    if (!globalEnabled) return;
+   if (!isGlobalEnabled()) return;
 
-    console.log('[小白X] 启用沉浸式显示模式');
-    $('body').addClass('immersive-mode');
-    updateMessageDisplay();
-    showNavigationButtons();
-    startChatObserver();
+   console.log('[小白X] 启用沉浸式显示模式');
+   $('body').addClass('immersive-mode');
+   moveAvatarWrappers();
+   updateMessageDisplay();
+   showNavigationButtons();
+   startChatObserver();
 }
 
 function disableImmersiveMode() {
-    console.log('[小白X] 禁用沉浸式显示模式');
-    $('body').removeClass('immersive-mode');
-    $('#chat .mes').show();
-    hideNavigationButtons();
-    stopChatObserver();
-    $('.mesAvatarWrapper, .timestamp, .swipe_left, .swipeRightBlock').show();
+   console.log('[小白X] 禁用沉浸式显示模式');
+   $('body').removeClass('immersive-mode');
+   restoreAvatarWrappers();
+   $('#chat .mes').show();
+   hideNavigationButtons();
+   stopChatObserver();
+   $('.swipe_left, .swipeRightBlock').show();
 }
 
+// Avatar management
+function moveAvatarWrappers() {
+   $('#chat .mes').each(function() {
+       const $mes = $(this);
+       const $avatarWrapper = $mes.find('.mesAvatarWrapper');
+       const $chName = $mes.find('.ch_name.flex-container.justifySpaceBetween');
+       const $targetSibling = $chName.find('.flex-container.flex1.alignitemscenter');
+       const $nameText = $mes.find('.name_text');
+
+       if ($avatarWrapper.length && $chName.length && $targetSibling.length && !$chName.find('.mesAvatarWrapper').length) {
+           $targetSibling.before($avatarWrapper);
+
+           if ($nameText.length && !$nameText.parent().hasClass('xiaobaix-vertical-wrapper')) {
+               const $verticalWrapper = $('<div class="xiaobaix-vertical-wrapper" style="display: flex; flex-direction: column; flex: 1; margin-top: 5px; align-self: stretch; justify-content: space-between;"></div>');
+               const $topGroup = $('<div class="xiaobaix-top-group"></div>');
+
+               $topGroup.append($nameText.detach(), $targetSibling.detach());
+               $verticalWrapper.append($topGroup);
+               $avatarWrapper.after($verticalWrapper);
+           }
+       }
+   });
+}
+
+function restoreAvatarWrappers() {
+   $('#chat .mes').each(function() {
+       const $mes = $(this);
+       const $avatarWrapper = $mes.find('.mesAvatarWrapper');
+       const $verticalWrapper = $mes.find('.xiaobaix-vertical-wrapper');
+
+       if ($avatarWrapper.length && !$avatarWrapper.parent().hasClass('mes')) {
+           $mes.prepend($avatarWrapper);
+       }
+
+       if ($verticalWrapper.length) {
+           const $chName = $mes.find('.ch_name.flex-container.justifySpaceBetween');
+           const $flexContainer = $mes.find('.flex-container.flex1.alignitemscenter');
+           const $nameText = $mes.find('.name_text');
+
+           if ($flexContainer.length) $chName.append($flexContainer);
+           if ($nameText.length) {
+               const $originalContainer = $mes.find('.flex-container.alignItemsBaseline');
+               if ($originalContainer.length) $originalContainer.prepend($nameText);
+           }
+
+           $verticalWrapper.remove();
+       }
+   });
+}
+
+// Chat observer
 function startChatObserver() {
-    if (chatObserver) {
-        stopChatObserver();
-    }
+   stopChatObserver();
 
-    const chatContainer = document.getElementById('chat');
-    if (!chatContainer) return;
+   const chatContainer = document.getElementById('chat');
+   if (!chatContainer) return;
 
-    chatObserver = new MutationObserver((mutations) => {
-        let hasValidAIMessage = false;
+   state.chatObserver = new MutationObserver((mutations) => {
+       let hasValidAIMessage = false;
 
-        mutations.forEach((mutation) => {
-            if (mutation.type === 'childList') {
-                mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === Node.ELEMENT_NODE && node.classList && node.classList.contains('mes')) {
-                        const isUser = node.getAttribute('is_user') === 'true';
-                        const isSystem = node.getAttribute('is_system') === 'true';
+       mutations.forEach((mutation) => {
+           if (mutation.type === 'childList') {
+               mutation.addedNodes.forEach((node) => {
+                   if (node.nodeType === Node.ELEMENT_NODE && node.classList?.contains('mes')) {
+                       const isUser = node.getAttribute('is_user') === 'true';
+                       const isSystem = node.getAttribute('is_system') === 'true';
 
-                        if (!isUser && !isSystem) {
-                            hasValidAIMessage = true;
-                            console.log('[小白X] 检测到AI消息，准备切换页面');
-                        }
-                    }
-                });
-            }
+                       if (!isUser && !isSystem) {
+                           hasValidAIMessage = true;
+                           console.log('[小白X] 检测到AI消息，准备切换页面');
+                       }
 
-            if (mutation.type === 'subtree' || mutation.type === 'characterData') {
-                const target = mutation.target;
-                if (target && target.closest) {
-                    const mesElement = target.closest('.mes');
-                    if (mesElement) {
-                        const isUser = mesElement.getAttribute('is_user') === 'true';
-                        const isSystem = mesElement.getAttribute('is_system') === 'true';
+                       setTimeout(() => {
+                           moveAvatarWrappers();
+                           showNavigationButtons();
+                       }, 100);
+                   }
+               });
+           }
+       });
 
-                        if (!isUser && !isSystem) {
-                            hasValidAIMessage = true;
-                        }
-                    }
-                }
-            }
-        });
+       if (hasValidAIMessage) handleChatUpdate();
+   });
 
-        if (hasValidAIMessage) {
-            handleChatUpdate();
-        }
-    });
-
-    chatObserver.observe(chatContainer, {
-        childList: true,
-        subtree: true,
-        characterData: true
-    });
+   state.chatObserver.observe(chatContainer, {
+       childList: true,
+       subtree: true,
+       characterData: true
+   });
 }
 
 function stopChatObserver() {
-    if (chatObserver) {
-        chatObserver.disconnect();
-        chatObserver = null;
-    }
+   if (state.chatObserver) {
+       state.chatObserver.disconnect();
+       state.chatObserver = null;
+   }
 }
 
-function handleChatUpdate() {
-    if (!isImmersiveModeActive) return;
-
-    const settings = getImmersiveSettings();
-
-    if (settings.autoJumpOnAI && !settings.showAllMessages) {
-        console.log('[小白X] AI消息检测，保持单个消息显示模式');
-        updateMessageDisplay();
-    } else if (settings.showAllMessages) {
-        console.log('[小白X] AI消息检测，但当前为多层模式，不进行跳转');
-        updateMessageDisplay();
-    }
-}
-
+// Navigation and display
 function updateMessageDisplay() {
-    if (!isImmersiveModeActive) return;
+   if (!state.isActive) return;
 
-    const messages = $('#chat .mes');
-    const settings = getImmersiveSettings();
+   const messages = $('#chat .mes');
+   if (!messages.length) return;
 
-    if (messages.length === 0) return;
+   const settings = getSettings();
+   settings.showAllMessages ? messages.show() : messages.hide().last().show();
 
-    if (settings.showAllMessages) {
-        messages.show();
-    } else {
-        messages.hide();
-        messages.last().show();
-    }
-
-    updateNavigationButtons();
-}
-
-function isInChat() {
-    return this_chid !== undefined || selected_group || getCurrentChatId() !== undefined;
+   updateNavigationButtons();
+   updateSwipesCounter();
 }
 
 function showNavigationButtons() {
@@ -264,111 +253,171 @@ function showNavigationButtons() {
         return;
     }
 
-    if ($('#immersive-navigation').length === 0) {
+    $('#immersive-navigation').remove();
+
+    const $lastMes = $('#chat .mes.last_mes');
+    const $verticalWrapper = $lastMes.find('.xiaobaix-vertical-wrapper');
+
+    if ($lastMes.length && $verticalWrapper.length) {
+        const settings = getSettings();
+        const buttonText = settings.showAllMessages ? '切换：锁定单楼层' : '切换：传统多楼层';
+
         const navigationHtml = `
             <div id="immersive-navigation" class="immersive-navigation">
                 <button id="immersive-swipe-left" class="immersive-nav-btn" title="左滑消息">
-                    <i class="fa-solid fa-chevron-left"></i> 左滑
+                    <i class="fa-solid fa-chevron-left"></i>
                 </button>
                 <button id="immersive-toggle" class="immersive-nav-btn" title="切换显示模式">
-                    历史 <i class="fa-solid fa-expand"></i> 楼层
+                    |${buttonText}|
                 </button>
-                <button id="immersive-swipe-right" class="immersive-nav-btn" title="右滑消息">
-                    右滑 <i class="fa-solid fa-chevron-right"></i>
+                <button id="immersive-swipe-right" class="immersive-nav-btn" title="右滑消息" style="display: flex; align-items: center; gap: 1px;">
+                    <div class="swipes-counter" style="opacity: 0.7; justify-content: flex-end;margin-bottom: 0 !important;">1&ZeroWidthSpace;/&ZeroWidthSpace;1</div>
+                    <span> <i class="fa-solid fa-chevron-right"></i></span>
                 </button>
             </div>
         `;
 
-        $('#form_sheld').before(navigationHtml);
+        $verticalWrapper.append(navigationHtml);
 
-        const navActions = {
-            '#immersive-swipe-left': () => handleSwipe('.swipe_left'),
-            '#immersive-toggle': toggleDisplayMode,
-            '#immersive-swipe-right': () => handleSwipe('.swipe_right')
-        };
-
-        Object.entries(navActions).forEach(([selector, handler]) => {
-            $(selector).on('click', handler);
-        });
+        $('#immersive-swipe-left').on('click', () => handleSwipe('.swipe_left'));
+        $('#immersive-toggle').on('click', toggleDisplayMode);
+        $('#immersive-swipe-right').on('click', () => handleSwipe('.swipe_right'));
     }
 
     updateNavigationButtons();
-}
+    updateSwipesCounter();
+ }
 
 
-
-function hideNavigationButtons() {
-    $('#immersive-navigation').remove();
-}
+const hideNavigationButtons = () => $('#immersive-navigation').remove();
 
 function updateNavigationButtons() {
-    if (!isImmersiveModeActive) return;
+    if (!state.isActive) return;
 
-    const settings = getImmersiveSettings();
+    const settings = getSettings();
     const $toggleBtn = $('#immersive-toggle');
+    const buttonText = settings.showAllMessages ? '切换：锁定单楼层' : '切换：传统多楼层';
 
-    if (settings.showAllMessages) {
-        $toggleBtn.find('i').removeClass('fa-expand').addClass('fa-compress');
-        $toggleBtn.attr('title', '切换到单层模式');
-    } else {
-        $toggleBtn.find('i').removeClass('fa-compress').addClass('fa-expand');
-        $toggleBtn.attr('title', '切换到多层模式');
-    }
+    $toggleBtn.html(`|${buttonText}|`);
+    $toggleBtn.attr('title', settings.showAllMessages ? '切换到单层模式' : '切换到多层模式');
+ }
+
+
+function updateSwipesCounter() {
+   if (!state.isActive) return;
+
+   const $swipesCounter = $('.swipes-counter');
+   if (!$swipesCounter.length) return;
+
+   const $currentMessage = $('#chat .mes:visible').last();
+   if (!$currentMessage.length) {
+       $swipesCounter.text('1/1');
+       return;
+   }
+
+   const mesId = $currentMessage.attr('mesid');
+   if (mesId !== undefined) {
+       try {
+           const chat = getContext().chat;
+           const mesIndex = parseInt(mesId);
+           const message = chat?.[mesIndex];
+
+           if (message?.swipes) {
+               const currentSwipeIndex = message.swipe_id || 0;
+               $swipesCounter.html(`${currentSwipeIndex + 1}&ZeroWidthSpace;/&ZeroWidthSpace;${message.swipes.length}`);
+               return;
+           }
+       } catch (error) {}
+   }
+
+   $swipesCounter.html('1&ZeroWidthSpace;/&ZeroWidthSpace;1');
 }
 
+// User interactions
 function toggleDisplayMode() {
-    if (!isImmersiveModeActive) return;
+   if (!state.isActive) return;
 
-    const settings = getImmersiveSettings();
-    settings.showAllMessages = !settings.showAllMessages;
+   const settings = getSettings();
+   settings.showAllMessages = !settings.showAllMessages;
+   updateMessageDisplay();
 
-    updateMessageDisplay();
-    saveSettingsDebounced();
+   if (settings.showAllMessages) {
+       setTimeout(() => {
+           const chatContainer = document.getElementById('chat');
+           if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+       }, 50);
+   }
+
+   saveSettingsDebounced();
 }
 
 function handleSwipe(swipeSelector) {
-    if (!isImmersiveModeActive) return;
+   if (!state.isActive) return;
 
-    const currentMessage = $('#chat .mes:visible').last();
-    const swipeBtn = currentMessage.find(swipeSelector);
-    if (swipeBtn.length > 0) {
-        swipeBtn.click();
-    }
+   const swipeBtn = $('#chat .mes:visible').last().find(swipeSelector);
+   if (swipeBtn.length) {
+       swipeBtn.click();
+       setTimeout(updateSwipesCounter, 100);
+   }
+}
+
+// Event handlers
+function handleChatUpdate() {
+   if (!state.isActive) return;
+
+   const settings = getSettings();
+   console.log(`[小白X] AI消息检测，${settings.showAllMessages ? '但当前为多层模式，不进行跳转' : '保持单个消息显示模式'}`);
+
+   updateMessageDisplay();
+   setTimeout(showNavigationButtons, 200);
+}
+
+function handleGlobalStateChange(event) {
+   const enabled = event.detail.enabled;
+   updateControlState();
+
+   if (enabled) {
+       const settings = getSettings();
+       state.isActive = settings.enabled;
+
+       if (state.isActive) enableImmersiveMode();
+       bindSettingsEvents();
+
+       setTimeout(() => {
+           const checkbox = document.getElementById('xiaobaix_immersive_enabled');
+           if (checkbox) checkbox.checked = settings.enabled;
+       }, 100);
+   } else {
+       if (state.isActive) disableImmersiveMode();
+       state.isActive = false;
+       unbindSettingsEvents();
+   }
 }
 
 function onChatChanged() {
-    const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-    if (!globalEnabled) return;
+   if (!isGlobalEnabled() || !state.isActive) return;
 
-    if (isImmersiveModeActive) {
-        setTimeout(() => {
-            startChatObserver();
-            updateMessageDisplay();
-            showNavigationButtons();
-        }, 100);
-    }
+   setTimeout(() => {
+       startChatObserver();
+       moveAvatarWrappers();
+       updateMessageDisplay();
+       showNavigationButtons();
+   }, 100);
 }
 
+// Cleanup
 function cleanup() {
-    if (isImmersiveModeActive) {
-        disableImmersiveMode();
-    }
+   if (state.isActive) disableImmersiveMode();
 
-    if (eventHandlers.chatChanged) {
-        eventSource.removeListener(event_types.CHAT_CHANGED, eventHandlers.chatChanged);
-    }
-    if (eventHandlers.globalStateChange) {
-        document.removeEventListener('xiaobaixEnabledChanged', eventHandlers.globalStateChange);
-    }
+   Object.values(state.eventHandlers).forEach((handler, index) => {
+       const events = [event_types.CHAT_CHANGED, 'xiaobaixEnabledChanged'];
+       const targets = [eventSource, document];
+       targets[index].removeListener?.(events[index], handler) ||
+       targets[index].removeEventListener?.(events[index], handler);
+   });
 
-    if (chatObserver) {
-        chatObserver.disconnect();
-        chatObserver = null;
-    }
-
-    isImmersiveModeActive = false;
-    eventsBound = false;
-    eventHandlers = {};
+   stopChatObserver();
+   state = { isActive: false, chatObserver: null, eventsBound: false, eventHandlers: {} };
 }
 
 export { initImmersiveMode, toggleImmersiveMode };
