@@ -2627,6 +2627,29 @@ class StatsTracker {
         this.uiManager = null;
     }
 
+    loadRelationshipCSS() {
+        const cssId = 'relationship-metrics-styles';
+
+        if (document.getElementById(cssId)) {
+            return;
+        }
+
+        const link = document.createElement('link');
+        link.id = cssId;
+        link.rel = 'stylesheet';
+        link.type = 'text/css';
+        link.href = 'scripts/extensions/third-party/LittleWhiteBox/relationship-metrics.css';
+
+        document.head.appendChild(link);
+    }
+
+    unloadRelationshipCSS() {
+        const cssElement = document.getElementById('relationship-metrics-styles');
+        if (cssElement) {
+            cssElement.remove();
+        }
+    }
+
     isGloballyEnabled() {
         return window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     }
@@ -2636,6 +2659,8 @@ class StatsTracker {
         this.MODULE_NAME = moduleName;
         this.settings = settings;
         this.executeCommand = executeCommand;
+
+        this.loadRelationshipCSS();
 
         this.dataManager = new StatsDataManager(executeCommand);
         this.messageStateManager = new MessageStateManager(this.dataManager);
@@ -2696,6 +2721,8 @@ class StatsTracker {
         if (this.messageStateManager) {
             this.messageStateManager.messageStates.clear();
         }
+
+        this.unloadRelationshipCSS();
 
         this.isInitialized = false;
         this.chatChangedHandler = null;
