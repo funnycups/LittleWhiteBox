@@ -11,14 +11,13 @@ class StatsDataManager {
 
     createEmptyStats() {
         return {
-            dialogueCount: 0,
             locationChanges: 0,
+            giftGiving: 0,
+            moneyTransfer: 0,
             intimacyStats: {
                 kissingEvents: 0, embraceEvents: 0, sexualEncounters: 0,
                 maleOrgasms: 0, femaleOrgasms: 0, oralCompletions: 0, internalCompletions: 0
             },
-            violenceStats: { hitEvents: 0, weaponUse: 0, deathEvents: 0 },
-            exchangeStats: { giftGiving: 0, moneyTransfer: 0 },
             emotionStats: {
                 positiveEmotions: 0, negativeEmotions: 0, loveExpressions: 0,
                 angerOutbursts: 0, fearEvents: 0, sadnessEvents: 0, joyEvents: 0, surpriseEvents: 0
@@ -72,6 +71,7 @@ class StatsDataManager {
                 relationshipGuidelines: behaviorSettings,
                 trackedRelationships: trackedRelationships,
                 settings: settings,
+                stageRanges: extension_settings[MODULE_NAME]?.stageRanges || {},
                 version: "1.4",
                 lastUpdated: new Date().toISOString(),
                 creatorMode: true,
@@ -91,6 +91,7 @@ class StatsDataManager {
             relationshipGuidelines: behaviorSettings,
             trackedRelationships: trackedRelationships,
             settings: settings,
+            stageRanges: extension_settings[this.MODULE_NAME]?.stageRanges || {},
             characterInfo: this_chid && characters[this_chid] ? {
                 id: this_chid,
                 name: characters[this_chid].name,
@@ -153,6 +154,12 @@ class StatsDataManager {
 
             let confirmMessage = `确定要导入行为设定吗？\n\n文件信息：\n版本：${importData.version || '未知'}\n导出日期：${importData.exportDate ? new Date(importData.exportDate).toLocaleString() : '未知'}`;
 
+            const hasCustomRanges = importData.stageRanges && Object.keys(importData.stageRanges).length > 0;
+            if (hasCustomRanges) {
+                const customStages = Object.keys(importData.stageRanges);
+                confirmMessage += `\n自定义阶段范围：${customStages.length}个`;
+            }
+
             if (importData.characterInfo) {
                 confirmMessage += `\n原角色：${importData.characterInfo.name}`;
                 if (isCharacterSpecific) {
@@ -173,7 +180,7 @@ class StatsDataManager {
 
             confirmMessage += `\n\n这将覆盖当前角色的所有设定。`;
 
-            return { importData, confirmMessage, hasTrackedRelationships, isCharacterSpecific, isMatchingCharacter };
+            return { importData, confirmMessage, hasTrackedRelationships, isCharacterSpecific, isMatchingCharacter, hasCustomRanges };
 
         } catch (error) {
             executeCommand(`/echo 导入失败：${error.message}`);
@@ -219,6 +226,85 @@ class StatsDataManager {
         }
     }
 }
+// ==================== 消息状态管理器 ====================
+class MessageStateManager {
+    constructor(dataManager) {
+        this.dataManager = dataManager;
+        this.messageStates = new Map(); // messageId -> {hash, statsSnapshot}
+    }
+
+    calculateMessageHash(content) {
+        if (!content) return '';
+        let hash = 0;
+        for (let i = 0; i < content.length; i++) {
+            const char = content.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return hash.toString();
+    }
+
+    cloneStats(stats) {
+        return JSON.parse(JSON.stringify(stats));
+    }
+
+    async isMessageReroll(messageId, content) {
+        const contentHash = this.calculateMessageHash(content);
+        const messageKey = String(messageId);
+        const existingState = this.messageStates.get(messageKey);
+
+        if (!existingState) {
+            return { isReroll: false, hash: contentHash };
+        }
+
+        return {
+            isReroll: existingState.hash !== contentHash,
+            hash: contentHash
+        };
+    }
+
+    async saveMessageState(messageId, contentHash, statsBeforeProcessing) {
+        const messageKey = String(messageId);
+        this.messageStates.set(messageKey, {
+            hash: contentHash,
+            statsSnapshot: this.cloneStats(statsBeforeProcessing),
+            timestamp: Date.now()
+        });
+    }
+
+    async rollbackToMessage(messageId) {
+        const messageKey = String(messageId);
+        const messageState = this.messageStates.get(messageKey);
+
+        if (messageState && messageState.statsSnapshot) {
+            await this.dataManager.saveStats(messageState.statsSnapshot);
+
+            // 清理该消息及之后的所有状态记录
+            const messagesToRemove = [];
+            const currentMessageNum = parseInt(messageId);
+
+            for (const [id, state] of this.messageStates.entries()) {
+                if (parseInt(id) >= currentMessageNum) {
+                    messagesToRemove.push(id);
+                }
+            }
+
+            messagesToRemove.forEach(id => this.messageStates.delete(id));
+            return messageState.statsSnapshot;
+        }
+        return null;
+    }
+
+    cleanupOldStates(maxAgeMs = 24 * 60 * 60 * 1000) {
+        const now = Date.now();
+        for (const [id, state] of this.messageStates.entries()) {
+            if (now - state.timestamp > maxAgeMs) {
+                this.messageStates.delete(id);
+            }
+        }
+    }
+}
+
 
 // ==================== NLP分析引擎 ====================
 class TextAnalysisEngine {
@@ -237,9 +323,6 @@ class TextAnalysisEngine {
             love: { regex: /我.*?爱你|我.*?喜欢你|爱上了你|迷上了你|深爱着你|钟情于你|倾心|倾慕|仰慕|臣服|迷恋|深情|挚爱|心仪|心悦|青睐|心生爱意|怦然心动/g, score: 1, stats_event: 'loveExpressions' },
             praise: { regex: /赞美|夸赞|称赞|表扬|好棒|真棒|厉害|了不起|优秀|出色|完美|很棒|真行|很厉害|太棒了|棒极了|真不错|佩服|赞赏|欣赏/g, score: 0.5, stats_event: 'positiveEmotions' },
             care: { regex: /关心|关怀|体贴|照顾|呵护|保护|心疼|疼爱|爱护|牵挂|挂念|在乎|惦记|温柔|细心|体恤|体谅|关爱|爱怜|宠爱/g, score: 0.5, stats_event: 'positiveEmotions' },
-            hit: { regex: /揍|踢|掌掴|拳头|殴打|击打|重击|鞭打|挨打|扇耳光|暴揍|暴打|痛击|摔打|撞击|殴斗/g, score: -2, stats_event: 'hitEvents' },
-            weapon: { regex: /刀|剑|枪|弓箭|匕首|射击|开枪|砍|斩/g, score: -0.1, stats_event: 'weaponUse' },
-            death: { regex: /死亡|丧命|毙命|牺牲|身亡|丧生|亡故|逝世/g, score: -0.2, stats_event: 'deathEvents' },
             sad: { regex: /悲伤|难过|伤心|痛苦|心痛|愤怒|生气|恐惧|害怕|抑郁|沮丧|郁闷|忧伤|失落|苦涩|心碎|悲哀|伤感|绝望|哀伤|酸楚|郁结|失意|黯然|悲凉/g, score: -1, stats_event: 'negativeEmotions' },
             disgust: { regex: /厌恶|恶心|反感|不耐烦|讨厌|失望|不屑|讽刺|嘲讽|挖苦|厌烦|鄙视|看不起|嫌恶|嗤之以鼻|反胃|抵触|排斥|嫌弃|唾弃|嫌恶|厌倦|反感|不悦|不爽|烦躁|烦闷|恼火/g, score: -1, stats_event: 'negativeEmotions' },
             cold: { regex: /冷笑|冰冷|寒气|刀一样|冷眼|冷漠|漠然|不理不睬|冷酷|无情|冷若冰霜|漠不关心|嗤笑|冷哼|冷言冷语|阴阳怪气|冷冷地|冷淡地|冷漠地|疏离|疏远|敷衍|应付|敷衍了事/g, score: -0.6, stats_event: 'negativeEmotions' },
@@ -290,7 +373,19 @@ class TextAnalysisEngine {
         };
 
         this.quoteChars = ['\u0022', '\u201C', '\u201D', '\u2018', '\u2019', '\u300C', '\u300D', '\u300E', '\u300F', '\u301D', '\u301E', '\u301F', '\uFF02', '\u2033', '\u2036'];
-        this.excludedXmlTags = ['thinking', 'think', 'cot', 'summary', 'details'];
+        this.filterConfig = {
+            xmlTags: [
+                'thinking', 'think', 'cot', 'summary', 'details',
+                'status', 'statusbar', 'stats', 'ui', 'interface',
+                'Status', 'Statusbar', 'system', 'debug', 'log'
+            ],
+            specialMarkers: [
+                /<!--[\s\S]*?-->/g,
+                /<！[^>]*>[\s\S]*?<\/！>/g,
+                /<\?[\s\S]*?\?>/g,
+                /<\![^>]*>/g
+            ]
+        };
         this.pronounMapping = new Map();
         this.userSettings = {
             gender: 'unknown',
@@ -311,8 +406,13 @@ class TextAnalysisEngine {
         if (!text || typeof text !== 'string') return text;
 
         let filteredText = text;
-        this.excludedXmlTags.forEach(tag => {
+
+        this.filterConfig.xmlTags.forEach(tag => {
             const regex = new RegExp(`<${tag}[^>]*>[\\s\\S]*?<\\/${tag}>`, 'gi');
+            filteredText = filteredText.replace(regex, '');
+        });
+
+        this.filterConfig.specialMarkers.forEach(regex => {
             filteredText = filteredText.replace(regex, '');
         });
 
@@ -1212,7 +1312,7 @@ class TextAnalysisEngine {
 
         this.pronounMapping.clear();
 
-        stats.dialogueCount += (text.match(/[\u201C\u201D\u300C\u300D\u300E\u300F\u301D\u301E\u301F\uFF02\u2033\u2036""][^\u201C\u201D\u300C\u300D\u300E\u300F\u301D\u301E\u301F\uFF02\u2033\u2036""]{3,}[\u201C\u201D\u300C\u300D\u300E\u300F\u301D\u301E\u301F\uFF02\u2033\u2036""]/g) || []).length;
+        // 只保留地点变化，删除对话次数统计
         stats.locationChanges += (text.match(/进入|走进|来到|到达|离开|前往|回到/g) || []).length > 0 ? 1 : 0;
 
         const trackedNames = Object.keys(stats.relationships);
@@ -1308,7 +1408,7 @@ class TextAnalysisEngine {
             if (finalChange !== 0) {
                 stats.relationships[name].interactions++;
                 stats.relationships[name].intimacyLevel += finalChange;
-                stats.relationships[name].intimacyLevel = Math.max(-100, stats.relationships[name].intimacyLevel);
+                stats.relationships[name].intimacyLevel = Math.max(-99999999, stats.relationships[name].intimacyLevel);
                 stats.relationships[name].stage = this.relationshipManager.getRelationshipStage(stats.relationships[name].intimacyLevel);
             }
         });
@@ -1316,8 +1416,8 @@ class TextAnalysisEngine {
         const finalGlobalChange = Math.round(Math.min(3, Math.max(-3, globalSentiment)));
         stats.relationshipStats.intimacyLevel += finalGlobalChange;
         stats.relationshipStats.emotionalChange += finalGlobalChange;
-        stats.relationshipStats.intimacyLevel = Math.max(-100, stats.relationshipStats.intimacyLevel);
-        stats.relationshipStats.emotionalChange = Math.max(-100, stats.relationshipStats.emotionalChange);
+        stats.relationshipStats.intimacyLevel = Math.max(-99999999, stats.relationshipStats.intimacyLevel);
+        stats.relationshipStats.emotionalChange = Math.max(-99999999, stats.relationshipStats.emotionalChange);
 
         Object.values(this.SENTIMENT_LEXICON).forEach(lexiconItem => {
             if (lexiconItem.stats_event) {
@@ -1330,8 +1430,10 @@ class TextAnalysisEngine {
                         stats.intimacyStats[lexiconItem.stats_event] += matches.length;
                     } else if (stats.emotionStats[lexiconItem.stats_event] !== undefined) {
                         stats.emotionStats[lexiconItem.stats_event] += matches.length;
-                    } else if (stats.violenceStats[lexiconItem.stats_event] !== undefined) {
-                        stats.violenceStats[lexiconItem.stats_event] += matches.length;
+                    } else if (lexiconItem.stats_event === 'giftGiving') {
+                        stats.giftGiving += matches.length;
+                    } else if (lexiconItem.stats_event === 'moneyTransfer') {
+                        stats.moneyTransfer += matches.length;
                     }
                 }
             }
@@ -1415,7 +1517,6 @@ class TextAnalysisEngine {
                 kissingEvents: 0, embraceEvents: 0, sexualEncounters: 0,
                 maleOrgasms: 0, femaleOrgasms: 0, oralCompletions: 0, internalCompletions: 0
             },
-            violenceStats: { hitEvents: 0, weaponUse: 0, deathEvents: 0 },
             exchangeStats: { giftGiving: 0, moneyTransfer: 0 },
             emotionStats: {
                 positiveEmotions: 0, negativeEmotions: 0, loveExpressions: 0,
@@ -1635,7 +1736,7 @@ class TextAnalysisEngine {
             if (finalChange !== 0) {
                 debugStats.relationships[name].interactions++;
                 debugStats.relationships[name].intimacyLevel += finalChange;
-                debugStats.relationships[name].intimacyLevel = Math.max(-100, debugStats.relationships[name].intimacyLevel);
+                debugStats.relationships[name].intimacyLevel = Math.max(-99999999, debugStats.relationships[name].intimacyLevel);
                 debugStats.relationships[name].stage = this.relationshipManager.getRelationshipStage(debugStats.relationships[name].intimacyLevel);
 
                 logs.push(`\n${name} 好感度变化:`);
@@ -1681,10 +1782,10 @@ class TextAnalysisEngine {
             });
         }
 
-        const violenceChanges = Object.entries(statChanges.violenceStats || {}).filter(([_, change]) => change > 0);
-        if (violenceChanges.length > 0) {
-            logs.push(`\n暴力统计:`);
-            violenceChanges.forEach(([key, change]) => {
+        const exchangeChanges = Object.entries(statChanges.exchangeStats || {}).filter(([_, change]) => change > 0);
+        if (exchangeChanges.length > 0) {
+            logs.push(`\n物品交换:`);
+            exchangeChanges.forEach(([key, change]) => {
                 const keyName = this.getStatKeyName(key);
                 logs.push(`  ${keyName}: +${change}`);
             });
@@ -1699,7 +1800,6 @@ class TextAnalysisEngine {
             locationChanges: (afterStats.locationChanges || 0) - (beforeStats.locationChanges || 0),
             intimacyStats: {},
             emotionStats: {},
-            violenceStats: {},
             exchangeStats: {}
         };
 
@@ -1715,9 +1815,9 @@ class TextAnalysisEngine {
             });
         }
 
-        if (afterStats.violenceStats && beforeStats.violenceStats) {
-            Object.keys(afterStats.violenceStats).forEach(key => {
-                changes.violenceStats[key] = (afterStats.violenceStats[key] || 0) - (beforeStats.violenceStats[key] || 0);
+        if (afterStats.exchangeStats && beforeStats.exchangeStats) {
+            Object.keys(afterStats.exchangeStats).forEach(key => {
+                changes.exchangeStats[key] = (afterStats.exchangeStats[key] || 0) - (beforeStats.exchangeStats[key] || 0);
             });
         }
 
@@ -1874,7 +1974,7 @@ class RelationshipManager {
 
     getRelationshipStage(intimacyLevel) {
         const stages = ["厌恶", "无视", "礼貌", "熟悉", "友善", "好感", "暧昧", "恋人初期", "热恋", "深爱", "唯一", "命运"];
-        const thresholds = [-100, 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+        const thresholds = [-99999999, 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 
         if (intimacyLevel >= 100) return "命运";
 
@@ -1891,7 +1991,7 @@ class RelationshipManager {
                 if (stats.relationships[name]) {
                     stats.relationships[name].interactions++;
                     stats.relationships[name].intimacyLevel += finalChange;
-                    stats.relationships[name].intimacyLevel = Math.max(-100, stats.relationships[name].intimacyLevel);
+                    stats.relationships[name].intimacyLevel = Math.max(-99999999, stats.relationships[name].intimacyLevel);
                     stats.relationships[name].stage = this.getRelationshipStage(stats.relationships[name].intimacyLevel);
                 }
             }
@@ -1900,8 +2000,8 @@ class RelationshipManager {
         const finalGlobalChange = Math.round(Math.min(3, Math.max(-3, globalSentiment)));
         stats.relationshipStats.intimacyLevel += finalGlobalChange;
         stats.relationshipStats.emotionalChange += finalGlobalChange;
-        stats.relationshipStats.intimacyLevel = Math.max(-100, stats.relationshipStats.intimacyLevel);
-        stats.relationshipStats.emotionalChange = Math.max(-100, stats.relationshipStats.emotionalChange);
+        stats.relationshipStats.intimacyLevel = Math.max(-99999999, stats.relationshipStats.intimacyLevel);
+        stats.relationshipStats.emotionalChange = Math.max(-99999999, stats.relationshipStats.emotionalChange);
 
         return stats;
     }
@@ -1912,8 +2012,6 @@ class RelationshipManager {
                 stats.intimacyStats[eventType] += count;
             } else if (stats.emotionStats[eventType] !== undefined) {
                 stats.emotionStats[eventType] += count;
-            } else if (stats.violenceStats[eventType] !== undefined) {
-                stats.violenceStats[eventType] += count;
             }
         });
 
@@ -1924,58 +2022,91 @@ class RelationshipManager {
         const changes = stats.lastChanges || {};
         const formatChange = (value) => value > 0 ? ` (+${value})` : '';
 
-        let userVisibleStats = `【关系与互动统计】\n\n💬 基础数据：\n`;
-        userVisibleStats += `• 对话次数: ${stats.dialogueCount || 0}次${formatChange(changes.dialogueCount || 0)}\n`;
-        userVisibleStats += `• 地点变化: ${stats.locationChanges || 0}次${formatChange(changes.locationChanges || 0)}\n\n`;
+        let userVisibleStats = `【关系与互动统计】\n`;
 
-        userVisibleStats += `💞 关系网络：\n`;
-        const relationships = Object.entries(stats.relationships || {}).sort((a, b) => b[1].interactions - a[1].interactions).slice(0, 8);
+        userVisibleStats += `<table class="stats-compact-table">
+        <tr>
+            <th>💬 基础数据</th>
+            <th>🔞 亲密互动</th>
+            <th>😊 情感表达</th>
+        </tr>
+        <tr>
+            <td>地点变化: ${stats.locationChanges || 0}${formatChange(changes.locationChanges || 0)}</td>
+            <td>接吻次数: ${stats.intimacyStats?.kissingEvents || 0}${formatChange(changes.intimacyStats?.kissingEvents || 0)}</td>
+            <td>爱情表白: ${stats.emotionStats?.loveExpressions || 0}${formatChange(changes.emotionStats?.loveExpressions || 0)}</td>
+        </tr>
+        <tr>
+            <td>礼物交换: ${stats.giftGiving || 0}${formatChange(changes.giftGiving || 0)}</td>
+            <td>拥抱次数: ${stats.intimacyStats?.embraceEvents || 0}${formatChange(changes.intimacyStats?.embraceEvents || 0)}</td>
+            <td>喜悦表达: ${stats.emotionStats?.joyEvents || 0}${formatChange(changes.emotionStats?.joyEvents || 0)}</td>
+        </tr>
+        <tr>
+            <td>金钱交易: ${stats.moneyTransfer || 0}${formatChange(changes.moneyTransfer || 0)}</td>
+            <td>性爱次数: ${stats.intimacyStats?.sexualEncounters || 0}${formatChange(changes.intimacyStats?.sexualEncounters || 0)}</td>
+            <td>悲伤表达: ${stats.emotionStats?.sadnessEvents || 0}${formatChange(changes.emotionStats?.sadnessEvents || 0)}</td>
+        </tr>
+        <tr>
+            <td>情绪变化: ${this.formatEmotionalChange(stats.relationshipStats?.emotionalChange || 0)}</td>
+            <td>男性高潮: ${stats.intimacyStats?.maleOrgasms || 0}${formatChange(changes.intimacyStats?.maleOrgasms || 0)}</td>
+            <td>愤怒爆发: ${stats.emotionStats?.angerOutbursts || 0}${formatChange(changes.emotionStats?.angerOutbursts || 0)}</td>
+        </tr>
+        <tr>
+            <td>积极情绪: ${stats.emotionStats?.positiveEmotions || 0}${formatChange(changes.emotionStats?.positiveEmotions || 0)}</td>
+            <td>女性高潮: ${stats.intimacyStats?.femaleOrgasms || 0}${formatChange(changes.intimacyStats?.femaleOrgasms || 0)}</td>
+            <td>恐惧表现: ${stats.emotionStats?.fearEvents || 0}${formatChange(changes.emotionStats?.fearEvents || 0)}</td>
+        </tr>
+        <tr>
+            <td>消极情绪: ${stats.emotionStats?.negativeEmotions || 0}${formatChange(changes.emotionStats?.negativeEmotions || 0)}</td>
+            <td>吞精次数: ${stats.intimacyStats?.oralCompletions || 0}${formatChange(changes.intimacyStats?.oralCompletions || 0)}</td>
+            <td>惊讶反应: ${stats.emotionStats?.surpriseEvents || 0}${formatChange(changes.emotionStats?.surpriseEvents || 0)}</td>
+        </tr>
+        <tr>
+            <td></td>
+            <td>内射次数: ${stats.intimacyStats?.internalCompletions || 0}${formatChange(changes.intimacyStats?.internalCompletions || 0)}</td>
+            <td></td>
+        </tr>
+    </table>`;
+
+        userVisibleStats += `\n💞 关系网络：\n`;
+        const relationships = Object.entries(stats.relationships || {}).sort((a, b) => b.interactions - a.interactions).slice(0, 8);
         if (relationships.length > 0) {
+            userVisibleStats += `<div class="relationship-tags">`;
             relationships.forEach(([name, data]) => {
                 const intimacyLevel = Math.round(data.intimacyLevel);
-                userVisibleStats += `• ${name}: ${data.stage} (${intimacyLevel}${intimacyLevel < 100 ? "/100" : ""})\n`;
+                userVisibleStats += `<span class="relationship-tag">${name}: ${data.stage} (${intimacyLevel}${intimacyLevel < 100 ? "/100" : ""})</span> `;
             });
+            userVisibleStats += `</div>`;
         } else {
-            userVisibleStats += `• 暂无关系记录\n`;
+            userVisibleStats += `• 暂无关系记录`;
         }
 
-        userVisibleStats += `\n📊 剧情风格：\n• 情绪变化: ${this.formatEmotionalChange(stats.relationshipStats?.emotionalChange || 0)}\n\n`;
-
-        userVisibleStats += `🔞 亲密互动：\n`;
-        userVisibleStats += `• 接吻次数: ${stats.intimacyStats?.kissingEvents || 0}次${formatChange(changes.intimacyStats?.kissingEvents || 0)}\n`;
-        userVisibleStats += `• 拥抱次数: ${stats.intimacyStats?.embraceEvents || 0}次${formatChange(changes.intimacyStats?.embraceEvents || 0)}\n`;
-        userVisibleStats += `• 性爱次数: ${stats.intimacyStats?.sexualEncounters || 0}次${formatChange(changes.intimacyStats?.sexualEncounters || 0)}\n`;
-        userVisibleStats += `• 男性高潮: ${stats.intimacyStats?.maleOrgasms || 0}次${formatChange(changes.intimacyStats?.maleOrgasms || 0)}\n`;
-        userVisibleStats += `• 女性高潮: ${stats.intimacyStats?.femaleOrgasms || 0}次${formatChange(changes.intimacyStats?.femaleOrgasms || 0)}\n`;
-        userVisibleStats += `• 吞精次数: ${stats.intimacyStats?.oralCompletions || 0}次${formatChange(changes.intimacyStats?.oralCompletions || 0)}\n`;
-        userVisibleStats += `• 内射次数: ${stats.intimacyStats?.internalCompletions || 0}次${formatChange(changes.intimacyStats?.internalCompletions || 0)}\n\n`;
-
-        userVisibleStats += `😊 情感表达：\n`;
-        userVisibleStats += `• 积极情绪: ${stats.emotionStats?.positiveEmotions || 0}次${formatChange(changes.emotionStats?.positiveEmotions || 0)}\n`;
-        userVisibleStats += `• 消极情绪: ${stats.emotionStats?.negativeEmotions || 0}次${formatChange(changes.emotionStats?.negativeEmotions || 0)}\n`;
-        userVisibleStats += `• 爱情表白: ${stats.emotionStats?.loveExpressions || 0}次${formatChange(changes.emotionStats?.loveExpressions || 0)}\n`;
-        userVisibleStats += `• 喜悦表达: ${stats.emotionStats?.joyEvents || 0}次${formatChange(changes.emotionStats?.joyEvents || 0)}\n`;
-        userVisibleStats += `• 悲伤表达: ${stats.emotionStats?.sadnessEvents || 0}次${formatChange(changes.emotionStats?.sadnessEvents || 0)}\n`;
-        userVisibleStats += `• 愤怒爆发: ${stats.emotionStats?.angerOutbursts || 0}次${formatChange(changes.emotionStats?.angerOutbursts || 0)}\n`;
-        userVisibleStats += `• 恐惧表现: ${stats.emotionStats?.fearEvents || 0}次${formatChange(changes.emotionStats?.fearEvents || 0)}\n`;
-        userVisibleStats += `• 惊讶反应: ${stats.emotionStats?.surpriseEvents || 0}次${formatChange(changes.emotionStats?.surpriseEvents || 0)}\n\n`;
-
-        userVisibleStats += `⚔️ 暴力冲突：\n`;
-        userVisibleStats += `• 身体冲突: ${stats.violenceStats?.hitEvents || 0}次${formatChange(changes.violenceStats?.hitEvents || 0)}\n`;
-        userVisibleStats += `• 武器使用: ${stats.violenceStats?.weaponUse || 0}次${formatChange(changes.violenceStats?.weaponUse || 0)}\n`;
-        userVisibleStats += `• 死亡事件: ${stats.violenceStats?.deathEvents || 0}次${formatChange(changes.violenceStats?.deathEvents || 0)}\n\n`;
-
-        userVisibleStats += `💰 物品交换：\n`;
-        userVisibleStats += `• 礼物交换: ${stats.exchangeStats?.giftGiving || 0}次${formatChange(changes.exchangeStats?.giftGiving || 0)}\n`;
-        userVisibleStats += `• 金钱交易: ${stats.exchangeStats?.moneyTransfer || 0}次${formatChange(changes.exchangeStats?.moneyTransfer || 0)}`;
-
-        let behaviorGuidance = `\n\n【角色行为指导】\n`;
+        let behaviorGuidance = `\n【角色行为指导】\n`;
         if (relationships.length > 0) {
+            behaviorGuidance += `<table class="behavior-guidance-table">`;
+
             relationships.forEach(([name, data]) => {
                 const stage = data.stage;
                 const guidelines = currentGuidelines[stage] || this.relationshipGuidelines[stage];
-                behaviorGuidance += `\n${name}当前关系阶段: ${stage}\n• 核心态度: ${guidelines.attitude}\n• 允许行为: ${guidelines.allowed}\n• 底线/拒绝行为: ${guidelines.limits}\n`;
+
+                behaviorGuidance += `
+            <tr class="character-header">
+                <td colspan="2"><strong>${name} - 当前关系阶段: ${stage}</strong></td>
+            </tr>
+            <tr>
+                <td class="guidance-label">核心态度</td>
+                <td class="guidance-content">${guidelines.attitude}</td>
+            </tr>
+            <tr>
+                <td class="guidance-label">允许行为</td>
+                <td class="guidance-content">${guidelines.allowed}</td>
+            </tr>
+            <tr>
+                <td class="guidance-label">底线/拒绝行为</td>
+                <td class="guidance-content">${guidelines.limits}</td>
+            </tr>`;
             });
+
+            behaviorGuidance += `</table>`;
         }
 
         let aiGuidance = behaviorGuidance + `\n💡 指令: 请严格根据上述关系阶段和行为准则，结合角色设定，调整你的回应，确保你的反应符合当前关系发展阶段。请注意行为指导仅作用于指定的NPC对用户的行为指导，不涉及他人。`;
@@ -2014,9 +2145,8 @@ class RelationshipManager {
 
 // ==================== UI管理层 ====================
 class StatsUIManager {
-    constructor(executeCommand, showConfirmDialog) {
+    constructor(executeCommand) {
         this.executeCommand = executeCommand;
-        this.showConfirmDialog = showConfirmDialog;
     }
 
     showMemoryModal(content, isEditing = false) {
@@ -2034,7 +2164,6 @@ class StatsUIManager {
                     <div class="main-menu-footer-buttons">
                         <button id="memory-behavior" class="memory-action-button">🎭 初始设定</button>
                         <button id="memory-edit" class="memory-action-button">✏️ 当前编辑</button>
-                        <button id="memory-clear" class="memory-action-button">🗑️ 清空数据</button>
                     </div>
                 </div>
             </div>
@@ -2193,7 +2322,7 @@ class StatsUIManager {
                         <option value="male">男性 ♂</option>
                         <option value="female">女性 ♀</option>
                     </select>
-                    <input type="number" id="new-tracked-intimacy" class="tracked-intimacy-input" placeholder="初始好感度" min="-100" value="0" />
+                    <input type="number" id="new-tracked-intimacy" class="tracked-intimacy-input" placeholder="初始好感度" min="-99999999" value="0" />
                     <button id="add-tracked-name" class="add-name-button">添加</button>
                 </div>
             </div>
@@ -2204,8 +2333,21 @@ class StatsUIManager {
 
         const stages = Object.keys(behaviors);
         stages.forEach(stage => {
-            html += `<div class="behavior-stage-tab" data-stage="${stage}" title="点击编辑 ${stage} 阶段设定">${stage}</div>`;
+            const range = stageRanges[stage] || "未知";
+            html += `
+        <div class="behavior-stage-tab" data-stage="${stage}" data-range="${range}" title="点击编辑阶段名称和范围">
+            <span class="stage-tab-content">${stage}</span>
+            <button class="stage-delete-btn" data-stage="${stage}" title="删除此关系阶段">
+                <i class="fa-solid fa-minus"></i>
+            </button>
+        </div>`;
         });
+
+        html += `
+        <div class="behavior-stage-tab add-stage-tab" title="新增关系阶段">
+            <i class="fa-solid fa-plus"></i>
+        </div>
+    `;
 
         html += `</div><div class="behavior-stage-content">`;
 
@@ -2214,7 +2356,11 @@ class StatsUIManager {
             const range = stageRanges[stage] || "未知";
             html += `
             <div class="behavior-stage-form" data-stage="${stage}" ${index === 0 ? '' : 'style="display:none;"'}>
-                <h3>${stage} 阶段行为设定 <span class="stage-range">【${range}】</span></h3>
+                <h3>
+                    <span class="stage-name-display">${stage}</span> 
+                    阶段行为设定 
+                    <span class="stage-range editable-range" data-stage="${stage}" title="点击编辑数值范围">【${range}】</span>
+                </h3>
                 <div class="behavior-field">
                     <label>核心态度:</label>
                     <textarea class="behavior-textarea" data-stage="${stage}" data-field="attitude">${behavior.attitude}</textarea>
@@ -2253,8 +2399,10 @@ class StatsUIManager {
         const sections = [
             {
                 title: '💬 基础数据', fields: [
-                    { label: '对话次数', path: 'dialogueCount', value: stats.dialogueCount || 0 },
-                    { label: '地点变化', path: 'locationChanges', value: stats.locationChanges || 0 }
+                    // { label: '对话次数', path: 'dialogueCount', value: stats.dialogueCount || 0 },    // ❌ 删除这行
+                    { label: '地点变化', path: 'locationChanges', value: stats.locationChanges || 0 },
+                    { label: '礼物交换', path: 'giftGiving', value: stats.giftGiving || 0 },              // ✅ 移到基础数据，路径改为根级别
+                    { label: '金钱交易', path: 'moneyTransfer', value: stats.moneyTransfer || 0 }          // ✅ 移到基础数据，路径改为根级别
                 ]
             },
             {
@@ -2284,20 +2432,14 @@ class StatsUIManager {
                     { label: '恐惧表现', path: 'emotionStats.fearEvents', value: stats.emotionStats?.fearEvents || 0 },
                     { label: '惊讶反应', path: 'emotionStats.surpriseEvents', value: stats.emotionStats?.surpriseEvents || 0 }
                 ]
-            },
-            {
-                title: '⚔️ 暴力冲突', fields: [
-                    { label: '身体冲突', path: 'violenceStats.hitEvents', value: stats.violenceStats?.hitEvents || 0 },
-                    { label: '武器使用', path: 'violenceStats.weaponUse', value: stats.violenceStats?.weaponUse || 0 },
-                    { label: '死亡事件', path: 'violenceStats.deathEvents', value: stats.violenceStats?.deathEvents || 0 }
-                ]
-            },
-            {
-                title: '💰 物品交换', fields: [
-                    { label: '礼物交换', path: 'exchangeStats.giftGiving', value: stats.exchangeStats?.giftGiving || 0 },
-                    { label: '金钱交易', path: 'exchangeStats.moneyTransfer', value: stats.exchangeStats?.moneyTransfer || 0 }
-                ]
             }
+            // 删除整个💰 物品交换的section
+            // {
+            //     title: '💰 物品交换', fields: [
+            //         { label: '礼物交换', path: 'exchangeStats.giftGiving', value: stats.exchangeStats?.giftGiving || 0 },
+            //         { label: '金钱交易', path: 'exchangeStats.moneyTransfer', value: stats.exchangeStats?.moneyTransfer || 0 }
+            //     ]
+            // }
         ];
 
         let html = '<div class="stats-editor">';
@@ -2311,7 +2453,7 @@ class StatsUIManager {
                         const stage = data.stage || relationshipManager.getRelationshipStage(intimacyLevel);
                         html += `<div class="stats-field">
                             <label>${name}:</label>
-                            <input type="number" data-path="relationships.${name}.intimacyLevel" value="${intimacyLevel}" min="-100" />
+                            <input type="number" data-path="relationships.${name}.intimacyLevel" value="${intimacyLevel}" min="-99999999" />
                             <span class="relationship-stage">${stage}</span>
                         </div>`;
                     });
@@ -2332,12 +2474,13 @@ class StatsUIManager {
 
     collectStatsFromForm(relationshipManager) {
         const stats = {
-            dialogueCount: 0,
+            // dialogueCount: 0,     // ❌ 删除
             locationChanges: 0,
+            giftGiving: 0,           // ✅ 新增
+            moneyTransfer: 0,        // ✅ 新增
             intimacyStats: {},
             emotionStats: {},
-            violenceStats: {},
-            exchangeStats: {},
+            // exchangeStats: {},    // ❌ 删除
             relationships: {}
         };
 
@@ -2398,7 +2541,7 @@ class StatsUIManager {
                 </div>
                 <div class="edit-name-field">
                     <label>初始好感度 (-100 ~ 无上限):</label>
-                    <input type="number" id="edit-intimacy-input" min="-100" value="${currentIntimacy}" />
+                    <input type="number" id="edit-intimacy-input" min="-99999999" value="${currentIntimacy}" />
                 </div>
                 <div class="xiaobaix-edit-name-buttons">
                     <button class="xiaobaix-edit-name-save">保存</button>
@@ -2478,6 +2621,7 @@ class StatsTracker {
         this.isInitialized = false;
 
         this.dataManager = null;
+        this.messageStateManager = null;
         this.relationshipManager = new RelationshipManager();
         this.textAnalysis = new TextAnalysisEngine(this.relationshipManager);
         this.uiManager = null;
@@ -2494,7 +2638,8 @@ class StatsTracker {
         this.executeCommand = executeCommand;
 
         this.dataManager = new StatsDataManager(executeCommand);
-        this.uiManager = new StatsUIManager(executeCommand, this.showConfirmDialog.bind(this));
+        this.messageStateManager = new MessageStateManager(this.dataManager);
+        this.uiManager = new StatsUIManager(executeCommand);
 
         if (!extension_settings[extId].relationshipGuidelines) {
             extension_settings[extId].relationshipGuidelines = structuredClone(this.relationshipManager.relationshipGuidelines);
@@ -2548,6 +2693,10 @@ class StatsTracker {
 
         this.removeMemoryPrompt();
 
+        if (this.messageStateManager) {
+            this.messageStateManager.messageStates.clear();
+        }
+
         this.isInitialized = false;
         this.chatChangedHandler = null;
         this.appReadyHandler = null;
@@ -2583,15 +2732,15 @@ class StatsTracker {
         if (savedData?.relationshipGuidelines) {
             extension_settings[this.EXT_ID].relationshipGuidelines = structuredClone(savedData.relationshipGuidelines);
             this.characterSettings.set(newCharId, structuredClone(savedData.relationshipGuidelines));
-
+            if (savedData.stageRanges) {
+                extension_settings[this.EXT_ID].stageRanges = structuredClone(savedData.stageRanges);
+            }
             if (userGlobalEnabled && userMemoryEnabled && savedData.settings) {
                 this.settings.memoryInjectDepth = savedData.settings.memoryInjectDepth ?? this.settings.memoryInjectDepth;
             }
-
             let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
             if (!currentStats || currentStats === "undefined") {
                 const newStats = this.dataManager.createEmptyStats();
-
                 if (savedData.trackedRelationships) {
                     Object.entries(savedData.trackedRelationships).forEach(([name, data]) => {
                         const initialIntimacy = data.initialIntimacy !== undefined ? data.initialIntimacy : 0;
@@ -2605,7 +2754,6 @@ class StatsTracker {
                         };
                     });
                 }
-
                 await this.executeCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(newStats)}`);
             }
         } else if (this.characterSettings.has(newCharId)) {
@@ -2653,7 +2801,10 @@ class StatsTracker {
         if (!this.settings.memoryEnabled || !this.isGloballyEnabled()) return false;
 
         try {
-            const lastMessage = await this.executeCommand('/messages names=on {{lastMessageId}}');
+            const lastMessageIdStr = await this.executeCommand('/return {{lastMessageId}}');
+            const messageId = parseInt(lastMessageIdStr) || 0;
+
+            const lastMessage = await this.executeCommand(`/messages names=on ${messageId}`);
             if (!lastMessage) return false;
 
             const colonIndex = lastMessage.indexOf(':');
@@ -2664,7 +2815,14 @@ class StatsTracker {
 
             if (!extractedText) return false;
 
+            const rerollCheck = await this.messageStateManager.isMessageReroll(messageId, extractedText);
+
+            if (rerollCheck.isReroll) {
+                await this.messageStateManager.rollbackToMessage(messageId);
+            }
+
             let currentStats = await this.dataManager.loadStats();
+            const statsBeforeProcessing = this.messageStateManager.cloneStats(currentStats);
             const oldStats = JSON.parse(JSON.stringify(currentStats));
 
             this.textAnalysis.updateUserSettings({
@@ -2674,39 +2832,50 @@ class StatsTracker {
 
             currentStats = this.textAnalysis.updateStatsFromText(currentStats, extractedText, extractedName);
 
-            currentStats.lastChanges = {
-                dialogueCount: currentStats.dialogueCount - oldStats.dialogueCount,
-                locationChanges: currentStats.locationChanges - oldStats.locationChanges,
-                intimacyStats: {},
-                emotionStats: {},
-                violenceStats: {},
-                exchangeStats: {}
-            };
-
-            Object.keys(currentStats.intimacyStats).forEach(key => {
-                currentStats.lastChanges.intimacyStats[key] = currentStats.intimacyStats[key] - oldStats.intimacyStats[key];
-            });
-            Object.keys(currentStats.emotionStats).forEach(key => {
-                currentStats.lastChanges.emotionStats[key] = currentStats.emotionStats[key] - oldStats.emotionStats[key];
-            });
-            Object.keys(currentStats.violenceStats).forEach(key => {
-                currentStats.lastChanges.violenceStats[key] = currentStats.violenceStats[key] - oldStats.violenceStats[key];
-            });
-            Object.keys(currentStats.exchangeStats).forEach(key => {
-                currentStats.lastChanges.exchangeStats[key] = currentStats.exchangeStats[key] - oldStats.exchangeStats[key];
-            });
+            currentStats.lastChanges = this.calculateStatChanges(oldStats, currentStats);
 
             await this.dataManager.saveStats(currentStats);
+
+            await this.messageStateManager.saveMessageState(
+                messageId,
+                rerollCheck.hash,
+                statsBeforeProcessing
+            );
 
             if (this.settings.memoryInjectEnabled) {
                 this.updateMemoryPrompt();
             }
 
+            if (Math.random() < 0.1) {
+                this.messageStateManager.cleanupOldStates();
+            }
+
             return true;
+
         } catch (error) {
             console.error('[小白X] 更新统计数据出错:', error);
             return false;
         }
+    }
+
+    calculateStatChanges(oldStats, newStats) {
+        const changes = {
+            locationChanges: (newStats.locationChanges || 0) - (oldStats.locationChanges || 0),
+            giftGiving: (newStats.giftGiving || 0) - (oldStats.giftGiving || 0),
+            moneyTransfer: (newStats.moneyTransfer || 0) - (oldStats.moneyTransfer || 0),
+            intimacyStats: {},
+            emotionStats: {}
+        };
+
+        ['intimacyStats', 'emotionStats'].forEach(category => {
+            if (newStats[category] && oldStats[category]) {
+                Object.keys(newStats[category]).forEach(key => {
+                    changes[category][key] = (newStats[category][key] || 0) - (oldStats[category][key] || 0);
+                });
+            }
+        });
+
+        return changes;
     }
 
     async updateMemoryPrompt() {
@@ -2914,9 +3083,6 @@ class StatsTracker {
                 if (currentStats.emotionStats) {
                     finalStats.emotionStats = { ...currentStats.emotionStats, ...updatedStatsFromForm.emotionStats };
                 }
-                if (currentStats.violenceStats) {
-                    finalStats.violenceStats = { ...currentStats.violenceStats, ...updatedStatsFromForm.violenceStats };
-                }
                 if (currentStats.exchangeStats) {
                     finalStats.exchangeStats = { ...currentStats.exchangeStats, ...updatedStatsFromForm.exchangeStats };
                 }
@@ -2934,25 +3100,36 @@ class StatsTracker {
                 const formattedStats = this.relationshipManager.formatHistoryStatistics(finalStats, currentGuidelines);
                 $('#memory-modal .memory-tab-content').html(formattedStats.userVisibleStats);
                 $('#memory-edit').text('✏️ 编辑数据').attr('data-editing', 'false');
+                $('#memory-clear-edit').remove();
                 this.executeCommand('/echo 数据已更新');
             } else {
-
                 let stats = await this.dataManager.loadStats();
 
                 const editForm = this.uiManager.createEditableStatsForm(stats, this.relationshipManager);
                 $('#memory-modal .memory-tab-content').html(editForm);
 
                 $('#memory-edit').text('💾 保存数据').attr('data-editing', 'true');
-            }
-        });
 
-        $(document).off('click', '#memory-clear').on('click', '#memory-clear', async () => {
-            this.showConfirmDialog('确定要清空所有数据吗？此操作不可撤销。', async () => {
-                await this.dataManager.clearStats();
-                this.removeMemoryPrompt();
-                $('#memory-modal').remove();
-                this.executeCommand('/echo 统计数据已清空');
-            });
+                if (!$('#memory-clear-edit').length) {
+                    $('#memory-edit').after('<button id="memory-clear-edit" class="memory-action-button">🗑️ 清空数据</button>');
+
+                    $('#memory-clear-edit').off('click').on('click', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        this.uiManager.showConfirmDialog('确定要清空所有统计数据吗？此操作不可撤销。', async () => {
+                            await this.dataManager.clearStats();
+                            this.removeMemoryPrompt();
+
+                            const emptyStats = this.dataManager.createEmptyStats();
+                            const editForm = this.uiManager.createEditableStatsForm(emptyStats, this.relationshipManager);
+                            $('#memory-modal .memory-tab-content').html(editForm);
+
+                            this.executeCommand('/echo 统计数据已清空');
+                        });
+                    });
+                }
+            }
         });
 
         $(document).off('keydown.memorymodal').on('keydown.memorymodal', function (e) {
@@ -3010,8 +3187,30 @@ class StatsTracker {
             }
         });
 
+        $(document).off('click', '.stage-delete-btn').on('click', '.stage-delete-btn', (e) => {
+            e.stopPropagation();
+            const stage = $(e.currentTarget).data('stage');
+
+            const currentStages = Object.keys(extension_settings[this.EXT_ID].relationshipGuidelines);
+            if (currentStages.length <= 1) {
+                this.executeCommand('/echo 至少需要保留一个关系阶段');
+                return;
+            }
+
+            this.uiManager.showConfirmDialog(
+                `确定要删除关系阶段"${stage}"吗？<br><br>此操作将同时删除该阶段的所有设定内容。`,
+                () => {
+                    this.deleteStage(stage);
+                }
+            );
+        });
+
+        $(document).off('click', '.add-stage-tab').on('click', '.add-stage-tab', () => {
+            this.showAddStageDialog();
+        });
+
         $(document).off('click', '#behavior-reset').on('click', '#behavior-reset', () => {
-            this.showConfirmDialog('确定要重置所有行为设定为默认值吗？', () => {
+            this.uiManager.showConfirmDialog('确定要重置所有行为设定为默认值吗？', () => {
                 extension_settings[this.EXT_ID].relationshipGuidelines = structuredClone(this.relationshipManager.relationshipGuidelines);
 
                 if (this.currentCharacterId) {
@@ -3070,15 +3269,24 @@ class StatsTracker {
                 );
 
                 if (importResult) {
-                    this.showConfirmDialog(
+                    this.uiManager.showConfirmDialog(
                         importResult.confirmMessage,
                         async () => {
                             const importData = importResult.importData;
                             const hasTrackedRelationships = importResult.hasTrackedRelationships;
-                            const isCharacterSpecific = importResult.isCharacterSpecific;
-                            const isMatchingCharacter = importResult.isMatchingCharacter;
+                            const hasCustomRanges = importResult.hasCustomRanges;
 
                             extension_settings[this.EXT_ID].relationshipGuidelines = importData.relationshipGuidelines;
+
+                            if (hasCustomRanges) {
+                                if (!extension_settings[this.EXT_ID].stageRanges) {
+                                    extension_settings[this.EXT_ID].stageRanges = {};
+                                }
+                                extension_settings[this.EXT_ID].stageRanges = {
+                                    ...extension_settings[this.EXT_ID].stageRanges,
+                                    ...importData.stageRanges
+                                };
+                            }
 
                             if (this.currentCharacterId) {
                                 this.characterSettings.set(this.currentCharacterId, structuredClone(importData.relationshipGuidelines));
@@ -3129,6 +3337,9 @@ class StatsTracker {
                             }
 
                             let successMessage = '行为设定已成功导入';
+                            if (hasCustomRanges) {
+                                successMessage += `\n已导入 ${Object.keys(importData.stageRanges).length} 个自定义阶段范围`;
+                            }
                             if (hasTrackedRelationships) {
                                 successMessage += `\n已恢复 ${Object.keys(importData.trackedRelationships).length} 个追踪人物(含初始好感度)`;
                             }
@@ -3143,7 +3354,7 @@ class StatsTracker {
                                 await this.updateMemoryPrompt();
                             }
 
-                            if (isCharacterSpecific && isMatchingCharacter) {
+                            if (importResult.isCharacterSpecific && importResult.isMatchingCharacter) {
                                 await this.handleCharacterSwitch();
                             }
                         },
@@ -3200,6 +3411,19 @@ class StatsTracker {
             $(this).addClass('active');
             $('.behavior-stage-form').hide();
             $(`.behavior-stage-form[data-stage="${stage}"]`).show();
+        });
+
+        $(document).off('dblclick', '.behavior-stage-tab').on('dblclick', '.behavior-stage-tab', (e) => {
+            const $tab = $(e.currentTarget);
+            const currentStage = $tab.data('stage');
+            this.editStageName($tab, currentStage);
+        });
+
+        $(document).off('click', '.editable-range').on('click', '.editable-range', (e) => {
+            e.stopPropagation();
+            const $range = $(e.currentTarget);
+            const stage = $range.data('stage');
+            this.editStageRange($range, stage);
         });
 
         $(document).off('click', '#add-user-alias').on('click', '#add-user-alias', () => {
@@ -3293,7 +3517,7 @@ class StatsTracker {
                         <option value="male">男性 ♂</option>
                         <option value="female">女性 ♀</option>
                     </select>
-                    <input type="number" id="new-tracked-intimacy" class="tracked-intimacy-input" placeholder="初始好感度" min="-100" value="0" />
+                    <input type="number" id="new-tracked-intimacy" class="tracked-intimacy-input" placeholder="初始好感度" min="-99999999" value="0" />
                     <button id="add-tracked-name" class="add-name-button">添加</button>
                 `);
             }
@@ -3351,7 +3575,7 @@ class StatsTracker {
     async addTrackedName(name, initialIntimacy = 0, gender = 'unknown') {
         if (!name) return;
 
-        initialIntimacy = Math.max(-100, initialIntimacy);
+        initialIntimacy = Math.max(-99999999, initialIntimacy);
 
         const stats = await this.dataManager.loadStats();
         if (!stats.relationships[name]) {
@@ -3610,12 +3834,275 @@ class StatsTracker {
                     <p style="color: #888; font-size: 0.9em;">这将覆盖当前的行为设定。</p>
                 </div>`;
 
-            this.showConfirmDialog(message, () => resolve(true), () => resolve(false));
+            this.uiManager.showConfirmDialog(message, () => resolve(true), () => resolve(false));
         });
     }
 
-    showConfirmDialog(message, onConfirm, onCancel) {
-        this.uiManager.showConfirmDialog(message, onConfirm, onCancel);
+    editStageName($tab, currentStage) {
+        if ($tab.hasClass('editing')) return;
+        $tab.addClass('editing');
+        const originalContent = $tab.html();
+        const $input = $('<input>', {
+            type: 'text',
+            class: 'stage-name-editor',
+            value: currentStage,
+            maxlength: 10
+        });
+        $tab.html($input);
+        $input.focus().select();
+        const finishEdit = () => {
+            const newName = $input.val().trim();
+            if (newName && newName !== currentStage) {
+                this.updateStageName(currentStage, newName);
+                $tab.text(newName);
+            } else {
+                $tab.html(originalContent);
+            }
+            $tab.removeClass('editing');
+        };
+        $input.on('blur', finishEdit);
+        $input.on('keydown', (e) => {
+            if (e.key === 'Enter') {
+                finishEdit();
+            } else if (e.key === 'Escape') {
+                $tab.html(originalContent);
+                $tab.removeClass('editing');
+            }
+        });
+    }
+
+    editStageRange($range, stage) {
+        if ($range.hasClass('editing')) return;
+        $range.addClass('editing');
+        const currentRange = $range.text().replace(/【|】/g, '');
+        const [minVal, maxVal] = this.parseRange(currentRange);
+        const $editor = $(
+            `<span class="range-editor">` +
+            `【<input type="number" class="range-min" value="${minVal}" min="-99999999" max="999">` +
+            `<span class="range-editor-separator">~</span>` +
+            `<input type="number" class="range-max" value="${maxVal}" min="-99999999" max="999">】` +
+            `</span>`
+        );
+        $range.html($editor);
+        const $minInput = $editor.find('.range-min');
+        const $maxInput = $editor.find('.range-max');
+        $minInput.focus().select();
+        const finishEdit = () => {
+            const newMin = parseInt($minInput.val()) || -99999999;
+            const newMax = $maxInput.val() === '∞' ? '∞' : (parseInt($maxInput.val()) || 100);
+            if (newMin < newMax || newMax === '∞') {
+                const newRange = newMax === '∞' ? `${newMin}~∞` : `${newMin}~${newMax}`;
+                this.updateStageRange(stage, newRange);
+                $range.text(`【${newRange}】`);
+            } else {
+                $range.text(`【${currentRange}】`);
+            }
+            $range.removeClass('editing');
+        };
+        $editor.on('blur', 'input', (e) => {
+            setTimeout(() => {
+                if (!$editor.find('input:focus').length) {
+                    finishEdit();
+                }
+            }, 100);
+        });
+        $editor.on('keydown', 'input', (e) => {
+            if (e.key === 'Enter') {
+                finishEdit();
+            } else if (e.key === 'Escape') {
+                $range.text(`【${currentRange}】`);
+                $range.removeClass('editing');
+            } else if (e.key === 'Tab') {
+                e.preventDefault();
+                if (e.target === $minInput[0]) {
+                    $maxInput.focus().select();
+                } else {
+                    $minInput.focus().select();
+                }
+            }
+        });
+        $maxInput.on('input', (e) => {
+            const val = e.target.value;
+            if (val.includes('∞') || val.toLowerCase().includes('inf')) {
+                e.target.value = '∞';
+            }
+        });
+    }
+
+    parseRange(rangeStr) {
+        const parts = rangeStr.split(/[~-]/);
+        const min = parseInt(parts) || -99999999;
+        const max = parts === '∞' ? '∞' : (parseInt(parts) || 100);
+        return [min, max];
+    }
+
+    updateStageName(oldName, newName) {
+        const guidelines = extension_settings[this.EXT_ID].relationshipGuidelines;
+        if (guidelines[oldName]) {
+            guidelines[newName] = guidelines[oldName];
+            delete guidelines[oldName];
+        }
+        $(`.behavior-stage-tab[data-stage="${oldName}"]`).attr('data-stage', newName).text(newName);
+        $(`.behavior-stage-form[data-stage="${oldName}"]`).attr('data-stage', newName);
+        $(`.behavior-stage-form[data-stage="${newName}"] h3 .stage-name-display`).text(newName);
+        $(`.behavior-textarea[data-stage="${oldName}"]`).attr('data-stage', newName);
+        $(`.editable-range[data-stage="${oldName}"]`).attr('data-stage', newName);
+        saveSettingsDebounced();
+        this.executeCommand(`/echo 阶段名称已更新: "${oldName}" → "${newName}"`);
+    }
+
+    updateStageRange(stage, newRange) {
+        this.executeCommand(`/echo 阶段"${stage}"的数值范围已更新为: ${newRange}`);
+        if (!extension_settings[this.EXT_ID].stageRanges) {
+            extension_settings[this.EXT_ID].stageRanges = {};
+        }
+        extension_settings[this.EXT_ID].stageRanges[stage] = newRange;
+        saveSettingsDebounced();
+    }
+
+    deleteStage(stage) {
+        if (extension_settings[this.EXT_ID].relationshipGuidelines[stage]) {
+            delete extension_settings[this.EXT_ID].relationshipGuidelines[stage];
+        }
+
+        $(`.behavior-stage-tab[data-stage="${stage}"]`).remove();
+        $(`.behavior-stage-form[data-stage="${stage}"]`).remove();
+
+        if (!$('.behavior-stage-tab.active').length) {
+            $('.behavior-stage-tab:first').addClass('active');
+            $('.behavior-stage-form:first').show();
+        }
+
+        saveSettingsDebounced();
+        this.executeCommand(`/echo 已删除关系阶段"${stage}"`);
+    }
+
+    showAddStageDialog() {
+        $('.xiaobaix-add-stage-modal').remove();
+
+        const dialogHtml = `
+    <div class="xiaobaix-add-stage-modal">
+        <div class="xiaobaix-add-stage-content">
+            <h3>新增关系阶段</h3>
+            <div class="add-stage-field">
+                <label>阶段名称:</label>
+                <input type="text" id="new-stage-name" placeholder="请输入阶段名称" maxlength="10" />
+            </div>
+            <div class="add-stage-field">
+                <label>数值范围:</label>
+                <div class="range-input-group">
+                    <input type="number" id="new-stage-min" placeholder="最小值" min="-99999999" max="999" />
+                    <span>~</span>
+                    <input type="text" id="new-stage-max" placeholder="最大值或∞" />
+                </div>
+            </div>
+            <div class="add-stage-field">
+                <label>核心态度:</label>
+                <textarea id="new-stage-attitude" placeholder="描述在此阶段的核心态度"></textarea>
+            </div>
+            <div class="add-stage-field">
+                <label>允许行为:</label>
+                <textarea id="new-stage-allowed" placeholder="描述允许的行为"></textarea>
+            </div>
+            <div class="add-stage-field">
+                <label>底线/拒绝行为:</label>
+                <textarea id="new-stage-limits" placeholder="描述拒绝的行为和底线"></textarea>
+            </div>
+            <div class="xiaobaix-add-stage-buttons">
+                <button class="xiaobaix-add-stage-save">添加</button>
+                <button class="xiaobaix-add-stage-cancel">取消</button>
+            </div>
+        </div>
+    </div>`;
+
+        $('body').append(dialogHtml);
+
+        $(document).off('click', '.xiaobaix-add-stage-save').on('click', '.xiaobaix-add-stage-save', () => {
+            const stageName = $('#new-stage-name').val().trim();
+            const minVal = parseInt($('#new-stage-min').val()) || 0;
+            const maxVal = $('#new-stage-max').val().trim() || '100';
+            const attitude = $('#new-stage-attitude').val().trim();
+            const allowed = $('#new-stage-allowed').val().trim();
+            const limits = $('#new-stage-limits').val().trim();
+
+            if (!stageName) {
+                this.executeCommand('/echo 请输入阶段名称');
+                return;
+            }
+
+            if (extension_settings[this.EXT_ID].relationshipGuidelines[stageName]) {
+                this.executeCommand('/echo 该阶段名称已存在');
+                return;
+            }
+
+            if (!attitude || !allowed || !limits) {
+                this.executeCommand('/echo 请填写完整的行为设定');
+                return;
+            }
+
+            this.addNewStage(stageName, minVal, maxVal, attitude, allowed, limits);
+            $('.xiaobaix-add-stage-modal').remove();
+        });
+
+        $(document).off('click', '.xiaobaix-add-stage-cancel').on('click', '.xiaobaix-add-stage-cancel', () => {
+            $('.xiaobaix-add-stage-modal').remove();
+        });
+
+        $(document).off('click', '.xiaobaix-add-stage-modal').on('click', '.xiaobaix-add-stage-modal', function (e) {
+            if (e.target === this) {
+                $(this).remove();
+            }
+        });
+    }
+
+    addNewStage(stageName, minVal, maxVal, attitude, allowed, limits) {
+        extension_settings[this.EXT_ID].relationshipGuidelines[stageName] = {
+            attitude: attitude,
+            allowed: allowed,
+            limits: limits
+        };
+
+        if (!extension_settings[this.EXT_ID].stageRanges) {
+            extension_settings[this.EXT_ID].stageRanges = {};
+        }
+        const range = maxVal === '∞' || maxVal.toLowerCase().includes('inf') ?
+            `${minVal}~∞` : `${minVal}~${maxVal}`;
+        extension_settings[this.EXT_ID].stageRanges[stageName] = range;
+
+        const newTabHtml = `
+    <div class="behavior-stage-tab" data-stage="${stageName}" data-range="${range}" title="点击编辑阶段名称和范围">
+        <span class="stage-tab-content">${stageName}</span>
+        <button class="stage-delete-btn" data-stage="${stageName}" title="删除此关系阶段">
+            <i class="fa-solid fa-minus"></i>
+        </button>
+    </div>`;
+
+        const newFormHtml = `
+    <div class="behavior-stage-form" data-stage="${stageName}" style="display:none;">
+        <h3>
+            <span class="stage-name-display">${stageName}</span> 
+            阶段行为设定 
+            <span class="stage-range editable-range" data-stage="${stageName}" title="点击编辑数值范围">【${range}】</span>
+        </h3>
+        <div class="behavior-field">
+            <label>核心态度:</label>
+            <textarea class="behavior-textarea" data-stage="${stageName}" data-field="attitude">${attitude}</textarea>
+        </div>
+        <div class="behavior-field">
+            <label>允许行为:</label>
+            <textarea class="behavior-textarea" data-stage="${stageName}" data-field="allowed">${allowed}</textarea>
+        </div>
+        <div class="behavior-field">
+            <label>底线/拒绝行为:</label>
+            <textarea class="behavior-textarea" data-stage="${stageName}" data-field="limits">${limits}</textarea>
+        </div>
+    </div>`;
+
+        $('.add-stage-tab').before(newTabHtml);
+        $('.behavior-stage-content').append(newFormHtml);
+
+        saveSettingsDebounced();
+        this.executeCommand(`/echo 已添加新的关系阶段"${stageName}"`);
     }
 }
 
