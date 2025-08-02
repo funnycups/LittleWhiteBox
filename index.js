@@ -583,7 +583,7 @@ function toggleAllFeatures(enabled) {
             { condition: extension_settings[EXT_ID].characterUpdater?.enabled, init: initCharacterUpdater },
             { condition: extension_settings[EXT_ID].dynamicPrompt?.enabled, init: initDynamicPrompt },
             { condition: extension_settings[EXT_ID].variablesPanel?.enabled, init: initVariablesPanel },
-            { condition: true, init: initButtonCollapse } // 按钮收纳总是启用
+            { condition: true, init: initButtonCollapse } 
         ];
 
         moduleInits.forEach(({ condition, init }) => {

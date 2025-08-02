@@ -894,7 +894,6 @@ handleInlineSave(e) {
         const msgId = msg.attr('mesid');
         if (!msgId) return;
 
-        // 检查是否已经存在变量面板按钮
         if (msg.find('.mes_variables_panel').length) return;
 
         const btn = document.createElement('div');
@@ -902,20 +901,17 @@ handleInlineSave(e) {
         btn.className = 'mes_btn mes_variables_panel';
         btn.innerHTML = '<i class="fa-solid fa-database"></i>';
 
-        // 直接添加点击事件处理器
         btn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
             this.open();
         });
 
-        // 尝试注册到button-collapse，如果失败则使用原方法
         if (typeof window.registerButtonToSubContainer === 'function' &&
             window.registerButtonToSubContainer(msgId, btn)) {
             return;
         }
 
-        // 降级：直接添加到mes_buttons
         const btns = msg.find('.mes_buttons');
         const $btn = $(btn);
         const edit = btns.find('.mes_edit');

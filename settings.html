@@ -256,7 +256,7 @@
             <div class="flex1">
                 <label for="task_commands_edit">斜杠命令</label>
                 <textarea class="task_commands_edit text_pole wide100p textarea_compact"
-                    placeholder="输入要执行的斜杠命令, eg: /buttons labels=[&quot;男&quot;,&quot;女&quot;] 你是？ | /echo 你选择了：{{pipe}}"></textarea>
+                    placeholder="输入要执行的斜杠命令或js, eg: &#10;&lt;&lt;taskjs&gt;&gt;&#10;count++;&#10;&lt;&lt;/taskjs&gt;&gt;&#10;/echo 已完成脚本！"></textarea>
             </div>
             <div class="flex-container">
                 <div class="flex1">
@@ -300,7 +300,7 @@
                         <option value="before_user">用户消息后</option>
                         <option value="any_message">任意对话</option>
                         <option value="initialization">初始化</option>
-                        <option value="only_this_floor">仅该楼层</option>
+                        <option value="only_this_floor">仅在“间隔楼层”的那个楼层执行一次</option>
 
                     </select>
                     <small>选择任务执行的时机</small>

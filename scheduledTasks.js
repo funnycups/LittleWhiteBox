@@ -34,20 +34,17 @@ function scheduleCleanup() {
     if (state.cleanupTimer) return;
     state.cleanupTimer = setInterval(() => {
         const now = Date.now();
-        // 清理过期的冷却时间
         for (const [taskName, lastTime] of state.taskLastExecutionTime.entries()) {
             if (now - lastTime > CONFIG.TASK_COOLDOWN * 2) {
                 state.taskLastExecutionTime.delete(taskName);
             }
         }
-        // 限制冷却条目数量
         if (state.taskLastExecutionTime.size > CONFIG.MAX_COOLDOWN) {
             const entries = Array.from(state.taskLastExecutionTime.entries())
                 .sort((a, b) => b[1] - a[1]).slice(0, CONFIG.MAX_COOLDOWN);
             state.taskLastExecutionTime.clear();
             entries.forEach(([name, time]) => state.taskLastExecutionTime.set(name, time));
         }
-        // 清理处理过的消息
         const settings = getSettings();
         if (settings.processedMessages.length > CONFIG.MAX_PROCESSED) {
             settings.processedMessages = settings.processedMessages.slice(-CONFIG.MAX_PROCESSED);
@@ -329,7 +326,6 @@ function createTaskItem(task, index, isCharacterTask = false) {
     taskElement.find('.disable_task').attr('id', `task_disable_${task.id}`).prop('checked', task.disabled);
     taskElement.find('label.checkbox').attr('for', `task_disable_${task.id}`);
 
-    // 绑定事件
     taskElement.find('.disable_task').on('input', () => {
         task.disabled = taskElement.find('.disable_task').prop('checked');
         saveTask(task, index, isCharacterTask);
@@ -657,7 +653,6 @@ async function importGlobalTasks(file) {
     }
 }
 
-// 简化的工具函数
 function clearProcessedMessages() { getSettings().processedMessages = []; debouncedSave(); }
 function clearTaskCooldown(taskName = null) { taskName ? state.taskLastExecutionTime.delete(taskName) : state.taskLastExecutionTime.clear(); }
 function getTaskCooldownStatus() {
@@ -688,7 +683,6 @@ function cleanup() {
     }
     state.taskLastExecutionTime.clear();
 
-    // 移除所有事件监听器
     [event_types.CHARACTER_MESSAGE_RENDERED, event_types.USER_MESSAGE_RENDERED, 
      event_types.CHAT_CHANGED, event_types.CHAT_CREATED, event_types.MESSAGE_DELETED,
      event_types.MESSAGE_SWIPED, event_types.CHARACTER_DELETED].forEach(eventType => {
@@ -699,7 +693,6 @@ function cleanup() {
     $(window).off('beforeunload', cleanup);
 }
 
-// 全局函数
 window.xbqte = async (name) => {
     try {
         if (!name?.trim()) throw new Error('请提供任务名称');
@@ -747,7 +740,6 @@ window.setScheduledTaskInterval = async (name, interval) => {
     throw new Error(`找不到名为 "${name}" 的任务`);
 };
 
-// 导出工具函数
 Object.assign(window, { 
     clearTasksProcessedMessages: clearProcessedMessages,
     clearTaskCooldown, 
@@ -811,7 +803,6 @@ function initTasks() {
 
     window.addEventListener('message', handleTaskMessage);
 
-    // 绑定UI事件
     $('#scheduled_tasks_enabled').on('input', e => {
         const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
         if (!globalEnabled) return;
@@ -821,7 +812,6 @@ function initTasks() {
         if (!enabled) cleanup();
     });
 
-    // 绑定按钮事件
     $('#add_global_task').on('click', () => showTaskEditor(null, false, false));
     $('#add_character_task').on('click', () => showTaskEditor(null, false, true));
     $('#toggle_task_bar').on('click', toggleTaskBarVisibility);
@@ -840,7 +830,6 @@ function initTasks() {
 
     setTimeout(() => updateTaskBar(), 1000);
 
-    // 绑定事件监听器
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
     eventSource.on(event_types.USER_MESSAGE_RENDERED, onUserMessage);
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
