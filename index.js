@@ -8,14 +8,15 @@ import { initImmersiveMode } from "./immersive-mode.js";
 import { initTemplateEditor, templateSettings } from "./template-editor.js";
 import { initWallhavenBackground } from "./wallhaven-background.js";
 import { initCharacterUpdater } from "./character-updater.js";
+import { initDynamicPrompt } from "./dynamic-prompt.js";
+import { initButtonCollapse } from "./button-collapse.js";
+import { initVariablesPanel, getVariablesPanelInstance, cleanupVariablesPanel } from "./variables-panel.js";
 
-// ============ 常量定义 ============
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
 const MODULE_NAME = "xiaobaix-memory";
 const extensionFolderPath = `scripts/extensions/third-party/${EXT_ID}`;
 
-// ============ 扩展设置初始化 ============
 extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     enabled: true,
     sandboxMode: false,
@@ -29,10 +30,11 @@ extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     preview: { enabled: false },
     wallhaven: { enabled: false },
     immersive: { enabled: false },
-    characterUpdater: { enabled: true, showNotifications: true, serverUrl: "https://db.littlewhitebox.qzz.io" }
+    characterUpdater: { enabled: true, showNotifications: true, serverUrl: "https://db.littlewhitebox.qzz.io" },
+    dynamicPrompt: { enabled: true },
+    variablesPanel: { enabled: false }
 };
 
-// ============ 全局变量 ============
 const settings = extension_settings[EXT_ID];
 let isXiaobaixEnabled = settings.enabled;
 let moduleInstances = { statsTracker: null };
@@ -42,7 +44,6 @@ let globalTimers = [];
 let moduleCleanupFunctions = new Map();
 let updateCheckPerformed = false;
 
-// ============ 全局接口导出 ============
 window.isXiaobaixEnabled = isXiaobaixEnabled;
 window.testLittleWhiteBoxUpdate = async () => {
     updateCheckPerformed = false;
@@ -55,7 +56,6 @@ window.testRemoveUpdateUI = () => {
     removeAllUpdateNotices();
 };
 
-// ============ 更新功能模块 ============
 async function checkLittleWhiteBoxUpdate() {
     try {
         const timestamp = Date.now();
@@ -209,7 +209,6 @@ async function performExtensionUpdateCheck() {
     } catch (error) {}
 }
 
-// ============ 资源管理模块 ============
 function registerModuleCleanup(moduleName, cleanupFunction) {
     moduleCleanupFunctions.set(moduleName, cleanupFunction);
 }
@@ -265,7 +264,6 @@ function cleanupAllResources() {
     });
 }
 
-// ============ 工具函数模块 ============
 async function waitForElement(selector, root = document, timeout = 10000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -286,7 +284,6 @@ function shouldRenderContent(content) {
     return htmlTags.some(tag => content.includes(tag));
 }
 
-// ============ iframe渲染模块 ============
 function createIframeApi() {
     return `
     const originalGetElementById = document.getElementById;
@@ -512,7 +509,6 @@ function renderHtmlInIframe(htmlContent, container, preElement) {
     }
 }
 
-// ============ 设置管理模块 ============
 function toggleSettingsControls(enabled) {
     const controls = [
         'xiaobaix_sandbox', 'xiaobaix_memory_enabled', 'xiaobaix_memory_inject',
@@ -520,7 +516,7 @@ function toggleSettingsControls(enabled) {
         'xiaobaix_script_assistant', 'scheduled_tasks_enabled', 'xiaobaix_template_enabled',
         'wallhaven_enabled', 'wallhaven_bg_mode', 'wallhaven_category',
         'wallhaven_purity', 'wallhaven_opacity',
-        'xiaobaix_immersive_enabled', 'character_updater_enabled'
+        'xiaobaix_immersive_enabled', 'character_updater_enabled', 'xiaobaix_dynamic_prompt_enabled'
     ];
 
     controls.forEach(id => {
@@ -549,6 +545,8 @@ function setDefaultSettings() {
         { module: 'tasks', control: 'scheduled_tasks_enabled', enabled: true },
         { module: 'recorded', control: 'xiaobaix_recorded_enabled', enabled: true },
         { module: 'characterUpdater', control: 'character_updater_enabled', enabled: true },
+        { module: 'dynamicPrompt', control: 'xiaobaix_dynamic_prompt_enabled', enabled: true },
+        { module: 'variablesPanel', control: 'xiaobaix_variables_panel_enabled', enabled: false },
         { module: 'preview', control: 'xiaobaix_preview_enabled', enabled: false },
         { module: 'scriptAssistant', control: 'xiaobaix_script_assistant', enabled: false }
     ];
@@ -582,7 +580,10 @@ function toggleAllFeatures(enabled) {
             { condition: extension_settings[EXT_ID].immersive?.enabled, init: initImmersiveMode },
             { condition: extension_settings[EXT_ID].templateEditor?.enabled, init: initTemplateEditor },
             { condition: extension_settings[EXT_ID].wallhaven?.enabled, init: initWallhavenBackground },
-            { condition: extension_settings[EXT_ID].characterUpdater?.enabled, init: initCharacterUpdater }
+            { condition: extension_settings[EXT_ID].characterUpdater?.enabled, init: initCharacterUpdater },
+            { condition: extension_settings[EXT_ID].dynamicPrompt?.enabled, init: initDynamicPrompt },
+            { condition: extension_settings[EXT_ID].variablesPanel?.enabled, init: initVariablesPanel },
+            { condition: true, init: initButtonCollapse } // 按钮收纳总是启用
         ];
 
         moduleInits.forEach(({ condition, init }) => {
@@ -607,10 +608,13 @@ function toggleAllFeatures(enabled) {
         cleanupAllResources();
 
         if (window.messagePreviewCleanup) try { window.messagePreviewCleanup(); } catch (e) { }
+        if (window.dynamicPromptCleanup) try { window.dynamicPromptCleanup(); } catch (e) { }
+        if (window.buttonCollapseCleanup) try { window.buttonCollapseCleanup(); } catch (e) { }
+        try { cleanupVariablesPanel(); } catch (e) { }
 
         Object.assign(settings, { sandboxMode: false, memoryEnabled: false, memoryInjectEnabled: false });
 
-        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive', 'templateEditor', 'wallhaven', 'characterUpdater'].forEach(module => {
+        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive', 'templateEditor', 'wallhaven', 'characterUpdater', 'dynamicPrompt', 'variablesPanel'].forEach(module => {
             if (!extension_settings[EXT_ID][module]) extension_settings[EXT_ID][module] = {};
             extension_settings[EXT_ID][module].enabled = false;
         });
@@ -618,7 +622,7 @@ function toggleAllFeatures(enabled) {
         ["xiaobaix_sandbox", "xiaobaix_memory_enabled", "xiaobaix_memory_inject",
             "xiaobaix_recorded_enabled", "xiaobaix_preview_enabled", "xiaobaix_script_assistant",
             "scheduled_tasks_enabled", "xiaobaix_template_enabled", "wallhaven_enabled",
-            "xiaobaix_immersive_enabled", "character_updater_enabled"].forEach(id => $(`#${id}`).prop("checked", false));
+            "xiaobaix_immersive_enabled", "character_updater_enabled", "xiaobaix_dynamic_prompt_enabled"].forEach(id => $(`#${id}`).prop("checked", false));
 
         toggleSettingsControls(false);
 
@@ -634,7 +638,6 @@ function toggleAllFeatures(enabled) {
     }
 }
 
-// ============ 消息处理模块 ============
 function processCodeBlocks(messageElement) {
     if (!settings.enabled || !isXiaobaixEnabled) return;
     try {
@@ -668,7 +671,6 @@ function processExistingMessages() {
     }
 }
 
-// ============ 设置界面模块 ============
 async function setupSettings() {
     try {
         const settingsContainer = await waitForElement("#extensions_settings");
@@ -721,7 +723,15 @@ async function setupSettings() {
 
         $("#xiaobaix_memory_depth").val(settings.memoryInjectDepth).on("change", function () {
             if (!isXiaobaixEnabled) return;
-            settings.memoryInjectDepth = parseInt($(this).val()) || 2;
+            const inputValue = $(this).val();
+            const newDepth = inputValue === '' || inputValue === null || inputValue === undefined ? 4 : parseInt(inputValue);
+            settings.memoryInjectDepth = newDepth;
+            if (statsTracker && statsTracker.settings) {
+                statsTracker.settings.memoryInjectDepth = newDepth;
+            }
+    
+            console.log(`[小白X] 深度设置已更改为: ${newDepth}`);
+    
             saveSettingsDebounced();
             if (settings.memoryEnabled && settings.memoryInjectEnabled) {
                 statsTracker.updateMemoryPrompt();
@@ -736,7 +746,9 @@ async function setupSettings() {
             { id: 'scheduled_tasks_enabled', key: 'tasks', init: initTasks },
             { id: 'xiaobaix_template_enabled', key: 'templateEditor', init: initTemplateEditor },
             { id: 'wallhaven_enabled', key: 'wallhaven', init: initWallhavenBackground },
-            { id: 'character_updater_enabled', key: 'characterUpdater', init: initCharacterUpdater }
+            { id: 'character_updater_enabled', key: 'characterUpdater', init: initCharacterUpdater },
+            { id: 'xiaobaix_dynamic_prompt_enabled', key: 'dynamicPrompt', init: initDynamicPrompt },
+            { id: 'xiaobaix_variables_panel_enabled', key: 'variablesPanel', init: initVariablesPanel }
         ];
 
         moduleConfigs.forEach(({ id, key, init }) => {
@@ -779,7 +791,6 @@ function setupMenuTabs() {
     }, 300);
 }
 
-// ============ 事件监听模块 ============
 function setupEventListeners() {
     if (!isXiaobaixEnabled) return;
 
@@ -870,7 +881,6 @@ function setupEventListeners() {
     addGlobalEventListener(window, 'message', handleIframeMessage);
 }
 
-// ============ 全局接口导出 ============
 window.processExistingMessages = processExistingMessages;
 window.renderHtmlInIframe = renderHtmlInIframe;
 window.registerModuleCleanup = registerModuleCleanup;
@@ -879,7 +889,6 @@ window.addGlobalTimer = addGlobalTimer;
 window.updateLittleWhiteBoxExtension = updateLittleWhiteBoxExtension;
 window.removeAllUpdateNotices = removeAllUpdateNotices;
 
-// ============ 主入口 ============
 jQuery(async () => {
     try {
         isXiaobaixEnabled = settings.enabled;
@@ -907,7 +916,10 @@ jQuery(async () => {
                 { condition: settings.immersive?.enabled, init: initImmersiveMode },
                 { condition: settings.templateEditor?.enabled, init: initTemplateEditor },
                 { condition: settings.wallhaven?.enabled, init: initWallhavenBackground },
-                { condition: settings.characterUpdater?.enabled, init: initCharacterUpdater }
+                { condition: settings.characterUpdater?.enabled, init: initCharacterUpdater },
+                { condition: settings.dynamicPrompt?.enabled, init: initDynamicPrompt },
+                { condition: settings.variablesPanel?.enabled, init: initVariablesPanel },
+                { condition: true, init: initButtonCollapse }
             ];
 
             moduleInits.forEach(({ condition, init }) => {

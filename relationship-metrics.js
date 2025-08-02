@@ -2762,9 +2762,6 @@ class StatsTracker {
             if (savedData.stageRanges) {
                 extension_settings[this.EXT_ID].stageRanges = structuredClone(savedData.stageRanges);
             }
-            if (userGlobalEnabled && userMemoryEnabled && savedData.settings) {
-                this.settings.memoryInjectDepth = savedData.settings.memoryInjectDepth ?? this.settings.memoryInjectDepth;
-            }
             let currentStats = await this.executeCommand('/getvar xiaobaix_stats');
             if (!currentStats || currentStats === "undefined") {
                 const newStats = this.dataManager.createEmptyStats();
@@ -2904,26 +2901,33 @@ class StatsTracker {
 
         return changes;
     }
-
-    async updateMemoryPrompt() {
-        if (!this.settings.memoryEnabled || !this.settings.memoryInjectEnabled || !this.isGloballyEnabled()) {
-            this.removeMemoryPrompt();
-            return;
-        }
-
-        let stats = await this.dataManager.loadStats();
-        if (!stats || typeof stats !== 'object') {
-            this.removeMemoryPrompt();
-            return;
-        }
-
-        const currentGuidelines = this.getCurrentCharacterGuidelines();
-        const formattedStats = this.relationshipManager.formatHistoryStatistics(stats, currentGuidelines);
-        setExtensionPrompt(this.MODULE_NAME, formattedStats.fullStatsWithGuidance, extension_prompt_types.IN_PROMPT, this.settings.memoryInjectDepth, false, 0);
-    }
+	async updateMemoryPrompt() {
+	    if (!this.settings.memoryEnabled || !this.settings.memoryInjectEnabled || !this.isGloballyEnabled()) {
+	        this.removeMemoryPrompt();
+	        return;
+	    }
+	
+	    let stats = await this.dataManager.loadStats();
+	    if (!stats || typeof stats !== 'object') {
+	        this.removeMemoryPrompt();
+	        return;
+	    }
+	
+	    const currentGuidelines = this.getCurrentCharacterGuidelines();
+	    const formattedStats = this.relationshipManager.formatHistoryStatistics(stats, currentGuidelines);
+	    
+	    setExtensionPrompt(
+	        this.MODULE_NAME, 
+	        formattedStats.fullStatsWithGuidance, 
+	        extension_prompt_types.IN_CHAT,
+	        this.settings.memoryInjectDepth, 
+	        false, 
+	        0
+	    );
+	}
 
     removeMemoryPrompt() {
-        setExtensionPrompt(this.MODULE_NAME, '', extension_prompt_types.IN_PROMPT);
+        setExtensionPrompt(this.MODULE_NAME, '', extension_prompt_types.IN_CHAT);
     }
 
     addMemoryButtonToMessage(messageId) {
@@ -2931,9 +2935,6 @@ class StatsTracker {
 
         const messageBlock = $(`#chat .mes[mesid="${messageId}"]`);
         if (!messageBlock.length || messageBlock.find('.memory-button').length) return;
-
-        const flexContainer = messageBlock.find('.flex-container.flex1.alignitemscenter');
-        if (!flexContainer.length) return;
 
         const buttonHtml = `<div class="mes_btn memory-button" title="查看历史数据统计\n\nPC端: Shift+点击调试分析\n移动端: 长按调试分析"><i class="fa-solid fa-brain"></i></div>`;
         const memoryButton = $(buttonHtml);
@@ -3019,7 +3020,16 @@ class StatsTracker {
             }, 50);
         });
 
-        flexContainer.append(memoryButton);
+        // 尝试注册到子容器，如果失败则添加到原位置
+        if (window.registerButtonToSubContainer && window.registerButtonToSubContainer(messageId, memoryButton[0])) {
+            // 成功注册到子容器
+        } else {
+            // 回退到原来的方式
+            const flexContainer = messageBlock.find('.flex-container.flex1.alignitemscenter');
+            if (flexContainer.length > 0) {
+                flexContainer.append(memoryButton);
+            }
+        }
     }
 
     async triggerDebugAnalysis(messageId) {

@@ -422,19 +422,25 @@ const addHistoryButtonsDebounced = debounce(() => {
     $('.mes_history_preview').remove();
     $('#chat .mes').each(function() {
         const mesId = parseInt($(this).attr('mesid'));
-        if (mesId <= 0) return;
+        const isUser = $(this).attr('is_user') === 'true';
+        
+        if (mesId <= 0 || isUser) return;
 
-        const flexContainer = $(this).find('.flex-container.flex1.alignitemscenter');
-        if (flexContainer.length > 0) {
-            const historyButton = $(`<div class="mes_btn mes_history_preview" title="查看历史API请求">
-                                        <i class="fa-regular fa-note-sticky"></i>
-                                     </div>`)
-                .on('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    showMessageHistoryPreview(mesId);
-                });
-            flexContainer.append(historyButton);
+        const historyButton = $(`<div class="mes_btn mes_history_preview" title="查看历史API请求">
+                                    <i class="fa-regular fa-note-sticky"></i>
+                                 </div>`)
+            .on('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                showMessageHistoryPreview(mesId);
+            });
+
+        if (window.registerButtonToSubContainer && window.registerButtonToSubContainer(mesId, historyButton[0])) {
+        } else {
+            const flexContainer = $(this).find('.flex-container.flex1.alignitemscenter');
+            if (flexContainer.length > 0) {
+                flexContainer.append(historyButton);
+            }
         }
     });
 }, CONSTANTS.DEBOUNCE_DELAY);

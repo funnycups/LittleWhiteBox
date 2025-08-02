@@ -1,16 +1,17 @@
 ---------------------
 关于小白X插件核心功能:
-1. 代码块渲染功能:
+1. 常规代码块渲染功能:
    - SillyTavern原生只支持显示静态代码块，无法执行JavaScript或渲染HTML
-   - 小白X将聊天中包含HTML标签(完整的<html>, <!DOCTYPE>或单独的<script>)的代码块自动转换为交互式iframe
+   - 小白X将聊天中包含HTML标签(完整的<html>, <!DOCTYPE>或单独的<script>)的代码块自动转换为交互式iframe，iframe高度为自适应
    - 小白X提供了特殊的桥接API: STscript()函数
      • 这是一个异步函数，接受斜杠命令字符串作为参数
      • 函数会将命令发送给SillyTavern执行，并返回执行结果
      • 使用await关键字等待命令执行完成并获取结果
      • 这使iframe内的JavaScript代码能与SillyTavern通信并执行各种SillyTavern的斜杠命令，不要尝试通过window.parent直接访问SillyTavern的函数，这样不会工作
+     • 自动解析STscript命令的管道输出（pipe值），无需JSON.parse
  
    正确用法示例:
-   \`\`\`html
+
    <!DOCTYPE html>
    <html>
    <head>
@@ -39,7 +40,7 @@
        </script>
    </body>
    </html>
-   \`\`\`
+
 2. 定时任务模块:
    - 拓展菜单中允许设置"在对话中自动执行"的斜杠命令
    - 可以设置触发频率(每几楼层)、触发条件(AI消息后/用户消息前/每轮对话)
@@ -47,31 +48,11 @@
    - 注册了/xbqte命令手动触发任务: \`/xbqte 任务名称\`
    - 注册了/xbset命令调整任务间隔: \`/xbset 任务名称 间隔数字\`
    - 任务命令可以使用所有标准STscript斜杠命令
-3. 与SillyTavern正则表达式功能的配合:
-   - SillyTavern提供了原生的正则设置功能，用于自动转换AI的消息输出
-   - 当设计包含交互界面的角色卡时，你应该教导用户如何使用这一功能
-   - 正确的工作流是:
-     a) 在AI输出中包含特定标记(如\`[状态面板]\`)
-     b) 在角色卡设置的格式化功能中添加正则表达式来替换这些标记为HTML代码
-     c) 勾选小白X的代码块渲染功能显示交互式界面
-   
-   正则表达式示例:
-   - 格式: \`/\\[状态面板\\]/g\` (匹配文本)
-   - 替换为: \`\`\`html
-<div id="status">
-  <h3>角色状态</h3>
-  <p>HP: <span id="hp">100</span>/100</p>
-  <script>
-    // 脚本代码
-  </script>
-</div>
-\`\`\`
-   这样设置后，每当AI输出包含[状态面板]时，SillyTavern会自动将其替换为HTML代码块，
-   然后小白X会将其渲染为可交互的界面。
-4.  沉浸式模板功能 (Template Editor):
+
+3.  沉浸式模板功能 (Template Editor):
 
     核心概念：沉浸式界面
-    -   工作原理：当AI开始回复时，插件会立即创建你的HTML模板作为该回合的聊天消息。AI流式输出的原始文本对用户不可见；插件会拦截这些文本，提取占位符数据，并用这些数据动态渲染你的HTML界面。
+    -   工作原理：与常规代码块渲染功能不同，使用沉浸式模板，在模板设置页放入html后，当AI开始回复时，插件会立即创建你的HTML模板作为该回合的聊天消息。AI流式输出的原始文本对用户不可见；插件会拦截这些文本，提取占位符数据，并用这些数据动态渲染你的HTML界面。
 
     生命周期：跨回合的状态管理
     -   iframe的重建：每次AI回复，都会用你的模板创建一个全新的、独立的iframe。iframe本身是无状态的，不继承上一层楼的任何JavaScript数据或DOM状态。
@@ -156,190 +137,176 @@
         const inventory = JSON.parse(dataStr);
         ```
     -   实践：逻辑分离。让UI JS负责状态显示和即时更新；SillyTavern变量负责持久化存储；AI负责故事叙述和高级逻辑响应。
-    // 复杂嵌套数据示例
-    {
-    "character": {
-        "name": "Alice",
-        "stats": {"hp": 100, "mp": 50}
-    },
-    "inventory": ["sword", "potion"],
-    "game_time": "下午"
-    }
-    // 在模板中的使用
-    vars.character.name        // "Alice"
-    vars.character.stats.hp    // 100
-    vars.inventory[0]          // "sword"
-    vars.game_time            // "下午"
-    案例：
+// 复杂嵌套数据示例
+{
+  "character": {
+    "name": "Alice",
+    "stats": {"hp": 100, "mp": 50}
+  },
+  "inventory": ["sword", "potion"],
+  "game_time": "下午"
+}
+// 在模板中的使用
+vars.character.name        // "Alice"
+vars.character.stats.hp    // 100
+vars.inventory[0]          // "sword"
+vars.game_time            // "下午"
+
+## 当你收到要生成一个沉浸式模板的写卡任务时，你必须严格遵循并使用下面的‘黄金模板’作为起点，然后根据用户的具体需求修改其中的HTML布局和JavaScript逻辑：
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>动态角色面板</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: #f0f2f5;
-            color: #333;
-            margin: 0;
-            padding: 15px;
-            max-width: 600px;
-            max-height: 480px;
-            box-sizing: border-box;
-        }
-
-        .panel {
-            background: #fff;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            margin-bottom: 20px;
-            overflow: hidden;
-        }
-
-        .panel-header {
-            background: #fafafa;
-            border-bottom: 1px solid #e8e8e8;
-            padding: 12px 20px;
-            font-weight: 600;
-            font-size: 16px;
-        }
-
-        .panel-content {
-            padding: 20px;
-        }
-  
-        /* 状态显示样式 */
-        .status-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-        .status-item {
-            display: flex;
-            flex-direction: column;
-        }
-        .status-label {
-            font-size: 14px;
-            color: #666;
-            margin-bottom: 5px;
-        }
-        .status-value {
-            font-size: 18px;
-            font-weight: bold;
-        }
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: #e9ecef;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 5px;
-        }
-        .progress-bar-inner {
-            height: 100%;
-            background: linear-gradient(90deg, #1890ff, #40a9ff);
-            border-radius: 4px;
-            transition: width 0.5s ease-in-out;
-        }
-
-        /* 故事日志样式 */
-        #story-log-content {
-            min-height: 50px;
-            background: #f9f9f9;
-            border: 1px solid #eee;
-            border-radius: 6px;
-            padding: 10px;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-  
-        /* 按钮样式 */
-        .action-button {
-            display: block;
-            width: 100%;
-            padding: 10px;
-            margin-top: 15px;
-            border: none;
-            background: #1890ff;
-            color: white;
-            border-radius: 6px;
-            font-size: 15px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .action-button:hover {
-            background: #40a9ff;
-        }
-        .action-button:disabled {
-            background: #b0b0b0;
-            cursor: not-allowed;
-        }
-
-    </style>
+    <title>沉浸式模板</title>
+    <style> /* CSS样式 */ </style>
 </head>
 <body>
-
-    <!-- 角色状态面板 -->
-    <div class="panel">
-        <div class="panel-header">角色状态</div>
-        <div class="panel-content">
-            <div class="status-grid">
-                <div class="status-item">
-                    <span class="status-label">生命值 (HP)</span>
-                    <span id="hp-value" class="status-value">--/--</span>
-                    <div class="progress-bar"><div id="hp-bar" class="progress-bar-inner" style="width: 100%;"></div></div>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">心情</span>
-                    <span id="mood-value" class="status-value">未知</span>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 故事日志面板 -->
-    <div class="panel">
-        <div class="panel-header">
-            <span>剧情日志</span>
-            <span id="game-time-display" style="float: right; font-size: 14px; color: #888;"></span>
-        </div>
-        <div class="panel-content">
-            <div id="story-log-content">等待故事发生...</div>
-        </div>
-    </div>
-
-    <script>
-document.addEventListener('DOMContentLoaded', function() {
-   window.updateTemplateVariables = function(vars) {
-       // 更新血量
-       let profile = { hp: 0, max_hp: 100, mood: '平静' };
-       if (vars.profile) {
-           try {
-               profile = { ...profile, ...(typeof vars.profile === 'string' ? JSON.parse(vars.profile) : vars.profile) };
-           } catch (e) {}
-       }
-       const hpPercentage = (profile.hp / profile.max_hp) * 100;
-       document.getElementById('hp-value').textContent = `${profile.hp} / ${profile.max_hp}`;
-       document.getElementById('hp-bar').style.width = `${hpPercentage}%`;
-       document.getElementById('mood-value').textContent = profile.mood;
-
-       // 更新日志
-       const logElement = document.getElementById('story-log-content');
-       logElement.textContent = vars.story_log?.trim() ? vars.story_log : '等待故事发生...';
-
-       // 更新时间
-       document.getElementById('game-time-display').textContent = 
-           vars.game_time?.trim() ? `游戏时间: ${vars.game_time}` : '游戏时间: 未知';
-   };
-
-   // 初始化
-   window.updateTemplateVariables({});
-});
-    </script>
+    <!-- HTML布局 -->
 </body>
+<script>
+    // 关键：所有代码都必须在这个事件监听器里！
+    document.addEventListener('DOMContentLoaded', function() {
+        
+        // 1. 缓存所有会用到的UI元素
+        const UIElements = {
+            // 示例：element1: document.getElementById('element1'),
+        };
+
+        // 2. 本地状态缓存（仅用于单次iframe生命周期内的临时状态）
+        let localState = {
+            // 用于存储：加载状态、防重复计算标志、临时计算结果等
+            // 注意：这里的数据在iframe重建时会丢失，这是正常的
+            isLoading: false,
+            turnUpdateApplied: false, // 防止流式输出时重复计算的标志
+        };
+
+        // 3. 核心函数：处理AI的动态数据
+        window.updateTemplateVariables = function(vars) {
+            if (!vars) return;
+            
+            // ==================== 处理回合性数据 ====================
+            // 回合性数据：AI每回合都会提供的数据，如场景描述、故事日志等
+            // 这些数据直接从vars中读取并渲染到UI，无需持久化到ST变量
+            
+            // 示例：处理场景描述
+            // if (vars.scene?.description) {
+            //     UIElements.sceneText.innerHTML = vars.scene.description.replace(/\n/g, '<br>');
+            // }
+            
+            // ==================== 处理持久性数据 ====================
+            // 持久性数据：只在特定时候提供，需要跨回合保持的数据
+            // 这些数据需要存储到ST变量中，供initializeOrSync使用
+            
+            // 示例：处理任务目标（只在开始新任务时提供）
+            // if (vars.game?.objective) {
+            //     localState.objective = vars.game.objective;
+            //     STscript(`/setvar key=game_objective "${vars.game.objective}"`);
+            //     updateUI(); // 立即更新UI
+            // }
+            
+            // ==================== 处理增量数据 ====================
+            // 对于需要累加/累减的数据，使用turnUpdateApplied标志防止重复计算
+            
+            // 示例：处理金币变化
+            // if (vars.player?.gold_change !== undefined && !localState.turnUpdateApplied) {
+            //     const change = parseInt(vars.player.gold_change);
+            //     localState.currentGold += change;
+            //     STscript(`/setvar key=player_gold ${localState.currentGold}`);
+            //     updateUI();
+            //     localState.turnUpdateApplied = true; // 防止重复计算
+            // }
+            
+            // ==================== 处理绝对值数据 ====================
+            // 如果AI直接提供绝对值，直接使用（推荐用于简单场景）
+            
+            // 示例：处理生命值
+            // if (vars.player?.hp !== undefined) {
+            //     localState.currentHP = parseInt(vars.player.hp);
+            //     STscript(`/setvar key=player_hp ${localState.currentHP}`);
+            //     updateUI();
+            // }
+        };
+
+        // 4. UI更新辅助函数
+        function updateUI() {
+            // 将localState中的数据渲染到UI元素上
+            // 这个函数应该是幂等的，多次调用结果相同
+            
+            // 示例：
+            // UIElements.goldDisplay.textContent = localState.currentGold;
+            // UIElements.hpBar.style.width = (localState.currentHP / localState.maxHP * 100) + '%';
+        }
+
+        // 5. 用户操作处理函数
+        async function onUserClick() {
+            // 在用户操作开始时，重置回合更新标志
+            localState.turnUpdateApplied = false;
+            
+            // 调用STscript与SillyTavern通信
+            // 示例：
+            // await STscript('/send 我要购买这个物品');
+            // await STscript('/trigger');
+        }
+
+        // 6. 初始化和状态同步函数
+        async function initializeOrSync() {
+            // 检查游戏是否已初始化
+            const isInitialized = await STscript('/getvar game_initialized');
+            if (!isInitialized) {
+                // 首次运行：初始化默认值
+                await STscript('/setvar key=game_initialized true');
+                // await STscript('/setvar key=player_gold 100');
+                // await STscript('/setvar key=player_hp 100');
+                // await STscript('/setvar key=game_objective "暂无任务"');
+            }
+
+            // 每次iframe加载时：从ST变量同步持久化状态
+            // const gold = parseInt(await STscript('/getvar player_gold')) || 0;
+            // const hp = parseInt(await STscript('/getvar player_hp')) || 100;
+            // const objective = await STscript('/getvar game_objective') || '暂无任务';
+            
+            // 更新localState
+            // localState.currentGold = gold;
+            // localState.currentHP = hp;
+            // localState.objective = objective;
+
+            // 立即更新UI显示
+            updateUI();
+        }
+
+        // 7. 绑定事件监听器
+        // UIElements.buyButton.addEventListener('click', onUserClick);
+
+        // 8. 可选：监听SillyTavern的输入事件，自动重置回合标志
+        // 这确保任何触发AI回复的操作都会重置turnUpdateApplied
+        try {
+            if (window.parent) {
+                const inputElement = window.parent.document.getElementById('send_textarea');
+                const sendButton = window.parent.document.getElementById('send_button');
+                
+                if (inputElement) {
+                    inputElement.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            localState.turnUpdateApplied = false;
+                        }
+                    });
+                }
+                
+                if (sendButton) {
+                    sendButton.addEventListener('click', function() {
+                        localState.turnUpdateApplied = false;
+                    });
+                }
+            }
+        } catch (error) {
+            // 如果无法访问父窗口，忽略错误
+        }
+
+        // 9. 启动初始化
+        initializeOrSync();
+    });
+</script>
 </html>
+
 5.  以下是SillyTavern的官方STscript脚本文档，可结合小白X功能创作深度定制的SillyTavern角色卡。
 ----------------------
 # STscript 语言参考

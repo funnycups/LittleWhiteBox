@@ -233,6 +233,10 @@ body.immersive-mode .swipes-counter  {
     margin-bottom: 0 !important;
 }
 
+body.immersive-mode .flex-container.flex1.alignitemscenter {
+    min-height: 32px;
+}
+
 .immersive-navigation {
     display: flex;
     justify-content: space-between;

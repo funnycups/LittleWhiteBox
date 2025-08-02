@@ -1977,6 +1977,15 @@ function updateSettingsControls() {
     $('#wallhaven_purity').val(settings.purity);
     $('#wallhaven_opacity').val(settings.opacity);
     $('#wallhaven_opacity_value').text(Math.round(settings.opacity * 100) + '%');
+
+    // 控制后续设置的显示/隐藏
+    const settingsContainer = $('#wallhaven_settings_container');
+    if (settings.enabled) {
+        settingsContainer.show();
+    } else {
+        settingsContainer.hide();
+    }
+
     renderCustomTagsList();
 }
 
@@ -1988,6 +1997,14 @@ function initSettingsEvents() {
         const wasEnabled = settings.enabled;
         settings.enabled = $(this).prop('checked');
         saveSettingsDebounced();
+
+        // 控制后续设置的显示/隐藏
+        const settingsContainer = $('#wallhaven_settings_container');
+        if (settings.enabled) {
+            settingsContainer.show();
+        } else {
+            settingsContainer.hide();
+        }
 
         if (settings.enabled && !wasEnabled) {
             bindMessageHandlers();
