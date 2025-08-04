@@ -5,7 +5,7 @@ import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
 const CONFIG = {
     extensionName: "variables-panel", extensionFolderPath: "scripts/extensions/third-party/LittleWhiteBox",
-    defaultSettings: { enabled: true }, defaultFolderName: 'LittleWhiteBox',
+    defaultSettings: { enabled: false }, defaultFolderName: 'LittleWhiteBox',
     autoClassifyVars: ['chat_summary', 'user_psychology_guide', 'ai_style_guide', 'xiaobaix_stats'],
     watchInterval: 1500, touchTimeout: 4000, longPressDelay: 700, folderLongPressDelay: 1000
 };
@@ -897,7 +897,7 @@ handleInlineSave(e) {
         if (msg.find('.mes_variables_panel').length) return;
 
         const btn = document.createElement('div');
-        btn.title = 'Variables Panel';
+        btn.title = '变量面板';
         btn.className = 'mes_btn mes_variables_panel';
         btn.innerHTML = '<i class="fa-solid fa-database"></i>';
 
