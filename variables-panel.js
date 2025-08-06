@@ -232,7 +232,7 @@ const EMBEDDED_CSS = `
 `;
 
 const EMBEDDED_HTML = `
-<div id="vm-container" class="vm-container">
+<div id="vm-container" class="vm-container" style="display: none;">
     <div class="vm-header">
         <div class="vm-title">
             变量面板
@@ -390,7 +390,7 @@ class VariablesPanel {
         return extension_settings.LittleWhiteBox.variablesPanel;
     }
 
-    enable() { this.createContainer(); this.bindEvents(); this.autoClassifyAllVariables(); this.loadVariables(); this.addMessageButtons(); if (this.state.container?.is(':visible')) this.open(); }
+    enable() { this.createContainer(); this.bindEvents(); this.autoClassifyAllVariables(); this.loadVariables(); this.addMessageButtons(); }
     disable() { this.cleanup(); }
     cleanup() { this.stopWatcher(); this.unbindEvents(); this.unbindControlEvents(); this.removeContainer(); this.removeMessageButtons(); this.resetState(); }
     resetState() { this.clearAllTimers(); Object.assign(this.state, { isOpen: false, formState: {}, timers: { watcher: null, longPress: null, touch: new Map() }, currentInlineForm: null }); this.variableSnapshot = null; this.savingInProgress = false; }
