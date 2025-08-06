@@ -2357,8 +2357,8 @@ class StatsUIManager {
             html += `
             <div class="behavior-stage-form" data-stage="${stage}" ${index === 0 ? '' : 'style="display:none;"'}>
                 <h3>
-                    <span class="stage-name-display">${stage}</span> 
-                    阶段行为设定 
+                    <span class="stage-name-display">${stage}</span>
+                    阶段行为设定
                     <span class="stage-range editable-range" data-stage="${stage}" title="点击编辑数值范围">【${range}】</span>
                 </h3>
                 <div class="behavior-field">
@@ -2906,22 +2906,22 @@ class StatsTracker {
 	        this.removeMemoryPrompt();
 	        return;
 	    }
-	
+
 	    let stats = await this.dataManager.loadStats();
 	    if (!stats || typeof stats !== 'object') {
 	        this.removeMemoryPrompt();
 	        return;
 	    }
-	
+
 	    const currentGuidelines = this.getCurrentCharacterGuidelines();
 	    const formattedStats = this.relationshipManager.formatHistoryStatistics(stats, currentGuidelines);
-	    
+
 	    setExtensionPrompt(
-	        this.MODULE_NAME, 
-	        formattedStats.fullStatsWithGuidance, 
+	        this.MODULE_NAME,
+	        formattedStats.fullStatsWithGuidance,
 	        extension_prompt_types.IN_CHAT,
-	        this.settings.memoryInjectDepth, 
-	        false, 
+	        this.settings.memoryInjectDepth,
+	        false,
 	        0
 	    );
 	}
@@ -3203,13 +3203,12 @@ class StatsTracker {
 
         container.empty();
 
-        this.settings.userAliases.forEach(alias => {
-            const aliasItem = $(`
-                <div class="user-alias-item">
-                    <span class="alias-text">${alias}</span>
-                    <button class="remove-alias" data-alias="${alias}">×</button>
-                </div>
-            `);
+        this.settings.userAliases.forEach((alias, index) => {
+            const aliasItem = $('<div class="user-alias-item">');
+            const aliasText = $('<span class="alias-text">').text(alias);
+            const removeButton = $('<button class="remove-alias">').text('×').data('alias-index', index);
+
+            aliasItem.append(aliasText, removeButton);
             container.append(aliasItem);
         });
     }
@@ -3480,9 +3479,8 @@ class StatsTracker {
         });
 
         $(document).off('click', '.remove-alias').on('click', '.remove-alias', (e) => {
-            const alias = $(e.currentTarget).data('alias');
-            const index = this.settings.userAliases.indexOf(alias);
-            if (index > -1) {
+            const index = $(e.currentTarget).data('alias-index');
+            if (index >= 0 && index < this.settings.userAliases.length) {
                 this.settings.userAliases.splice(index, 1);
                 this.updateUserAliasesList();
 
@@ -4117,8 +4115,8 @@ class StatsTracker {
         const newFormHtml = `
     <div class="behavior-stage-form" data-stage="${stageName}" style="display:none;">
         <h3>
-            <span class="stage-name-display">${stageName}</span> 
-            阶段行为设定 
+            <span class="stage-name-display">${stageName}</span>
+            阶段行为设定
             <span class="stage-range editable-range" data-stage="${stageName}" title="点击编辑数值范围">【${range}】</span>
         </h3>
         <div class="behavior-field">
