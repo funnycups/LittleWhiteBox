@@ -11,6 +11,7 @@ import { initCharacterUpdater } from "./character-updater.js";
 import { initDynamicPrompt } from "./dynamic-prompt.js";
 import { initButtonCollapse } from "./button-collapse.js";
 import { initVariablesPanel, getVariablesPanelInstance, cleanupVariablesPanel } from "./variables-panel.js";
+import { initStreamingGeneration } from "./streaming-generation.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
@@ -583,6 +584,7 @@ function toggleAllFeatures(enabled) {
             { condition: extension_settings[EXT_ID].characterUpdater?.enabled, init: initCharacterUpdater },
             { condition: extension_settings[EXT_ID].dynamicPrompt?.enabled, init: initDynamicPrompt },
             { condition: extension_settings[EXT_ID].variablesPanel?.enabled, init: initVariablesPanel },
+            { condition: true, init: initStreamingGeneration },
             { condition: true, init: initButtonCollapse } 
         ];
 
@@ -919,6 +921,7 @@ jQuery(async () => {
                 { condition: settings.characterUpdater?.enabled, init: initCharacterUpdater },
                 { condition: settings.dynamicPrompt?.enabled, init: initDynamicPrompt },
                 { condition: settings.variablesPanel?.enabled, init: initVariablesPanel },
+                { condition: true, init: initStreamingGeneration },
                 { condition: true, init: initButtonCollapse }
             ];
 
