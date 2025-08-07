@@ -6,7 +6,7 @@ import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 const CONFIG = {
     extensionName: "variables-panel", extensionFolderPath: "scripts/extensions/third-party/LittleWhiteBox",
     defaultSettings: { enabled: false }, defaultFolderName: 'LittleWhiteBox',
-    autoClassifyVars: ['chat_summary', 'user_psychology_guide', 'ai_style_guide', 'xiaobaix_stats'],
+    autoClassifyVars: ['prompt1', 'prompt2', 'prompt3', 'prompt4', 'xiaobaix_stats'],
     watchInterval: 1500, touchTimeout: 4000, longPressDelay: 700, folderLongPressDelay: 1000
 };
 
@@ -939,3 +939,4 @@ export async function initVariablesPanel() {
 
 export function getVariablesPanelInstance() { return variablesPanelInstance; }
 export function cleanupVariablesPanel() { if (variablesPanelInstance) { variablesPanelInstance.cleanup(); variablesPanelInstance = null; } }
+
