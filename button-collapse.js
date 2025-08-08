@@ -26,17 +26,16 @@ const createCollapseButton = () => {
         align-items: center;
         justify-content: center;
         gap: inherit;
-        background: radial-gradient(ellipse at top, rgba(40,40,45,0.9) 0%, rgba(0,0,0,0.95) 70%);
+        background: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, 0)), var(--SmartThemeBlurTintColor);
         border-radius: 50%;
         position: relative;
         transition: all 0.3s ease;
         box-shadow: 
-            inset 0 2px 4px rgba(255,255,255,0.1),
-            0 4px 12px rgba(0,100,255,0.2),
-            0 0 20px rgba(0,150,255,0.1);
+            inset 0 0 15px rgba(0, 0, 0, 0.6),
+            0 2px 8px rgba(0,0,0,0.2);
         -webkit-tap-highlight-color: transparent;
         touch-action: manipulation;
-    `;
+    `;    
     
     btn.innerHTML = `
         <div style="position: relative; display: flex; align-items: center; justify-content: center; pointer-events: none;">
@@ -89,8 +88,8 @@ const createCollapseButton = () => {
             left: 38px;
             top: 50%;
             transform: translateY(-50%);
-            background: linear-gradient(135deg, rgba(20,20,25,0.95) 0%, rgba(0,0,0,0.98) 100%);
-            border: 1px solid rgba(100,150,255,0.2);
+            background: var(--SmartThemeBlurTintColor);
+            border: 1px solid var(--SmartThemeBorderColor);
             border-radius: 8px;
             padding: 4px;
             gap: 8px;
