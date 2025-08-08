@@ -256,7 +256,7 @@ const EMBEDDED_HTML = `
                     <button class="vm-btn" id="export-character-variables" title="导出变量">
                         <i class="fa-solid fa-download"></i>
                     </button>
-                    <button class="vm-btn" id="add-character-variable" title="添加变量">
+                    <button class="vm-btn" id="add-character-variable" title="添加变量，长按为添加文件夹">
                         <i class="fa-solid fa-plus"></i>
                     </button>
                     <button class="vm-btn" id="collapse-character-variables" title="展开/折叠所有">
@@ -306,7 +306,7 @@ const EMBEDDED_HTML = `
                     <button class="vm-btn" id="export-global-variables" title="导出变量">
                         <i class="fa-solid fa-download"></i>
                     </button>
-                    <button class="vm-btn" id="add-global-variable" title="添加变量">
+                    <button class="vm-btn" id="add-global-variable" title="添加变量，长按为添加文件夹">
                         <i class="fa-solid fa-plus"></i>
                     </button>
                     <button class="vm-btn" id="collapse-global-variables" title="展开/折叠所有">
@@ -939,4 +939,5 @@ export async function initVariablesPanel() {
 
 export function getVariablesPanelInstance() { return variablesPanelInstance; }
 export function cleanupVariablesPanel() { if (variablesPanelInstance) { variablesPanelInstance.cleanup(); variablesPanelInstance = null; } }
+
 
