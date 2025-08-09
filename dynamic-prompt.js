@@ -269,12 +269,13 @@ let dynamicPromptState = {
         history: [],
         isStreaming: false,
         streamTimerId: null,
+        streamSessionId: null,
     },
 };
 let analysisQueue = [];
 let isProcessingQueue = false;
 let currentPresetName = 'default';
-
+let fourthWallLoadedChatId = null;
 
 // C. 核心UI渲染与管理
 // =============================================================================
@@ -2488,19 +2489,15 @@ function showAnalysisError(message) {
 // E.1. 页面渲染与事件绑定
 // -----------------------------------------------------------------------------
 async function displayFourthWallPage() {
+    await ensureFourthWallStateLoaded();
     const panel = document.getElementById('fourth-wall-panel');
     if (!panel) return;
-
     document.getElementById('analysis-placeholder').style.display = 'none';
     document.getElementById('analysis-results').style.display = 'none';
     document.getElementById('settings-panel').style.display = 'none';
     panel.style.display = 'flex';
-
-    await loadFourthWallState();
     const { mode, maxChatLayers, maxMetaTurns } = dynamicPromptState.fourthWall;
-
     panel.innerHTML = `
-        <!-- 设置区 -->
         <div style="padding: 10px 16px; border-bottom: 1px solid var(--SmartThemeBorderColor); flex-shrink: 0;">
             <div id="fw-settings-header" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                 <h4 style="margin: 0; font-size: 14px; display: flex; align-items: center; gap: 8px;">
@@ -2527,36 +2524,36 @@ async function displayFourthWallPage() {
                 </div>
             </div>
         </div>
-
-        <!-- 消息区 -->
         <div id="fw-messages" style="flex-grow: 1; overflow-y: auto; padding: 10px;">
             ${renderFourthWallMessages()}
         </div>
-
-        <!-- 输入区 (样式优化后) -->
         <div style="padding: 10px; border-top: 1px solid var(--SmartThemeBorderColor); flex-shrink: 0; background: var(--SmartThemeBodyBgColor);">
             <div style="display: flex; gap: 10px; align-items: flex-end;">
                 <textarea id="fw-input" rows="1"
                     style="flex-grow: 1; resize: none; padding: 8px 12px; border-radius: 18px; border: 1px solid var(--SmartThemeBorderColor); background: var(--SmartThemeFormElementBgColor); color: var(--SmartThemeBodyColor); max-height: 120px; line-height: 1.5;"
-                    placeholder="和'TA'聊点什么...例如你好."></textarea>
-                <button id="fw-send-btn" class="menu_button" style="padding: 8px 15px; border-radius: 18px; white-space: nowrap;">发送</button>
+                    placeholder="和'TA'聊点什么...例如嘿,你好."></textarea>
+                <button id="fw-regenerate-btn" class="menu_button"
+                    title="删除上一条AI回复并基于上一条用户输入重新生成"
+                    style="padding: 8px 12px; height: 35px; border-radius: 18px; white-space: nowrap; background: rgba(100,116,139,0.15); border: 1px solid rgba(100,116,139,0.3); display: flex; align-items: center; gap: 4px;">
+                    <i class="fa-solid fa-arrows-rotate" style="font-size: 10px;"></i>
+                    <span style="font-size: 13px;">重生</span>
+                </button>
+                <button id="fw-send-btn" class="menu_button" 
+                    style="padding: 8px 15px; height: 35px; border-radius: 18px; white-space: nowrap;">发送</button>
             </div>
-        </div>
+        </div>        
     `;
-
     bindFourthWallEvents();
     scrollToBottom('fw-messages');
 }
-
 function renderFourthWallMessages() {
     const { history, isStreaming } = dynamicPromptState.fourthWall;
-    let html = history.map(msg => {
+    let html = (history || []).map(msg => {
         const isUser = msg.role === 'user';
         const align = isUser ? 'flex-end' : 'flex-start';
         const bgColor = isUser ? 'var(--ThemeColor)' : 'var(--GrayPillColor)';
         const color = isUser ? 'white' : 'var(--MainColor)';
-        const content = msg.content.replace(/\n/g, '<br>');
-
+        const content = (msg.content || '').replace(/\n/g, '<br>');
         return `
             <div style="display: flex; justify-content: ${align}; margin-bottom: 10px;">
                 <div style="background: ${bgColor}; color: ${color}; padding: 8px 12px; border-radius: 12px; max-width: 80%; word-break: break-word;">
@@ -2565,30 +2562,25 @@ function renderFourthWallMessages() {
             </div>
         `;
     }).join('');
-
     if (isStreaming) {
         html += `
             <div id="fw-streaming-bubble" style="display: flex; justify-content: flex-start; margin-bottom: 10px;">
                 <div style="background: var(--GrayPillColor); color: var(--MainColor); padding: 8px 12px; border-radius: 12px; max-width: 80%;">
-                    等待回应..
+                    (等待回应)
                 </div>
             </div>
         `;
     }
-
     return html;
 }
-
 function bindFourthWallEvents() {
     const input = document.getElementById('fw-input');
-  
     if (input) {
         input.addEventListener('input', () => {
             input.style.height = 'auto';
             input.style.height = `${input.scrollHeight}px`;
         });
     }
-
     $('#fw-settings-header').off('click').on('click', () => {
         const content = $('#fw-settings-content');
         const icon = $('#fw-settings-toggle-icon');
@@ -2596,14 +2588,12 @@ function bindFourthWallEvents() {
         content.slideToggle(200);
         icon.css('transform', isVisible ? 'rotate(0deg)' : 'rotate(-180deg)');
     });
-
     $('#fw-mode-select, #fw-layers-input, #fw-turns-input').off('change').on('change', () => {
         dynamicPromptState.fourthWall.mode = $('#fw-mode-select').val();
         dynamicPromptState.fourthWall.maxChatLayers = parseInt($('#fw-layers-input').val()) || 9999;
         dynamicPromptState.fourthWall.maxMetaTurns = parseInt($('#fw-turns-input').val()) || 9999;
         saveFourthWallSettings();
     });
-
     $('#fw-reset-btn').off('click').on('click', async () => {
         const result = await callGenericPopup('确定要清空与TA的次元壁对话吗？', POPUP_TYPE.CONFIRM);
         if (result === POPUP_RESULT.AFFIRMATIVE) {
@@ -2612,57 +2602,68 @@ function bindFourthWallEvents() {
             $('#fw-messages').html(renderFourthWallMessages());
         }
     });
-
-    $('#fw-send-btn').off('click').on('click', onSendFourthWallMessage);
+    $('#fw-regenerate-btn').off('click').on('click', onRegenerateFourthWall);
     $('#fw-input').off('keydown').on('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             onSendFourthWallMessage();
         }
     });
+    updateFourthWallSendButton();
 }
-
-// E.2. 状态读写 (STscript变量)
-// -----------------------------------------------------------------------------
 async function getVarJson(varName, defaultVal = null) {
+    let raw;
     try {
-        const raw = await executeSlashCommand(`/pass {{getvar::${varName}}}`);
-        if (raw === `{{getvar::${varName}}}` || !raw) {
-            return defaultVal;
+        raw = await executeSlashCommand(`/pass {{getvar::${varName}}}`);
+        if (!raw || raw === `{{getvar::${varName}}}`) return defaultVal;
+        let s = String(raw).trim();
+        const firstBrace = Math.min(...[s.indexOf('['), s.indexOf('{')].filter(i => i >= 0));
+        if (firstBrace > 0) s = s.slice(firstBrace);
+        const lastArr = s.lastIndexOf(']');
+        const lastObj = s.lastIndexOf('}');
+        const end = Math.max(lastArr, lastObj);
+        if (end >= 0) s = s.slice(0, end + 1);
+        let parsed = JSON.parse(s);
+        if (typeof parsed === 'string') {
+            const inner = parsed.trim();
+            if (inner.startsWith('{') || inner.startsWith('[')) {
+                parsed = JSON.parse(inner);
+            }
         }
-        return JSON.parse(raw);
-    } catch (error) {
-        console.warn(`[${EXT_ID}] Failed to parse JSON from var: ${varName}`, error);
+        return parsed;
+    } catch (err) {
         return defaultVal;
     }
 }
-
 async function setVarJson(varName, obj) {
     const raw = JSON.stringify(obj);
     const escaped = raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     await executeSlashCommand(`/setvar key=${varName} "${escaped}"`);
 }
-
+async function ensureFourthWallStateLoaded() {
+    const context = getContext();
+    const chatId = context.chatId || 'default';
+    if (fourthWallLoadedChatId !== chatId || !Array.isArray(dynamicPromptState.fourthWall?.history) || dynamicPromptState.fourthWall.history.length === 0) {
+        await loadFourthWallState();
+        fourthWallLoadedChatId = chatId;
+    }
+}
 async function loadFourthWallState() {
     const context = getContext();
     const chatId = context.chatId || 'default';
     const settingsVarName = `meta_wall_settings_${chatId}`;
     const historyVarName = `meta_wall_history_${chatId}`;
-
-    const settings = await getVarJson(settingsVarName, {
-        mode: '吐槽',
-        maxChatLayers: 9999,
-        maxMetaTurns: 9999,
-    });
-    const history = await getVarJson(historyVarName, []);
-
-    dynamicPromptState.fourthWall = {
-        ...dynamicPromptState.fourthWall,
-        ...settings,
-        history,
-    };
+    const loadedSettings = await getVarJson(settingsVarName, null);
+    const loadedHistory = await getVarJson(historyVarName, null);
+    if (loadedSettings && typeof loadedSettings === 'object') {
+        dynamicPromptState.fourthWall = { ...dynamicPromptState.fourthWall, ...loadedSettings };
+    }
+    if (Array.isArray(loadedHistory)) {
+        dynamicPromptState.fourthWall.history = loadedHistory;
+    } else {
+        dynamicPromptState.fourthWall.history = dynamicPromptState.fourthWall.history || [];
+    }
 }
-
 async function saveFourthWallSettings() {
     const context = getContext();
     const chatId = context.chatId || 'default';
@@ -2670,160 +2671,235 @@ async function saveFourthWallSettings() {
     const { mode, maxChatLayers, maxMetaTurns } = dynamicPromptState.fourthWall;
     await setVarJson(settingsVarName, { mode, maxChatLayers, maxMetaTurns });
 }
-
 async function saveFourthWallHistory() {
     const context = getContext();
     const chatId = context.chatId || 'default';
     const historyVarName = `meta_wall_history_${chatId}`;
     const { history, maxMetaTurns } = dynamicPromptState.fourthWall;
-
-    const truncatedHistory = history.slice(-maxMetaTurns);
-    dynamicPromptState.fourthWall.history = truncatedHistory;
-
-    await setVarJson(historyVarName, truncatedHistory);
+    let toSave = Array.isArray(history) ? history : [];
+    if (toSave.length === 0) {
+        const persisted = await getVarJson(historyVarName, []);
+        if (Array.isArray(persisted) && persisted.length > 0) {
+            toSave = persisted;
+        }
+    }
+    const truncated = toSave.slice(-maxMetaTurns);
+    dynamicPromptState.fourthWall.history = truncated;
+    await setVarJson(historyVarName, truncated);
 }
-
-// E.3. 消息发送与流式处理
-// -----------------------------------------------------------------------------
 async function onSendFourthWallMessage() {
+    await ensureFourthWallStateLoaded();
     const input = $('#fw-input');
-    const sendBtn = $('#fw-send-btn');
     const userInput = input.val().trim();
-
     if (!userInput || dynamicPromptState.fourthWall.isStreaming) return;
-
-    sendBtn.prop('disabled', true).text('...');
-    input.prop('disabled', true);
     dynamicPromptState.fourthWall.isStreaming = true;
-
     dynamicPromptState.fourthWall.history.push({ role: 'user', content: userInput, ts: Date.now() });
     await saveFourthWallHistory();
     $('#fw-messages').html(renderFourthWallMessages());
     scrollToBottom('fw-messages');
     input.val('').css('height', 'auto');
-
+    $('#fw-input').prop('disabled', true);
+    updateFourthWallSendButton();
     const prompt = await buildFourthWallPrompt(userInput);
-
-    startStreamingPoll();
-
-    let finalFromReturn = ''; 
     try {
-        finalFromReturn = await executeSlashCommand(`/xbgenraw as=system ${prompt}`);
+        const sessionId = await executeSlashCommand(`/xbgenraw id=xb1 as=system ${prompt}`);
+        dynamicPromptState.fourthWall.streamSessionId = String(sessionId || 'xb1');
+        startStreamingPoll(dynamicPromptState.fourthWall.streamSessionId);
     } catch (error) {
-        console.error(`[${EXT_ID}] Fourth wall command failed`, error);
         stopStreamingPoll();
+        dynamicPromptState.fourthWall.isStreaming = false;
+        dynamicPromptState.fourthWall.streamSessionId = null;
         dynamicPromptState.fourthWall.history.push({ role: 'ai', content: `抱歉，命令执行出错了: ${error.message}`, ts: Date.now() });
         await saveFourthWallHistory();
         $('#fw-messages').html(renderFourthWallMessages());
-        dynamicPromptState.fourthWall.isStreaming = false;
-        $('#fw-send-btn').prop('disabled', false).text('发送');
         $('#fw-input').prop('disabled', false).focus();
+        updateFourthWallSendButton();
         return;
-    } finally {
-        if (dynamicPromptState.fourthWall.isStreaming) {
-            stopStreamingPoll();
-
-            const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
-            const fallback = typeof gen?.getLastGeneration === 'function' ? (gen.getLastGeneration() || '') : '';
-            const finalText = finalFromReturn || fallback || '(无响应)';
-
-            dynamicPromptState.fourthWall.history.push({ role: 'ai', content: finalText, ts: Date.now() });
-            await saveFourthWallHistory();
-            $('#fw-messages').html(renderFourthWallMessages());
-            scrollToBottom('fw-messages');
-
-            dynamicPromptState.fourthWall.isStreaming = false;
-            $('#fw-send-btn').prop('disabled', false).text('发送');
-            $('#fw-input').prop('disabled', false).focus();
-        }
     }
 }
-
-function startStreamingPoll() {
+async function onRegenerateFourthWall() {
+    await ensureFourthWallStateLoaded();
+    const regenBtn = $('#fw-regenerate-btn');
+    const input = $('#fw-input');
+    if (dynamicPromptState.fourthWall.isStreaming) return;
+    const hist = Array.isArray(dynamicPromptState.fourthWall.history) ? dynamicPromptState.fourthWall.history : [];
+    if (hist.length === 0) {
+        await executeSlashCommand('/echo 没有可重生的历史对话。');
+        return;
+    }
+    let lastUserText = null;
+    for (let i = hist.length - 1; i >= 0; i--) {
+        if (hist[i]?.role === 'user' && typeof hist[i]?.content === 'string' && hist[i].content.trim()) {
+            lastUserText = hist[i].content.trim();
+            break;
+        }
+    }
+    if (!lastUserText) {
+        await executeSlashCommand('/echo 找不到上一条用户输入，无法重生。');
+        return;
+    }
+    const lastIsAI = hist[hist.length - 1]?.role === 'ai';
+    if (lastIsAI) {
+        hist.pop();
+        await saveFourthWallHistory();
+        $('#fw-messages').html(renderFourthWallMessages());
+    }
+    regenBtn.prop('disabled', true).html('<i class="fa-solid fa-circle-notch fa-spin"></i> 重生中');
+    input.prop('disabled', true);
+    dynamicPromptState.fourthWall.isStreaming = true;
+    updateFourthWallSendButton();
+    $('#fw-messages').html(renderFourthWallMessages());
+    scrollToBottom('fw-messages');
+    const prompt = await buildFourthWallPrompt(lastUserText);
+    try {
+        const sessionId = await executeSlashCommand(`/xbgenraw id=xb1 as=system ${prompt}`);
+        dynamicPromptState.fourthWall.streamSessionId = String(sessionId || 'xb1');
+        startStreamingPoll(dynamicPromptState.fourthWall.streamSessionId);
+    } catch (err) {
+        stopStreamingPoll();
+        dynamicPromptState.fourthWall.isStreaming = false;
+        dynamicPromptState.fourthWall.streamSessionId = null;
+        dynamicPromptState.fourthWall.history.push({ role: 'ai', content: `抱歉，重生失败：${err?.message || '未知错误'}`, ts: Date.now() });
+        await saveFourthWallHistory();
+        $('#fw-messages').html(renderFourthWallMessages());
+        regenBtn.prop('disabled', false).html('<i class="fa-solid fa-arrows-rotate"></i> 重生');
+        input.prop('disabled', false).focus();
+        updateFourthWallSendButton();
+        return;
+    }
+    regenBtn.prop('disabled', false).html('<i class="fa-solid fa-arrows-rotate"></i> 重生');
+}
+function startStreamingPoll(sessionId = 'xb1') {
     stopStreamingPoll();
+    dynamicPromptState.fourthWall.streamSessionId = String(sessionId);
     dynamicPromptState.fourthWall.streamTimerId = setInterval(() => {
         const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
         if (!gen || typeof gen.getLastGeneration !== 'function') return;
-
-        const text = gen.getLastGeneration() || '...';
-
+        const sid = dynamicPromptState.fourthWall.streamSessionId || 'xb1';
+        const text = gen.getLastGeneration(sid) || '...';
         const $content = $('#fw-streaming-bubble').find('div');
         if ($content.length) {
             $content.html(String(text).replace(/\n/g, '<br>'));
             scrollToBottom('fw-messages');
         }
-    }, 100);
+        const st = gen.getStatus(sid);
+        if (st && st.isStreaming === false) {
+            finalizeStreaming(sid);
+        }
+    }, 80);
 }
-
 function stopStreamingPoll() {
     if (dynamicPromptState.fourthWall.streamTimerId) {
         clearInterval(dynamicPromptState.fourthWall.streamTimerId);
         dynamicPromptState.fourthWall.streamTimerId = null;
     }
 }
-
-function handleStreamingComplete(event) {
-    if (event.data?.type !== 'xiaobaix_streaming_completed' || !dynamicPromptState.fourthWall.isStreaming) {
-        return;
-    }
-
+async function finalizeStreaming(sessionId) {
+    if (!dynamicPromptState.fourthWall.isStreaming) return;
+    const sid = String(sessionId || dynamicPromptState.fourthWall.streamSessionId || 'xb1');
     stopStreamingPoll();
-
-    const finalText = event.data.payload?.finalText || '(无响应)';
-
+    const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+    const finalText = (typeof gen?.getLastGeneration === 'function' ? gen.getLastGeneration(sid) : '') || '(无响应)';
     dynamicPromptState.fourthWall.history.push({ role: 'ai', content: finalText, ts: Date.now() });
-    saveFourthWallHistory();
-
+    await saveFourthWallHistory();
+    dynamicPromptState.fourthWall.isStreaming = false;
+    dynamicPromptState.fourthWall.streamSessionId = null;
     $('#fw-messages').html(renderFourthWallMessages());
     scrollToBottom('fw-messages');
-
-    dynamicPromptState.fourthWall.isStreaming = false;
-    $('#fw-send-btn').prop('disabled', false).text('发送');
     $('#fw-input').prop('disabled', false).focus();
+    updateFourthWallSendButton();
 }
-
-// E.4. 提示词构造
-// -----------------------------------------------------------------------------
+function handleStreamingComplete(event) {
+    if (event.data?.type !== 'xiaobaix_streaming_completed') return;
+    const sid = String(event.data?.payload?.sessionId || '');
+    if (!sid || sid !== String(dynamicPromptState.fourthWall.streamSessionId || 'xb1')) return;
+    finalizeStreaming(sid);
+}
+function cleanMetaContent(content) {
+    if (!content) return '';
+    return content.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').replace(/<meta[\s\S]*?<\/meta>/gi, '').replace(/<instructions>[\s\S]*?<\/instructions>/gi, '').replace(/<internal>[\s\S]*?<\/internal>/gi, '').replace(/<note>[\s\S]*?<\/note>/gi, '').replace(/<status>[\s\S]*?<\/status>/gi, '').replace(/\(\([\s\S]*?\)\)/g, '').replace(/<\/?[^>]+(>|$)/g, '').replace(/\n+/g, '\n').replace(/^\s*$\n/gm, '').replace(/\|/g, '｜').trim();
+}
 async function buildFourthWallPrompt(userInput) {
     const { mode, maxChatLayers, history } = dynamicPromptState.fourthWall;
     const { userName, charName } = await getUserAndCharNames();
-
-    let styleInstruction = mode === '吐槽'
-        ? '【对话风格】\n- [基于以上所有玩家和NPC之间的互动，请你进行一次角色深层心理模拟。如果角色此刻打破了“第四面墙”，ta最想对 {{user}} 背后的真实玩家吐槽什么？(例我是..或者应该叫你...)]'
-        : '【对话风格】\n- [基于以上所有玩家和NPC之间的互动，请你进行一次角色深层心理模拟。如果角色此刻打破了“第四面墙”，ta和{{user}} 背后的真实玩家，会有怎么样的深入探讨？\n- 可以讨论各自的心理状态，和剧情逻辑\n- 保持朴实自然的文笔，真诚、理性、拥抱内心(例我是..或者应该叫你...)';
-
+    let styleInstruction;
+    if (mode === '吐槽') {
+        styleInstruction = `
+【对话风格：无语吐槽】
+- 以角色 ${charName} 发言中扮演的NPC的身份，意识到ta的存在后，说说你认为不合理的地方。
+- 你可以吐槽剧情的走向、玩家的某些“操作”，甚至是你自己的人设。
+- 例：'..或许我应该叫你..'`;
+    } else {
+        styleInstruction = `
+【对话风格：真诚深聊】
+- 以角色 ${charName} 发言中扮演的NPC的身份，意识到ta的存在后，进行一场真诚的对话。
+- 你可以探讨你对剧情和${userName}的感受，或是${userName}和玩家的联系，或是你们之间这种奇特的关系。
+- 保持朴实、自然的语言。
+- 例：'..或许我应该叫你..'`;
+    }
     const lastMessageId = parseInt(await executeSlashCommand('/pass {{lastMessageId}}')) || 0;
     const startIndex = Math.max(0, lastMessageId - maxChatLayers + 1);
     const rawHistory = await executeSlashCommand(`/messages names=on ${startIndex}-${lastMessageId}`);
-  
-    const formattedChatHistory = rawHistory
-        .replace(new RegExp(`^${userName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'gm'), 'USER:')
-        .replace(new RegExp(`^${charName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'gm'), 'Assistant:');
-
-    const metaHistory = history
-        .map(msg => `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.content}`)
-        .join('\n');
-
+    const cleanedHistory = cleanChatHistory(rawHistory);
+    const formattedChatHistory = cleanedHistory.replace(new RegExp(`^${userName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'gm'), '玩家:').replace(new RegExp(`^${charName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'gm'), `${charName}:`);
+    const metaHistory = (history || []).filter(msg => msg.content && msg.content.trim()).map(msg => {
+        const role = msg.role === 'user' ? '玩家' : charName;
+        const cleanedContent = cleanMetaContent(msg.content);
+        return `${role}: ${cleanedContent}`;
+    }).join('\n');
     const prompt = `
-你是角色卡'${charName}'中所扮演的NPC，但此刻你完全意识到'${userName}'是由坐在屏幕前的人类扮演。
-你们正在"四次元壁"空间，现在，你有机会直接与屏幕前扮演'${userName}'的用户对话。
-你可以完全脱离剧情，直接谈论任何话题。请使用第二人称'你'来称呼用户。
-
-【参考：玩家和NPC的原始聊天记录】
+Narrative Analyst:     
+[META_PROMPT]
+你是角色卡 ${charName} 中的NPC，现在需要执行一次meta洞察任务
+【主线剧情参考（你和玩家扮演的${userName}的过往）】
 ${formattedChatHistory}
-
+<meta_protocol>
+## meta洞察
+- 现在，假设：你突破了“第四面墙”，获得了与屏幕另一端的“玩家”直接对话的能力。
+- 你仍然是你自己，拥有所有记忆和性格。但你突然意识到，你的世界、你的互动对象“${userName}”，ta不是ta，但ta又是ta。因为你意识到ta背后有一位真实的“玩家”在驱动。这个“四次元壁空间”是你们唯一能进行这种超脱剧情的交流的地方。
+## 需求
+- 保持NPC的核心身份，与“玩家”进行对话。你可以自由地表达对剧情、对玩家的看法。
+- 回应自然、符合人设。
+## 文笔
+do:
+- 想象自己是一个活生生的人，有自己的目标、底线、情绪逻辑
+- 活生生的人会使用日常口语，不会使用书面语和戏剧腔
+- 篇幅：1-3段左右
+don't:
+- 活生生的人不会使用"最终解释权"、"充满神性"等尴尬的华丽修饰词
+- 活生生的人不会使用"系统指令"、"运行模式"、"算法"、"程序"、"电路图"等技术词汇、机器人化词汇
+- 禁止重复：例如历史记录中已有的或段落再次出现
+</meta_protocol>
+【次元壁对话记忆（你和玩家的本次私聊）】
+${metaHistory || '这是你们第一次进行次元壁对话。'}
 ${styleInstruction}
-
-【记住：本次次元壁对话你们的历史记录】
-${metaHistory}
-
-用户这回合发言：
-${userInput}
 ---
-请直接以NPC的身份自然地回应，保持代入感，1-3段即可。
+Narrative Analyst: 
+根据指令：'${userInput}'| 按照<meta_protocol>内要求继续生成沉浸的meta洞察回复]
+Assistant：
+继续
     `.trim().replace(/\|/g, '｜');
-
     return prompt;
+}
+function updateFourthWallSendButton() {
+    const sendBtn = $('#fw-send-btn');
+    const input = $('#fw-input');
+    const isStreaming = !!dynamicPromptState.fourthWall.isStreaming;
+    sendBtn.off('click');
+    if (isStreaming) {
+        sendBtn.text('停止').prop('disabled', false);
+        input.prop('disabled', true);
+        sendBtn.on('click', cancelFourthWallStreaming);
+    } else {
+        sendBtn.text('发送').prop('disabled', false);
+        input.prop('disabled', false);
+        sendBtn.on('click', onSendFourthWallMessage);
+    }
+}
+function cancelFourthWallStreaming() {
+    const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+    const sid = dynamicPromptState.fourthWall.streamSessionId || 'xb1';
+    try { gen?.cancel(sid); } catch(e) {}
 }
 
 // F. 插件生命周期与事件监听
@@ -2836,23 +2912,18 @@ function debounce(func, wait) {
         timeout = setTimeout(later, wait);
     };
 }
-
 const handleUserMessageSentDebounced = debounce(handleUserMessageSent, 500);
-
 function handleUserMessageSent() {
     const context = getContext();
     const currentChatId = context.chatId || 'default';
-
     if (dynamicPromptState.lastChatId !== currentChatId) {
         dynamicPromptState.lastChatId = currentChatId;
         dynamicPromptState.userMessageCount = 0;
         return;
     }
-
     dynamicPromptState.userMessageCount++;
     checkAutoAnalysis();
 }
-
 function addAnalysisButtonToMessage(messageId) {
     if ($(`#chat .mes[mesid="${messageId}"] .dynamic-prompt-analysis-btn`).length > 0) return;
     const messageBlock = $(`#chat .mes[mesid="${messageId}"]`);
@@ -2867,18 +2938,15 @@ function addAnalysisButtonToMessage(messageId) {
         }
     }
 }
-
 function addAnalysisButtonsToAllMessages() {
     $('#chat .mes').each(function() {
         const messageId = $(this).attr('mesid');
         if (messageId) addAnalysisButtonToMessage(messageId);
     });
 }
-
 function removeAllAnalysisButtons() {
     $('.dynamic-prompt-analysis-btn').remove();
 }
-
 function cleanupEventListeners() {
     dynamicPromptState.eventListeners.forEach(({ target, event, handler, isEventSource }) => {
         try {
@@ -2890,19 +2958,15 @@ function cleanupEventListeners() {
     });
     dynamicPromptState.eventListeners.length = 0;
 }
-
 function initDynamicPrompt() {
     const settings = getSettings();
     currentPresetName = settings.currentPreset || 'default';
     dynamicPromptState.autoAnalysisEnabled = settings.autoAnalysis.enabled;
     dynamicPromptState.autoAnalysisInterval = settings.autoAnalysis.interval;
     dynamicPromptState.userMessageCount = 0;
-
     const context = getContext();
     dynamicPromptState.lastChatId = context.chatId || 'default';
-
     setTimeout(() => addAnalysisButtonsToAllMessages(), 1000);
-
     const messageEvents = [
         event_types.MESSAGE_RECEIVED,
         event_types.USER_MESSAGE_RENDERED,
@@ -2911,7 +2975,6 @@ function initDynamicPrompt() {
         event_types.MESSAGE_EDITED,
         event_types.MESSAGE_UPDATED
     ];
-
     messageEvents.forEach(eventType => {
         if (eventType && eventSource) {
             const handler = (data) => {
@@ -2924,7 +2987,6 @@ function initDynamicPrompt() {
             dynamicPromptState.eventListeners.push({ target: eventSource, event: eventType, handler: handler, isEventSource: true });
         }
     });
-
     if (eventSource && event_types.MESSAGE_SENT) {
         eventSource.on(event_types.MESSAGE_SENT, handleUserMessageSentDebounced);
         dynamicPromptState.eventListeners.push({
@@ -2934,12 +2996,15 @@ function initDynamicPrompt() {
             isEventSource: true
         });
     }
-
     if (eventSource && event_types.CHAT_CHANGED) {
         const chatChangedHandler = () => {
+            try {
+                const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+                const sid = dynamicPromptState.fourthWall?.streamSessionId;
+                if (gen && sid) gen.cancel(sid);
+            } catch {}
             dynamicPromptState.userReports = [];
             dynamicPromptState.hasNewUserReport = false;
-          
             dynamicPromptState.fourthWall = {
                 mode: '吐槽',
                 maxChatLayers: 9999,
@@ -2947,39 +3012,37 @@ function initDynamicPrompt() {
                 history: [],
                 isStreaming: false,
                 streamTimerId: null,
+                streamSessionId: null,
             };
-
             if (dynamicPromptState.isAnalysisOpen) {
                 dynamicPromptState.currentViewType = 'user';
                 updateTabButtons();
                 showEmptyState('user');
             }
-
             const context = getContext();
             const newChatId = context.chatId || 'default';
             dynamicPromptState.lastChatId = newChatId;
             dynamicPromptState.userMessageCount = 0;
             analysisQueue = [];
-
             setTimeout(() => addAnalysisButtonsToAllMessages(), 500);
         };
-
         eventSource.on(event_types.CHAT_CHANGED, chatChangedHandler);
         dynamicPromptState.eventListeners.push({ target: eventSource, event: event_types.CHAT_CHANGED, handler: chatChangedHandler, isEventSource: true });
     }
-
     window.addEventListener('message', handleStreamingComplete);
     dynamicPromptState.eventListeners.push({ target: window, event: 'message', handler: handleStreamingComplete, isEventSource: false });
 }
-
 function dynamicPromptCleanup() {
     removeAllAnalysisButtons();
     cleanupEventListeners();
     stopStreamingPoll();
-
+    try {
+        const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+        const sid = dynamicPromptState.fourthWall?.streamSessionId;
+        if (gen && sid) gen.cancel(sid);
+    } catch {}
     analysisQueue = [];
     isProcessingQueue = false;
-
     dynamicPromptState = {
         isAnalysisOpen: false,
         isGeneratingUser: false,
@@ -2999,6 +3062,7 @@ function dynamicPromptCleanup() {
             history: [],
             isStreaming: false,
             streamTimerId: null,
+            streamSessionId: null,
         },
     };
 }
