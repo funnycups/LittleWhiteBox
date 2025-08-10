@@ -104,13 +104,6 @@ pre:has(+ .xiaobaix-iframe) {
     cursor: grabbing;
 }
 
-.menu_button {
-    width: fit-content;
-    display: flex;
-    gap: 10px;
-    flex-direction: row;
-}
-
 .checkbox {
     align-items: center;
 }
@@ -987,3 +980,4 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
 .xiaobai_template_editor::-webkit-scrollbar-thumb:hover {
     background: var(--SmartThemeAccent);
 }
+
