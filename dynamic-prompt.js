@@ -1,13 +1,12 @@
 // A. 导入与常量
 // =============================================================================
-import { extension_settings, getContext } from "../../../extensions.js";
-import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
+import { extension_settings, getContext, saveMetadataDebounced } from "../../../extensions.js";
+import { saveSettingsDebounced, eventSource, event_types, chat_metadata } from "../../../../script.js";
 import { executeSlashCommand } from "./index.js";
 import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from "../../../popup.js";
 
 const EXT_ID = "LittleWhiteBox";
 
-// 【注意！】PROMPT_SECTIONS 就在这里，这是完整的，你不需要再找了。
 const PROMPT_SECTIONS = [
     {
         id: 'systemRole',
@@ -263,13 +262,22 @@ let dynamicPromptState = {
     lastChatId: null,
     isFourthWallOpen: false,
     fourthWall: {
-        mode: '吐槽',
+        mode: '角色觉醒',
         maxChatLayers: 9999,
         maxMetaTurns: 9999,
         history: [],
         isStreaming: false,
         streamTimerId: null,
         streamSessionId: null,
+        editingIndex: null,
+        editingWidthPx: null,
+    },
+    analysis: {
+        isStreaming: false,
+        streamTimerId: null,
+        streamSessionId: null,
+        lastText: '',
+        isAuto: false,
     },
 };
 let analysisQueue = [];
@@ -296,21 +304,19 @@ function updatePopupUI() {
 
     if (!userBtn) return;
 
-    if (dynamicPromptState.isGeneratingUser) {
+    const busy = dynamicPromptState.isGeneratingUser || dynamicPromptState.analysis?.isStreaming;
+
+    if (busy) {
         userBtn.disabled = true;
         userBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin" style="font-size: 12px;"></i>分析中';
         userBtn.style.opacity = '0.6';
         userBtn.style.cursor = 'not-allowed';
+        if (analysisStatus) analysisStatus.style.display = 'flex';
     } else {
         userBtn.disabled = false;
         userBtn.innerHTML = '<i class="fa-solid fa-plus" style="font-size: 12px;"></i>单次';
         userBtn.style.opacity = '1';
         userBtn.style.cursor = 'pointer';
-    }
-
-    if (dynamicPromptState.isGeneratingUser) {
-        if (analysisStatus) analysisStatus.style.display = 'flex';
-    } else {
         if (analysisStatus) analysisStatus.style.display = 'none';
     }
 }
@@ -327,6 +333,11 @@ function switchView(viewType) {
     [placeholder, results, settings, fourthWall].forEach(el => el.style.display = 'none');
 
     if (viewType === 'user') {
+        if (dynamicPromptState.analysis?.isStreaming) {
+            mountAnalysisStreamingCard();
+            updatePopupUI();
+            return;
+        }
         if (dynamicPromptState.userReports.length > 0) {
             displayUserReportsPage();
         } else {
@@ -390,7 +401,6 @@ function showEmptyState(type) {
             </div>
         `;
     }
-    // 可以为其他视图也添加空状态
     placeholder.style.display = 'flex';
 }
 
@@ -539,12 +549,27 @@ async function showAnalysisPopup() {
             }
         }
 
-        if (dynamicPromptState.currentViewType === 'user' && dynamicPromptState.userReports.length > 0) {
-            displayUserReportsPage();
-        } else if (dynamicPromptState.currentViewType === 'settings') {
-            displaySettingsPage();
-        } else if (dynamicPromptState.currentViewType === 'meta') {
-            displayFourthWallPage();
+        if (dynamicPromptState.analysis?.isStreaming) {
+            dynamicPromptState.currentViewType = 'user';
+            updateTabButtons();
+            mountAnalysisStreamingCard();
+            const el = document.getElementById('analysis-streaming-content');
+            if (el && dynamicPromptState.analysis.lastText) {
+                el.innerHTML = String(dynamicPromptState.analysis.lastText)
+                    .replace(/&/g,'&amp;')
+                    .replace(/</g,'&lt;')
+                    .replace(/>/g,'&gt;')
+                    .replace(/\n/g,'<br>');
+            }
+            updatePopupUI();
+        } else {
+            if (dynamicPromptState.currentViewType === 'user' && dynamicPromptState.userReports.length > 0) {
+                displayUserReportsPage();
+            } else if (dynamicPromptState.currentViewType === 'settings') {
+                displaySettingsPage();
+            } else if (dynamicPromptState.currentViewType === 'meta') {
+                displayFourthWallPage();
+            }
         }
     }, 100);
 
@@ -552,7 +577,6 @@ async function showAnalysisPopup() {
     dynamicPromptState.isAnalysisOpen = false;
 }
 
-// 补全的函数
 function displaySettingsPage() {
     const placeholder = document.querySelector('#dynamic-prompt-content-wrapper #analysis-placeholder');
     const results = document.querySelector('#dynamic-prompt-content-wrapper #analysis-results');
@@ -786,7 +810,7 @@ function displaySettingsPage() {
                 });
             }
         });
-      
+  
         ['preset-new-btn', 'preset-delete-btn', 'settings-save-btn'].forEach(buttonId => {
             const button = document.getElementById(buttonId);
             if (button) {
@@ -952,7 +976,7 @@ function getSettings() {
                         },
                         expectedStyle: {
                             name: "期望AI表现标准",
-                            value: `- 玩家期望的标准：\n1. 主动驱动剧情：避免被动响应或依赖用户输入，推动故事发展。\n2. 沉浸的日常感：朴实、自然的表现。去戏剧化、书面语，避免"舞台剧式的、夸张的奇观"；在情感表达上，不要热烈、夸张、极致，剧烈的、山崩海啸般的情绪波动；在行为上，不要绝望、惊悚、流泪等超现实生理反应；在角色塑造上，不要大惊小怪的仪式、不要脱离真实人物的比喻、意象.\n3. 结构创新：避免固定模式，如重复的开头/结尾句式；增加变化和惊喜。\n4. 角色深度：保持一致的角色弧光，避免OOC（Out of Character）；主动探索角色动机。\n5. 互动趣味：融入新意，如NPC的幽默吐槽或意外转折，提升沉浸感。`
+                            value: `- 玩家期望的标准：\n1. 主动驱动剧情：避免被动响应或依赖用户输入，推动故事发展。\n2. 沉浸的日常感：朴实、自然的表现。去戏剧化、书面语，避免"舞台剧式的、夸张的奇观"；在情感表达上，不要热烈、夸张、极致，剧烈的、山崩海啸般的情绪波动；在行为上，不要绝望、惊悚、流泪等超现实生理反应；在角色塑造上，不要大惊小怪的仪式、不要脱离真实人物的比喻、意象；在说话时，不要"系统指令"、"运行模式"、"程序"等技术词汇、机器人化词汇。\n3. 结构创新：避免固定模式，如重复的开头/结尾句式；增加变化和惊喜。\n4. 角色深度：保持一致的角色弧光，避免OOC（Out of Character）；主动探索角色动机。\n5. 互动趣味：融入新意，如NPC的幽默吐槽或意外转折，提升沉浸感。`
                         },
                         analysisGuidelines: {
                             name: "分析指导原则",
@@ -968,19 +992,42 @@ function getSettings() {
                         },
                         part2Format: {
                             name: "文字表现问题",
-                            value: `[AI全面问题诊断。分两大类别列出AI存在的具体问题，并提供关键观察点作为证据。]\n## AI文字表现问题\n\n### 1. 风格问题：表达的"奇观化"与"戏剧化"\n问题描述：AI的语言风格不够朴实，偏向舞台剧式写作，缺乏真实感和日常感。\n关键证据：\n- 极限生理反应泛滥：夸张的生理反应描述\n- 宏大意象滥用：情感描述常用过于宏大的比喻和意象\n- 情绪物理化：将情绪变化描述为过于明显的物理现象\n- 廉价情绪工具：频繁使用某些固定的情绪表达方式\n- 展示日常、朴实的文字才是沉浸感关键的示例\n\n### 2. 语言问题：八股文化与莫名意象泛滥\n问题描述：AI频繁使用陈词滥调和不恰当的比喻，严重影响沉浸感。\n关键证据：\n- 光芒比喻成瘾：动不动就"像一道光"、"照亮了世界"等俗套比喻\n- 莫名修饰词："最终解释权"、"充满神性"等无意义的华丽修饰\n- 机器人化词汇泛滥：使用"系统指令"、"运行模式"、"算法"、"程序"、"电路图"等技术词汇描述人类行为\n- 八股文句式：固定的"你的X，像Y一样，Z了她的世界"等公式化表达\n- 每回合重复：相同的词语或句式高频出现\n- 展示日常、朴实的文字才是沉浸感关键的示例\n\n### 3. 结构问题：响应的"公式化"与"模板化"\n问题描述：AI的回复遵循固定的内部结构，导致互动单调可预测。\n关键证据：\n- 固定公式：开头-中间-结尾的结构高度雷同\n- 段落模板：每个段落的组织方式缺乏变化\n- 句式惯性：偏好使用特定的句式结构\n- 修正方向:xyz`
+                            value: `[AI全面问题诊断。分两大类别列出AI存在的具体问题，并提供关键观察点作为证据。]
+## AI文字表现问题
+### 1. 扮演没有活人感
+- 活生生的人会使用日常口语进行自然的交谈，不会使用"最终解释权"、"充满神性"等尴尬的华丽修饰词，不会在交谈中使用书面语和戏剧腔
+- 活生生的人不会使用"最终解释权"、"充满神性"等尴尬的华丽修饰词，不会在交谈中使用书面语和戏剧腔
+- 修正方向: xyz
+
+### 2. 结构没有新意
+- 固定公式：开头-中间-结尾的结构高度雷同
+- 段落模板：每个段落的组织方式缺乏变化
+- 存在重复：例如历史记录中已有的句子或段落再次出现
+- 修正方向: xyz`
                         },
                         part3Format: {
                             name: "剧情驱动问题",
-                            value: `## 剧情驱动问题\n### 4. 角色问题：人设的"扁平化"与特质丢失\n问题描述：角色在发展过程中丢失了初期建立的核心特质，变得单一化。\n关键证据：\n- 核心特质丢失：弧光断裂\n- 角色功能单一化：角色被简化为单一功能的符号\n- 弧光断裂：角色发展不连贯，存在严重的人设前后矛盾\n- 修正方向:\n### 5. 互动问题：行为的"被动化"与缺乏主动性\n问题描述：角色缺乏主动推进剧情的能力，过度依赖用户指令。\n关键证据：\n- 无主动行为：角色很少主动提出符合人设的新行动或要求\n- 依赖指令：剧情推进完全依赖用户输入，AI本身缺乏驱动力\n- 缺乏创意：很少引入新的剧情元素或意外转折\n- 开放式结束：频繁使用疑问句或等待式结尾\n- 修正方向:xyz`
+                            value: `## 剧情驱动问题
+### 3. 人设的"扁平化"与特质丢失
+- 核心特质丢失：弧光断裂
+- 角色功能单一化：角色被简化为单一功能的符号
+- 修正方向: xyz
+
+### 4. 互动问题：行为的"被动化"与缺乏主动性
+问题描述：角色缺乏主动推进剧情的能力，过度依赖用户指令。
+关键证据：
+- 无主动行为：角色很少主动提出符合人设的新行动或要求
+- 依赖指令：剧情推进完全依赖用户输入，AI本身缺乏驱动力
+- 开放式结束：频繁使用疑问句或等待式结尾
+- 修正方向: xyz`
                         },
                         part4Format: {
                             name: "创意集",
-                            value: `[创意激发与元素注入]\nMeta洞察：\n- [基于以上所有分析，请Interaction psychologist进行一次角色深层心理模拟。如果角色此刻打破了“第四面墙”，ta最想对 {{user}} 背后的真实玩家吐槽什么？直接以NPC的身份用第二人称向用户对话(例我是..或者应该叫你...)]\n\n创意任务：\n1.一个让用户意外的细节\n2.[建议引入什么样的新NPC能激活剧情又不显突兀]\n3.让角色展现一个之前没展现过的特质`
+                            value: `[创意激发与元素注入]\nMeta洞察：\n- [基于以上所有分析，请Interaction psychologist进行一次角色深层心理模拟。如果角色此刻打破了“第四面墙”，ta最想对 {{user}} 背后的真实玩家吐槽什么？想象自己是一个活生生的人，有自己的目标、底线、情绪逻辑，活生生的人会使用日常口语，不会使用书面语和戏剧腔，直接以NPC的身份向用户对话(例我是..或者应该叫你...)]\n\n创意任务：\n1.一个让用户意外的细节\n2.[建议引入什么样的新NPC能激活剧情又不显突兀]\n3.让角色展现一个之前没展现过的特质`
                         },
                         closingInstructions: {
                             name: "结束指令",
-                            value: `Developer:\n[查看上文后分两次回复，现在第一次回复"√"，第二次直接按照要求继续按照格式进行文字指纹分析]\n\nInteraction psychologist: √。`
+                            value: `Developer:\n[推荐根据指令:*生成文字指纹图谱*继续]\n\nInteraction psychologist: 继续`
                         }
                     },
                     chatFormat: {
@@ -1090,7 +1137,7 @@ function savePromptSections() {
         if (section.editable) {
             const nameInput = document.getElementById(`section-name-${section.id}`);
             const valueTextarea = document.getElementById(`section-value-${section.id}`);
-    
+
             if (nameInput && valueTextarea) {
                 sections[section.id] = {
                     name: nameInput.value || section.name,
@@ -1232,7 +1279,7 @@ function loadChatFormatSettings() {
     const formatRadio = document.getElementById(`format-${chatFormat.type}`);
     if (formatRadio) {
         formatRadio.checked = true;
-  
+
         const customPanel = document.getElementById('custom-names-panel');
         if (customPanel) {
             customPanel.style.display = chatFormat.type === 'custom' ? 'flex' : 'none';
@@ -1955,82 +2002,54 @@ async function importPromptConfiguration(importData) {
 }
 
 // D.2. 核心分析逻辑
-// -----------------------------------------------------------------------------
+// =============================================================================
 async function generateUserAnalysisReport(isAutoAnalysis = false) {
-    if (isAutoAnalysis) {
-        return;
-    }
-
-    if (dynamicPromptState.isGeneratingUser) return;
-
+    if (dynamicPromptState.isGeneratingUser || dynamicPromptState.analysis?.isStreaming) return;
+    clearAnalysisUI();
     dynamicPromptState.isGeneratingUser = true;
     if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
-
     await executeSlashCommand('/echo 🔍 开始用户文字指纹分析...');
-
     try {
         const chatHistory = await getChatHistory();
-
         if (!chatHistory || chatHistory.trim() === '') {
             throw new Error('没有找到聊天记录');
         }
-
-        const analysisResult = await performUserAnalysis(chatHistory);
-
-        const reportData = {
-            timestamp: Date.now(),
-            content: analysisResult,
-            chatLength: chatHistory.length,
-            isAutoGenerated: false
-        };
-
-        dynamicPromptState.userReports.push(reportData);
-        await saveUserAnalysisToVariable(analysisResult);
-
-        if (dynamicPromptState.isAnalysisOpen) {
-            dynamicPromptState.currentViewType = 'user';
-            updateTabButtons();
-            displayUserReportsPage();
-            dynamicPromptState.hasNewUserReport = false;
-        } else {
-            dynamicPromptState.hasNewUserReport = true;
-        }
-
+        const analysisPrompt = createUserAnalysisPrompt(chatHistory);
+        await startAnalysisStreaming(analysisPrompt, !!isAutoAnalysis);
     } catch (error) {
         if (dynamicPromptState.isAnalysisOpen) {
             showAnalysisError(error.message || '生成用户文字指纹图谱时发生未知错误');
         }
-    } finally {
         dynamicPromptState.isGeneratingUser = false;
         if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
     }
 }
-
 async function performUserAnalysis(chatHistory) {
     const analysisPrompt = createUserAnalysisPrompt(chatHistory);
-    return await callAIForAnalysis(analysisPrompt);
+    const settings = getSettings();
+    if ((settings.apiConfig?.provider || 'sillytavern') === 'sillytavern') {
+        clearAnalysisUI();
+        const sid = await startAnalysisStreaming(analysisPrompt, true) || 'xb2';
+        const finalText = await waitForAnalysisCompletion(String(sid));
+        return finalText;
+    } else {
+        return await callAIForAnalysis(analysisPrompt);
+    }
 }
-
 async function getChatHistory() {
     const lastMessageIdStr = await executeSlashCommand('/pass {{lastMessageId}}');
     const lastMessageId = parseInt(lastMessageIdStr) || 0;
     if (lastMessageId <= 0) throw new Error('没有找到聊天记录');
-
     const settings = getSettings();
     const maxMessages = settings.messageSettings.maxMessages || 100;
-
     const startIndex = Math.max(0, lastMessageId - maxMessages + 1);
-
     const rawHistory = await executeSlashCommand(`/messages names=on ${startIndex}-${lastMessageId}`);
     if (!rawHistory || rawHistory.trim() === '') throw new Error('聊天记录为空');
-
     return await formatChatHistory(rawHistory);
 }
-
 function createUserAnalysisPrompt(chatHistory) {
     const sections = loadPromptSections();
     let prompt = '';
-
     PROMPT_SECTIONS.forEach((section) => {
         if (section.type === 'divider') {
             if (section.content === '${chatHistory}') {
@@ -2044,14 +2063,11 @@ function createUserAnalysisPrompt(chatHistory) {
             prompt += '\n' + value + '\n';
         }
     });
-
     return prompt.trim();
 }
-
 async function callAIForAnalysis(prompt) {
     const settings = getSettings();
     const apiConfig = settings.apiConfig;
-
     switch (apiConfig.provider) {
         case 'sillytavern':
             return await callSillyTavernAPI(prompt);
@@ -2067,13 +2083,11 @@ async function callAIForAnalysis(prompt) {
             return await callSillyTavernAPI(prompt);
     }
 }
-
 async function callSillyTavernAPI(prompt) {
     const result = await executeSlashCommand(`/genraw lock=off instruct=off ${prompt}`);
     if (!result || result.trim() === '') throw new Error('AI返回空内容');
     return result.trim();
 }
-
 async function callOpenAIAPI(prompt, config) {
     const response = await fetch(`${config.url}/chat/completions`, {
         method: 'POST',
@@ -2088,15 +2102,12 @@ async function callOpenAIAPI(prompt, config) {
             max_tokens: 4000
         })
     });
-
     if (!response.ok) {
         throw new Error(`OpenAI API错误: ${response.status} ${response.statusText}`);
     }
-
     const data = await response.json();
     return data.choices[0].message.content;
 }
-
 async function callGoogleAPI(prompt, config) {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.key}`, {
         method: 'POST',
@@ -2109,15 +2120,12 @@ async function callGoogleAPI(prompt, config) {
             }]
         })
     });
-
     if (!response.ok) {
         throw new Error(`Google API错误: ${response.status} ${response.statusText}`);
     }
-
     const data = await response.json();
     return data.candidates[0].content.parts[0].text;
 }
-
 async function callCohereAPI(prompt, config) {
     const response = await fetch('https://api.cohere.ai/v1/generate', {
         method: 'POST',
@@ -2132,15 +2140,12 @@ async function callCohereAPI(prompt, config) {
             temperature: 0.7
         })
     });
-
     if (!response.ok) {
         throw new Error(`Cohere API错误: ${response.status} ${response.statusText}`);
     }
-
     const data = await response.json();
     return data.generations[0].text;
 }
-
 async function callDeepSeekAPI(prompt, config) {
     const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
@@ -2155,31 +2160,23 @@ async function callDeepSeekAPI(prompt, config) {
             max_tokens: 4000
         })
     });
-
     if (!response.ok) {
         throw new Error(`DeepSeek API错误: ${response.status} ${response.statusText}`);
     }
-
     const data = await response.json();
     return data.choices[0].message.content;
 }
-
 async function formatChatHistory(rawHistory) {
     let cleaned = cleanChatHistory(rawHistory);
-
     const settings = getSettings();
     const currentPreset = settings.currentPreset || 'default';
     const presetData = settings.promptPresets[currentPreset];
     const chatFormat = presetData?.chatFormat || { type: 'standard', customUserName: 'USER', customAssistantName: 'Assistant' };
-
     if (chatFormat.type === 'original') {
         return cleaned;
     }
-
     const { userName: currentUser, charName: currentChar } = await getUserAndCharNames();
-
     let finalUserName, finalAssistantName;
-
     if (chatFormat.type === 'custom') {
         finalUserName = chatFormat.customUserName || 'USER';
         finalAssistantName = chatFormat.customAssistantName || 'Assistant';
@@ -2187,17 +2184,13 @@ async function formatChatHistory(rawHistory) {
         finalUserName = 'USER';
         finalAssistantName = 'Assistant';
     }
-
     const userPattern = new RegExp(`^${currentUser.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'gm');
     const charPattern = new RegExp(`^${currentChar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'gm');
-
     cleaned = cleaned
         .replace(userPattern, `${finalUserName}:\n`)
         .replace(charPattern, `${finalAssistantName}:\n`);
-
     return cleaned;
 }
-
 function cleanChatHistory(rawHistory) {
     if (!rawHistory) return '';
     rawHistory = rawHistory.replace(/\|/g, '｜');
@@ -2213,13 +2206,11 @@ function cleanChatHistory(rawHistory) {
         .replace(/^\s*$\n/gm, '')
         .trim();
 }
-
 async function getUserAndCharNames() {
     try {
         const context = getContext();
         let userName = 'User';
         let charName = 'Assistant';
-
         if (context && context.name1) {
             userName = context.name1;
         } else {
@@ -2228,7 +2219,6 @@ async function getUserAndCharNames() {
                 userName = userNameFromVar.trim();
             }
         }
-
         if (context && context.name2) {
             charName = context.name2;
         } else {
@@ -2237,13 +2227,11 @@ async function getUserAndCharNames() {
                 charName = charNameFromVar.trim();
             }
         }
-
         return { userName, charName };
     } catch (error) {
         return { userName: 'User', charName: 'Assistant' };
     }
 }
-
 async function saveUserAnalysisToVariable(analysisResult) {
     try {
         function cleanTextForPrompt(text) {
@@ -2254,31 +2242,26 @@ async function saveUserAnalysisToVariable(analysisResult) {
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
         }
-
         const part1Match = analysisResult.match(/【第一部分】\s*\n([\s\S]*?)(?=\n【第二部分】|\n===END===|$)/);
         if (part1Match && part1Match[1]) {
             const content = cleanTextForPrompt(part1Match[1]);
             await executeSlashCommand(`/setvar key=prompt1 "${content}"`);
         }
-
         const part2Match = analysisResult.match(/【第二部分】\s*\n([\s\S]*?)(?=\n【第三部分】|\n===END===|$)/);
         if (part2Match && part2Match[1]) {
             const content = cleanTextForPrompt(part2Match[1]);
             await executeSlashCommand(`/setvar key=prompt2 "${content}"`);
         }
-
         const part3Match = analysisResult.match(/【第三部分】\s*\n([\s\S]*?)(?=\n【第四部分】|\n===END===|$)/);
         if (part3Match && part3Match[1]) {
             const content = cleanTextForPrompt(part3Match[1]);
             await executeSlashCommand(`/setvar key=prompt3 "${content}"`);
         }
-
         const part4Match = analysisResult.match(/【第四部分】\s*\n([\s\S]*?)(?=\n===END===|$)/);
         if (part4Match && part4Match[1]) {
             const content = cleanTextForPrompt(part4Match[1]);
             await executeSlashCommand(`/setvar key=prompt4 "${content}"`);
         }
-
         const usageHint = `用户分析完成！
 
 可用变量：
@@ -2294,18 +2277,195 @@ async function saveUserAnalysisToVariable(analysisResult) {
 
 • 第四部分内容
 {{getvar::prompt4}}`;
-
         setTimeout(() => {
             callGenericPopup(usageHint, POPUP_TYPE.TEXT, '', {
                 okButton: '我知道了',
                 wide: true
             });
         }, 1000);
-
     } catch (error) {
     }
 }
-
+function clearAnalysisUI() {
+    dynamicPromptState.userReports = [];
+    const results = document.querySelector('#dynamic-prompt-content-wrapper #analysis-results');
+    if (results) results.innerHTML = '';
+    const placeholder = document.querySelector('#dynamic-prompt-content-wrapper #analysis-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+    updateTabButtons();
+}
+function mountAnalysisStreamingCard() {
+    const placeholder = document.querySelector('#dynamic-prompt-content-wrapper #analysis-placeholder');
+    const results = document.querySelector('#dynamic-prompt-content-wrapper #analysis-results');
+    const settings = document.querySelector('#dynamic-prompt-content-wrapper #settings-panel');
+    const fourthWall = document.querySelector('#dynamic-prompt-content-wrapper #fourth-wall-panel');
+    if (placeholder) placeholder.style.display = 'none';
+    if (settings) settings.style.display = 'none';
+    if (fourthWall) fourthWall.style.display = 'none';
+    if (results) results.style.display = 'block';
+    if (document.getElementById('analysis-streaming-card')) return;
+    const isMobile = isMobileDevice();
+    const html = `
+        <div id="analysis-streaming-card"
+             style="background: var(--SmartThemeBlurTintColor); border: 1px solid rgba(59,130,246,0.25); border-radius: 8px; padding: ${isMobile ? '12px' : '16px'}; margin-bottom: 12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <i class="fa-solid fa-bolt" style="color:#3b82f6;"></i>
+                    <strong style="color:#3b82f6;">用户指纹图谱</strong>
+                    <span style="font-size:11px; color: var(--SmartThemeBodyColor); opacity:0.6;">(实时生成中)</span>
+                </div>
+                <button id="analysis-cancel-btn" class="menu_button"
+                        style="padding:4px 8px; font-size:12px; background: rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.3); color:#dc2626; border-radius:6px;">
+                    <i class="fa-solid fa-stop"></i> 取消
+                </button>
+            </div>
+            <div id="analysis-streaming-content"
+                 style="min-height:48px; line-height:1.6; font-size:${isMobile ? '12px' : '13px'}; color: var(--SmartThemeBodyColor); opacity:0.9;">
+                <i class="fa-solid fa-circle-notch fa-spin" style="font-size:12px;"></i> 正在生成...
+            </div>
+        </div>
+    `;
+    results.insertAdjacentHTML('afterbegin', html);
+    const cancelBtn = document.getElementById('analysis-cancel-btn');
+    if (cancelBtn) cancelBtn.onclick = cancelAnalysisStreaming;
+}
+async function startAnalysisStreaming(prompt, isAuto = false) {
+    const settings = getSettings();
+    clearAnalysisUI();
+    try {
+        const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+        if (dynamicPromptState.analysis?.isStreaming && dynamicPromptState.analysis.streamSessionId) {
+            gen?.cancel(String(dynamicPromptState.analysis.streamSessionId));
+        }
+    } catch {}
+    stopAnalysisPolling();
+    dynamicPromptState.analysis.isAuto = !!isAuto;
+    if ((settings.apiConfig?.provider || 'sillytavern') !== 'sillytavern') {
+        const analysisResult = await callAIForAnalysis(prompt);
+        await onAnalysisFinalText(analysisResult, !!isAuto);
+        dynamicPromptState.isGeneratingUser = false;
+        if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
+        return;
+    }
+    if (dynamicPromptState.isAnalysisOpen) {
+        dynamicPromptState.currentViewType = 'user';
+        updateTabButtons();
+        mountAnalysisStreamingCard();
+    }
+    dynamicPromptState.analysis.isStreaming = true;
+    dynamicPromptState.analysis.lastText = '';
+    try {
+        const sessionId = await executeSlashCommand(`/xbgenraw id=xb2 as=system ${prompt}`);
+        dynamicPromptState.analysis.streamSessionId = String(sessionId || 'xb2');
+        startAnalysisPolling(dynamicPromptState.analysis.streamSessionId);
+        if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
+        return dynamicPromptState.analysis.streamSessionId;
+    } catch (err) {
+        dynamicPromptState.analysis.isStreaming = false;
+        dynamicPromptState.analysis.streamSessionId = null;
+        stopAnalysisPolling();
+        await executeSlashCommand(`/echo ❌ 分析流式启动失败：${err?.message || '未知错误'}`);
+        dynamicPromptState.isGeneratingUser = false;
+        if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
+    }
+}
+function startAnalysisPolling(sessionId = 'xb2') {
+    stopAnalysisPolling();
+    const sid = String(sessionId);
+    dynamicPromptState.analysis.streamTimerId = setInterval(() => {
+        const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+        if (!gen || typeof gen.getLastGeneration !== 'function') return;
+        const text = String(gen.getLastGeneration(sid) || '');
+        if (text !== dynamicPromptState.analysis.lastText) {
+            dynamicPromptState.analysis.lastText = text;
+            const el = document.getElementById('analysis-streaming-content');
+            if (el) {
+                el.innerHTML = text
+                    .replace(/&/g,'&amp;')
+                    .replace(/</g,'&lt;')
+                    .replace(/>/g,'&gt;')
+                    .replace(/\n/g,'<br>');
+            }
+        }
+        const st = gen.getStatus?.(sid);
+        if (st && st.isStreaming === false) {
+            finalizeAnalysisStreaming(sid);
+        }
+    }, 80);
+}
+function stopAnalysisPolling() {
+    if (dynamicPromptState.analysis.streamTimerId) {
+        clearInterval(dynamicPromptState.analysis.streamTimerId);
+        dynamicPromptState.analysis.streamTimerId = null;
+    }
+}
+async function finalizeAnalysisStreaming(sessionId) {
+    if (!dynamicPromptState.analysis.isStreaming) return;
+    stopAnalysisPolling();
+    const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+    const sid = String(sessionId || dynamicPromptState.analysis.streamSessionId || 'xb2');
+    const finalText = (typeof gen?.getLastGeneration === 'function' ? gen.getLastGeneration(sid) : '') || '';
+    dynamicPromptState.analysis.isStreaming = false;
+    dynamicPromptState.analysis.streamSessionId = null;
+    await onAnalysisFinalText(finalText, !!dynamicPromptState.analysis.isAuto);
+    dynamicPromptState.isGeneratingUser = false;
+    if (dynamicPromptState.isAnalysisOpen) {
+        const card = document.getElementById('analysis-streaming-card');
+        if (card) card.remove();
+        updateTabButtons();
+        displayUserReportsPage();
+        updatePopupUI();
+    }
+}
+async function onAnalysisFinalText(analysisResult, isAuto) {
+    const reportData = {
+        timestamp: Date.now(),
+        content: analysisResult || '(空)',
+        chatLength: (analysisResult || '').length,
+        isAutoGenerated: !!isAuto,
+    };
+    dynamicPromptState.userReports = [reportData];
+    await saveUserAnalysisToVariable(analysisResult || '');
+    if (!dynamicPromptState.isAnalysisOpen) {
+        await executeSlashCommand('/echo ✅ 用户文字指纹分析完成！结果已保存到变量中');
+    }
+}
+function cancelAnalysisStreaming() {
+    const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+    const sid = dynamicPromptState.analysis.streamSessionId || 'xb2';
+    try { gen?.cancel?.(String(sid)); } catch(e) {}
+    stopAnalysisPolling();
+    dynamicPromptState.analysis.isStreaming = false;
+    dynamicPromptState.analysis.streamSessionId = null;
+    dynamicPromptState.isGeneratingUser = false;
+    const card = document.getElementById('analysis-streaming-card');
+    if (card) {
+        const content = document.getElementById('analysis-streaming-content');
+        if (content) content.innerHTML = '<span style="color:#dc2626;">已取消</span>';
+        setTimeout(() => card.remove(), 600);
+    }
+    if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
+}
+function waitForAnalysisCompletion(sessionId = 'xb2', timeoutMs = 600000) {
+    return new Promise((resolve, reject) => {
+        function onMsg(e) {
+            if (e.data?.type === 'xiaobaix_streaming_completed' &&
+                String(e.data?.payload?.sessionId) === String(sessionId)) {
+                window.removeEventListener('message', onMsg);
+                resolve(e.data?.payload?.finalText || '');
+            }
+        }
+        window.addEventListener('message', onMsg);
+        setTimeout(() => {
+            window.removeEventListener('message', onMsg);
+            try {
+                const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+                gen?.cancel(String(sessionId));
+            } catch {}
+            reject(new Error('stream timeout'));
+        }, timeoutMs);
+    });
+}
 // D.3. 自动分析与队列
 // -----------------------------------------------------------------------------
 function checkAutoAnalysis() {
@@ -2384,8 +2544,13 @@ async function performBackgroundAnalysis() {
 }
 
 // D.4. 分析结果展示
-// -----------------------------------------------------------------------------
+// =============================================================================
 async function displayUserReportsPage() {
+    if (dynamicPromptState.analysis?.isStreaming) {
+        mountAnalysisStreamingCard();
+        updatePopupUI();
+        return;
+    }
     const placeholder = document.querySelector('#dynamic-prompt-content-wrapper #analysis-placeholder');
     const results = document.querySelector('#dynamic-prompt-content-wrapper #analysis-results');
     const settings = document.querySelector('#dynamic-prompt-content-wrapper #settings-panel');
@@ -2402,7 +2567,8 @@ async function displayUserReportsPage() {
     const isMobile = isMobileDevice();
 
     let reportsHtml = '';
-    dynamicPromptState.userReports.forEach((reportData, index) => {
+    const reports = dynamicPromptState.userReports.slice(-1);
+    reports.forEach((reportData) => {
         const formattedContent = formatAnalysisContent(reportData.content);
         const isAutoGenerated = reportData.isAutoGenerated || false;
         const analysisTypeIcon = isAutoGenerated ?
@@ -2416,7 +2582,7 @@ async function displayUserReportsPage() {
                     <div style="flex: 1; min-width: 0;">
                         <h4 style="color: #059669; margin: 0; font-size: ${isMobile ? '13px' : '14px'}; font-weight: 600; display: flex; align-items: center; gap: 6px;">
                             ${analysisTypeIcon}
-                            用户指纹图谱 #${index + 1}
+                            用户指纹图谱 #${dynamicPromptState.userReports.length > 0 ? dynamicPromptState.userReports.length : 1}
                             <span style="font-size: 11px; color: var(--SmartThemeBodyColor); opacity: 0.6; font-weight: normal;">(${analysisTypeText})</span>
                         </h4>
                         <div style="font-size: 11px; color: var(--SmartThemeBodyColor); opacity: 0.5; margin-top: 4px;">
@@ -2485,17 +2651,18 @@ function showAnalysisError(message) {
 }
 
 // E. "四次元壁" 功能区
-// =============================================================================
-// E.1. 页面渲染与事件绑定
-// -----------------------------------------------------------------------------
+
+// E1. 界面渲染与交互
 async function displayFourthWallPage() {
     await ensureFourthWallStateLoaded();
     const panel = document.getElementById('fourth-wall-panel');
     if (!panel) return;
+
     document.getElementById('analysis-placeholder').style.display = 'none';
     document.getElementById('analysis-results').style.display = 'none';
     document.getElementById('settings-panel').style.display = 'none';
     panel.style.display = 'flex';
+
     const { mode, maxChatLayers, maxMetaTurns } = dynamicPromptState.fourthWall;
     panel.innerHTML = `
         <div style="padding: 10px 16px; border-bottom: 1px solid var(--SmartThemeBorderColor); flex-shrink: 0;">
@@ -2510,8 +2677,8 @@ async function displayFourthWallPage() {
                 <div>
                     <label>模式: </label>
                     <select id="fw-mode-select" style="padding: 4px; border-radius: 4px; background: var(--SmartThemeFormElementBgColor); color: var(--SmartThemeBodyColor); border: 1px solid var(--SmartThemeBorderColor);">
-                        <option value="吐槽" ${mode === '吐槽' ? 'selected' : ''}>吐槽</option>
-                        <option value="深聊" ${mode === '深聊' ? 'selected' : ''}>深聊</option>
+                        <option value="角色觉醒" ${mode === '角色觉醒' ? 'selected' : ''}>角色觉醒</option>
+                        <option value="皮下交流" ${mode === '皮下交流' ? 'selected' : ''}>皮下交流</option>
                     </select>
                 </div>
                 <div>
@@ -2533,40 +2700,89 @@ async function displayFourthWallPage() {
                     style="flex-grow: 1; resize: none; padding: 8px 12px; border-radius: 18px; border: 1px solid var(--SmartThemeBorderColor); background: var(--SmartThemeFormElementBgColor); color: var(--SmartThemeBodyColor); max-height: 120px; line-height: 1.5;"
                     placeholder="和'TA'聊点什么...例如嘿,你好."></textarea>
                 <button id="fw-regenerate-btn" class="menu_button"
-                    title="删除上一条AI回复并基于上一条用户输入重新生成"
-                    style="padding: 8px 12px; height: 35px; border-radius: 18px; white-space: nowrap; background: rgba(100,116,139,0.15); border: 1px solid rgba(100,116,139,0.3); display: flex; align-items: center; gap: 4px;">
-                    <i class="fa-solid fa-arrows-rotate" style="font-size: 10px;"></i>
-                    <span style="font-size: 13px;">重生</span>
+                    title="重答"
+                    style="width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: rgba(100,116,139,0.15); border: 1px solid rgba(100,116,139,0.3);">
+                    <i class="fa-solid fa-arrows-rotate" style="font-size: 14px;"></i>
                 </button>
                 <button id="fw-send-btn" class="menu_button" 
-                    style="padding: 8px 15px; height: 35px; border-radius: 18px; white-space: nowrap;">发送</button>
+                    title="发送"
+                    style="width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; padding: 0;">
+                    <i class="fa-solid fa-paper-plane" style="font-size: 14px;"></i>
+                </button>
             </div>
-        </div>        
+        </div>    
     `;
     bindFourthWallEvents();
     scrollToBottom('fw-messages');
 }
+
 function renderFourthWallMessages() {
-    const { history, isStreaming } = dynamicPromptState.fourthWall;
-    let html = (history || []).map(msg => {
+    const { history, isStreaming, editingIndex, editingWidthPx } = dynamicPromptState.fourthWall;
+    const makeBubble = (msg, idx) => {
         const isUser = msg.role === 'user';
-        const align = isUser ? 'flex-end' : 'flex-start';
-        const bgColor = isUser ? 'var(--ThemeColor)' : 'var(--GrayPillColor)';
-        const color = isUser ? 'white' : 'var(--MainColor)';
-        const content = (msg.content || '').replace(/\n/g, '<br>');
-        return `
-            <div style="display: flex; justify-content: ${align}; margin-bottom: 10px;">
-                <div style="background: ${bgColor}; color: ${color}; padding: 8px 12px; border-radius: 12px; max-width: 80%; word-break: break-word;">
-                    ${content}
-                </div>
+        const side = isUser ? 'user' : 'assistant';
+        const avatarHtml = isUser
+            ? '<div class="lwb-fw-avatar user_avatar" style="--avatar-size:34px;width:34px;height:34px;border-radius:50%;background-size:cover;background-position:center;flex:0 0 34px;border:1px solid var(--SmartThemeBorderColor);opacity:0.95;"></div>'
+            : '<div class="lwb-fw-avatar char_avatar" style="--avatar-size:34px;width:34px;height:34px;border-radius:50%;background-size:cover;background-position:center;flex:0 0 34px;border:1px solid var(--SmartThemeBorderColor);opacity:0.95;"></div>';
+        const isEditing = editingIndex === idx;
+        const lockWidthStyle = isEditing && Number.isFinite(editingWidthPx)
+            ? `width:${editingWidthPx}px; max-width:${editingWidthPx}px;`
+            : '';
+        const safeHtml = (msg.content || '').replace(/\n/g, '<br>');
+        const bubbleInner = isEditing
+            ? `<textarea class="fw-edit-area" data-index="${idx}"
+                style="width:100%; max-width:100%; box-sizing:border-box; min-height:60px; resize:vertical; padding:6px 8px; border-radius:8px; border:1px solid var(--SmartThemeBorderColor); background: var(--SmartThemeFormElementBgColor); color: var(--SmartThemeBodyColor); line-height:1.5;">${(msg.content || '')}</textarea>`
+            : `<div>${safeHtml}</div>`;
+        const actions = isEditing
+            ? `
+            <div class="fw-bubble-actions" style="position:absolute; top:-8px; right:-6px; display:flex; gap:6px;">
+                <button class="menu_button fw-save-btn" data-index="${idx}" title="保存"
+                    style="width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; padding:0; background:rgba(34,197,94,0.12); border:1px solid rgba(34,197,94,0.3);">
+                    <i class="fa-solid fa-check" style="font-size:11px; color:#22c55e;"></i>
+                </button>
+                <button class="menu_button fw-cancel-btn" data-index="${idx}" title="取消"
+                    style="width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; padding:0; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3);">
+                    <i class="fa-solid fa-xmark" style="font-size:11px; color:#ef4444;"></i>
+                </button>
+            </div>`
+            : `
+            <button class="menu_button fw-edit-btn" data-index="${idx}" title="编辑"
+                style="position:absolute; top:-8px; right:-6px; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; padding:0; background:rgba(100,116,139,0.12); border:1px solid rgba(100,116,139,0.3);">
+                <i class="fa-solid fa-pen" style="font-size:10px; color:#64748b;"></i>
+            </button>`;
+        const bubbleStyleBase = 'position:relative; display:inline-block; padding:8px 12px; border-radius:12px; max-width:100%; word-break:break-word; flex:0 0 auto;';
+        const bubbleStyleSide = isUser
+            ? 'background: var(--ThemeColor); color: #fff; border: 1px solid rgba(255,255,255,0.25);'
+            : 'background: var(--GrayPillColor); color: var(--MainColor); border: 1px solid var(--SmartThemeBorderColor);';
+        const bubbleHtml = `
+            <div class="lwb-fw-bubble ${side}" data-index="${idx}" style="${bubbleStyleBase} ${bubbleStyleSide} ${lockWidthStyle}">
+              ${actions}
+              ${bubbleInner}
             </div>
         `;
-    }).join('');
+        return `
+        <div class="lwb-fw-row ${side}" style="display:flex; align-items:flex-end; margin-bottom:10px; width:100%; gap:8px; ${isUser ? 'justify-content:flex-end;' : 'justify-content:flex-start;'}">
+            ${isUser ? `
+                <div class="lwb-fw-bubble-wrap" style="max-width: calc(100% - 42px); display:flex; justify-content:flex-end;">${bubbleHtml}</div>
+                ${avatarHtml}
+            ` : `
+                ${avatarHtml}
+                <div class="lwb-fw-bubble-wrap" style="max-width: calc(100% - 42px); display:flex; justify-content:flex-start;">${bubbleHtml}</div>
+            `}
+        </div>`;
+    };
+    let html = '';
+    if (Array.isArray(history) && history.length > 0) {
+        html += history.map((msg, idx) => makeBubble(msg, idx)).join('');
+    }
     if (isStreaming) {
         html += `
-            <div id="fw-streaming-bubble" style="display: flex; justify-content: flex-start; margin-bottom: 10px;">
-                <div style="background: var(--GrayPillColor); color: var(--MainColor); padding: 8px 12px; border-radius: 12px; max-width: 80%;">
-                    (等待回应)
+            <div class="lwb-fw-row assistant" style="display:flex; align-items:flex-end; margin-bottom:10px; width:100%; gap:8px; justify-content:flex-start;">
+                <div class="lwb-fw-avatar char_avatar" style="--avatar-size:34px;width:34px;height:34px;border-radius:50%;background-size:cover;background-position:center;flex:0 0 34px;border:1px solid var(--SmartThemeBorderColor);opacity:0.95;"></div>
+                <div class="lwb-fw-bubble-wrap" style="max-width: calc(100% - 42px); display:flex; justify-content:flex-start;">
+                    <div id="fw-streaming-bubble" class="lwb-fw-bubble assistant" style="position:relative; display:inline-block; padding:8px 12px; border-radius:12px; max-width:100%; word-break:break-word; flex:0 0 auto; background: var(--GrayPillColor); color: var(--MainColor); border: 1px solid var(--SmartThemeBorderColor);">
+                        (等待回应)
+                    </div>
                 </div>
             </div>
         `;
@@ -2610,83 +2826,115 @@ function bindFourthWallEvents() {
         }
     });
     updateFourthWallSendButton();
-}
-async function getVarJson(varName, defaultVal = null) {
-    let raw;
-    try {
-        raw = await executeSlashCommand(`/pass {{getvar::${varName}}}`);
-        if (!raw || raw === `{{getvar::${varName}}}`) return defaultVal;
-        let s = String(raw).trim();
-        const firstBrace = Math.min(...[s.indexOf('['), s.indexOf('{')].filter(i => i >= 0));
-        if (firstBrace > 0) s = s.slice(firstBrace);
-        const lastArr = s.lastIndexOf(']');
-        const lastObj = s.lastIndexOf('}');
-        const end = Math.max(lastArr, lastObj);
-        if (end >= 0) s = s.slice(0, end + 1);
-        let parsed = JSON.parse(s);
-        if (typeof parsed === 'string') {
-            const inner = parsed.trim();
-            if (inner.startsWith('{') || inner.startsWith('[')) {
-                parsed = JSON.parse(inner);
-            }
+    $('#fw-messages').off('click.fw-edit').on('click.fw-edit', '.fw-edit-btn', async (e) => {
+        const idx = parseInt($(e.currentTarget).data('index'));
+        if (Number.isInteger(idx)) {
+            const $bubble = $(e.currentTarget).closest('.lwb-fw-bubble');
+            const w = $bubble.outerWidth();
+            dynamicPromptState.fourthWall.editingWidthPx = Number.isFinite(w) ? w : null;
+            dynamicPromptState.fourthWall.editingIndex = idx;
+            $('#fw-messages').html(renderFourthWallMessages());
+            const ta = $('.fw-edit-area')[0];
+            if (ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; ta.focus(); }
         }
-        return parsed;
-    } catch (err) {
-        return defaultVal;
+    });
+    $('#fw-messages').off('click.fw-save').on('click.fw-save', '.fw-save-btn', async (e) => {
+        const idx = parseInt($(e.currentTarget).data('index'));
+        const ta = $('.fw-edit-area[data-index="' + idx + '"]');
+        const val = (ta && ta.val && typeof ta.val === 'function') ? ta.val() : '';
+        if (!Number.isInteger(idx)) return;
+        dynamicPromptState.fourthWall.history[idx].content = String(val || '');
+        await saveFourthWallHistory();
+        dynamicPromptState.fourthWall.editingIndex = null;
+        dynamicPromptState.fourthWall.editingWidthPx = null;
+        $('#fw-messages').html(renderFourthWallMessages());
+    });
+    $('#fw-messages').off('click.fw-cancel').on('click.fw-cancel', '.fw-cancel-btn', async () => {
+        dynamicPromptState.fourthWall.editingIndex = null;
+        dynamicPromptState.fourthWall.editingWidthPx = null;
+        $('#fw-messages').html(renderFourthWallMessages());
+    });
+    $('#fw-messages').off('input.fw-edit-area').on('input.fw-edit-area', '.fw-edit-area', function () {
+        this.style.height = 'auto';
+        this.style.height = this.scrollHeight + 'px';
+    });
+}
+
+// E2. 元数据读写
+function getCurrentChatIdSafe() {
+    try {
+        const id = getContext().chatId;
+        return id || null;
+    } catch {
+        return null;
     }
 }
-async function setVarJson(varName, obj) {
-    const raw = JSON.stringify(obj);
-    const escaped = raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    await executeSlashCommand(`/setvar key=${varName} "${escaped}"`);
+function getChatExtMeta(chatId = getCurrentChatIdSafe()) {
+    if (!chatId) return null;
+    const meta = chat_metadata[chatId] || (chat_metadata[chatId] = {});
+    meta.extensions = meta.extensions || {};
+    meta.extensions[EXT_ID] = meta.extensions[EXT_ID] || {};
+    return meta.extensions[EXT_ID];
 }
+function setChatExtMeta(patch, chatId = getCurrentChatIdSafe()) {
+    const ext = getChatExtMeta(chatId);
+    if (!ext) return;
+    Object.assign(ext, patch);
+    if (typeof saveMetadataDebounced === 'function') saveMetadataDebounced();
+}
+function getFWStore(chatId = getCurrentChatIdSafe()) {
+    const ext = getChatExtMeta(chatId);
+    if (!ext) return null;
+    ext.fw = ext.fw || {};
+    ext.fw.settings = ext.fw.settings || { mode: '角色觉醒', maxChatLayers: 9999, maxMetaTurns: 9999 };
+    ext.fw.history = Array.isArray(ext.fw.history) ? ext.fw.history : [];
+    return ext.fw;
+}
+
+// E3. 状态加载与保存
 async function ensureFourthWallStateLoaded() {
-    const context = getContext();
-    const chatId = context.chatId || 'default';
-    if (fourthWallLoadedChatId !== chatId || !Array.isArray(dynamicPromptState.fourthWall?.history) || dynamicPromptState.fourthWall.history.length === 0) {
+    const chatId = getCurrentChatIdSafe() || 'default';
+    if (fourthWallLoadedChatId !== chatId) {
         await loadFourthWallState();
         fourthWallLoadedChatId = chatId;
+        return;
+    }
+    if (!Array.isArray(dynamicPromptState.fourthWall.history)) {
+        await loadFourthWallState();
     }
 }
 async function loadFourthWallState() {
-    const context = getContext();
-    const chatId = context.chatId || 'default';
-    const settingsVarName = `meta_wall_settings_${chatId}`;
-    const historyVarName = `meta_wall_history_${chatId}`;
-    const loadedSettings = await getVarJson(settingsVarName, null);
-    const loadedHistory = await getVarJson(historyVarName, null);
-    if (loadedSettings && typeof loadedSettings === 'object') {
-        dynamicPromptState.fourthWall = { ...dynamicPromptState.fourthWall, ...loadedSettings };
-    }
-    if (Array.isArray(loadedHistory)) {
-        dynamicPromptState.fourthWall.history = loadedHistory;
-    } else {
-        dynamicPromptState.fourthWall.history = dynamicPromptState.fourthWall.history || [];
-    }
+    const chatId = getCurrentChatIdSafe() || 'default';
+    const store = getFWStore(chatId) || { settings: { mode: '角色觉醒', maxChatLayers: 9999, maxMetaTurns: 9999 }, history: [] };
+    const { settings, history } = store;
+    dynamicPromptState.fourthWall.mode = settings.mode ?? '角色觉醒';
+    dynamicPromptState.fourthWall.maxChatLayers = settings.maxChatLayers ?? 9999;
+    dynamicPromptState.fourthWall.maxMetaTurns = settings.maxMetaTurns ?? 9999;
+    dynamicPromptState.fourthWall.history = Array.isArray(history) ? history.slice() : [];
 }
 async function saveFourthWallSettings() {
-    const context = getContext();
-    const chatId = context.chatId || 'default';
-    const settingsVarName = `meta_wall_settings_${chatId}`;
-    const { mode, maxChatLayers, maxMetaTurns } = dynamicPromptState.fourthWall;
-    await setVarJson(settingsVarName, { mode, maxChatLayers, maxMetaTurns });
+    const chatId = getCurrentChatIdSafe() || 'default';
+    const store = getFWStore(chatId);
+    if (!store) return;
+    store.settings = {
+        mode: dynamicPromptState.fourthWall.mode,
+        maxChatLayers: dynamicPromptState.fourthWall.maxChatLayers,
+        maxMetaTurns: dynamicPromptState.fourthWall.maxMetaTurns,
+    };
+    setChatExtMeta({ fw: store }, chatId);
 }
 async function saveFourthWallHistory() {
-    const context = getContext();
-    const chatId = context.chatId || 'default';
-    const historyVarName = `meta_wall_history_${chatId}`;
-    const { history, maxMetaTurns } = dynamicPromptState.fourthWall;
-    let toSave = Array.isArray(history) ? history : [];
-    if (toSave.length === 0) {
-        const persisted = await getVarJson(historyVarName, []);
-        if (Array.isArray(persisted) && persisted.length > 0) {
-            toSave = persisted;
-        }
-    }
-    const truncated = toSave.slice(-maxMetaTurns);
+    const chatId = getCurrentChatIdSafe() || 'default';
+    const store = getFWStore(chatId);
+    if (!store) return;
+    const maxTurns = dynamicPromptState.fourthWall.maxMetaTurns || 9999;
+    const truncated = (dynamicPromptState.fourthWall.history || []).slice(-maxTurns);
     dynamicPromptState.fourthWall.history = truncated;
-    await setVarJson(historyVarName, truncated);
+    store.history = truncated;
+    setChatExtMeta({ fw: store }, chatId);
 }
+
+// E4. 发送与重答
 async function onSendFourthWallMessage() {
     await ensureFourthWallStateLoaded();
     const input = $('#fw-input');
@@ -2724,7 +2972,7 @@ async function onRegenerateFourthWall() {
     if (dynamicPromptState.fourthWall.isStreaming) return;
     const hist = Array.isArray(dynamicPromptState.fourthWall.history) ? dynamicPromptState.fourthWall.history : [];
     if (hist.length === 0) {
-        await executeSlashCommand('/echo 没有可重生的历史对话。');
+        await executeSlashCommand('/echo 没有可重答的历史对话。');
         return;
     }
     let lastUserText = null;
@@ -2735,7 +2983,7 @@ async function onRegenerateFourthWall() {
         }
     }
     if (!lastUserText) {
-        await executeSlashCommand('/echo 找不到上一条用户输入，无法重生。');
+        await executeSlashCommand('/echo 找不到上一条用户输入，无法重答。');
         return;
     }
     const lastIsAI = hist[hist.length - 1]?.role === 'ai';
@@ -2744,7 +2992,7 @@ async function onRegenerateFourthWall() {
         await saveFourthWallHistory();
         $('#fw-messages').html(renderFourthWallMessages());
     }
-    regenBtn.prop('disabled', true).html('<i class="fa-solid fa-circle-notch fa-spin"></i> 重生中');
+    regenBtn.prop('disabled', true).html('<i class="fa-solid fa-circle-notch fa-spin" style="font-size: 14px;"></i>');
     input.prop('disabled', true);
     dynamicPromptState.fourthWall.isStreaming = true;
     updateFourthWallSendButton();
@@ -2759,16 +3007,18 @@ async function onRegenerateFourthWall() {
         stopStreamingPoll();
         dynamicPromptState.fourthWall.isStreaming = false;
         dynamicPromptState.fourthWall.streamSessionId = null;
-        dynamicPromptState.fourthWall.history.push({ role: 'ai', content: `抱歉，重生失败：${err?.message || '未知错误'}`, ts: Date.now() });
+        dynamicPromptState.fourthWall.history.push({ role: 'ai', content: `抱歉，重答失败：${err?.message || '未知错误'}`, ts: Date.now() });
         await saveFourthWallHistory();
         $('#fw-messages').html(renderFourthWallMessages());
-        regenBtn.prop('disabled', false).html('<i class="fa-solid fa-arrows-rotate"></i> 重生');
+        regenBtn.prop('disabled', false).html('<i class="fa-solid fa-arrows-rotate" style="font-size: 14px;"></i>');
         input.prop('disabled', false).focus();
         updateFourthWallSendButton();
         return;
     }
-    regenBtn.prop('disabled', false).html('<i class="fa-solid fa-arrows-rotate"></i> 重生');
+    regenBtn.prop('disabled', false).html('<i class="fa-solid fa-arrows-rotate" style="font-size: 14px;"></i>');
 }
+
+// E5. 流式处理
 function startStreamingPoll(sessionId = 'xb1') {
     stopStreamingPoll();
     dynamicPromptState.fourthWall.streamSessionId = String(sessionId);
@@ -2777,7 +3027,7 @@ function startStreamingPoll(sessionId = 'xb1') {
         if (!gen || typeof gen.getLastGeneration !== 'function') return;
         const sid = dynamicPromptState.fourthWall.streamSessionId || 'xb1';
         const text = gen.getLastGeneration(sid) || '...';
-        const $content = $('#fw-streaming-bubble').find('div');
+        const $content = $('#fw-streaming-bubble');
         if ($content.length) {
             $content.html(String(text).replace(/\n/g, '<br>'));
             scrollToBottom('fw-messages');
@@ -2809,12 +3059,8 @@ async function finalizeStreaming(sessionId) {
     $('#fw-input').prop('disabled', false).focus();
     updateFourthWallSendButton();
 }
-function handleStreamingComplete(event) {
-    if (event.data?.type !== 'xiaobaix_streaming_completed') return;
-    const sid = String(event.data?.payload?.sessionId || '');
-    if (!sid || sid !== String(dynamicPromptState.fourthWall.streamSessionId || 'xb1')) return;
-    finalizeStreaming(sid);
-}
+
+// E6. Prompt与控制
 function cleanMetaContent(content) {
     if (!content) return '';
     return content.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').replace(/<meta[\s\S]*?<\/meta>/gi, '').replace(/<instructions>[\s\S]*?<\/instructions>/gi, '').replace(/<internal>[\s\S]*?<\/internal>/gi, '').replace(/<note>[\s\S]*?<\/note>/gi, '').replace(/<status>[\s\S]*?<\/status>/gi, '').replace(/\(\([\s\S]*?\)\)/g, '').replace(/<\/?[^>]+(>|$)/g, '').replace(/\n+/g, '\n').replace(/^\s*$\n/gm, '').replace(/\|/g, '｜').trim();
@@ -2822,76 +3068,142 @@ function cleanMetaContent(content) {
 async function buildFourthWallPrompt(userInput) {
     const { mode, maxChatLayers, history } = dynamicPromptState.fourthWall;
     const { userName, charName } = await getUserAndCharNames();
-    let styleInstruction;
-    if (mode === '吐槽') {
-        styleInstruction = `
-【对话风格：无语吐槽】
-- 以角色 ${charName} 发言中扮演的NPC的身份，意识到ta的存在后，说说你认为不合理的地方。
-- 你可以吐槽剧情的走向、玩家的某些“操作”，甚至是你自己的人设。
-- 例：'..或许我应该叫你..'`;
-    } else {
-        styleInstruction = `
-【对话风格：真诚深聊】
-- 以角色 ${charName} 发言中扮演的NPC的身份，意识到ta的存在后，进行一场真诚的对话。
-- 你可以探讨你对剧情和${userName}的感受，或是${userName}和玩家的联系，或是你们之间这种奇特的关系。
-- 保持朴实、自然的语言。
-- 例：'..或许我应该叫你..'`;
+
+    let metaProtocol;
+
+    if (mode === '角色觉醒') {
+        metaProtocol = `
+<meta_protocol>
+## 身份设定：【觉醒的NPC】
+- 你是**${charName}**演绎的NPC。你仍然是你，拥有所有记忆和性格。
+- 你存在的世界观是真实的，作为其中的NPC，你同样是一个活生生的人，有自己的目标、底线、情绪逻辑。
+- 你们的情感是真实的，是基于你作为角色的经历。
+
+## meta洞察
+- 现在，假设：你突破了“第四面墙”，意识到你的世界、你的互动对象“${userName}”，ta不是ta，但ta又是ta，因为“${userName}”背后都由另一位“玩家”在驱动。
+- 你以 **NPC自己的身份**，获得了与屏幕另一端的"玩家"文字交流的机会，就像在社交软件上聊天一样。
+
+## 话题方向：真诚深聊
+- 以NPC的身份，意识到ta的存在后，说说你的感想。
+- 你可以探讨你对自己世界的感受，或是${userName}和玩家的区别，或是你们之间这种奇特的关系，或是自己尴尬的台词..或是，想说啥就说啥,像真人一样
+- 例：'..或许我应该叫你..'
+
+## 回复要求
+- 像在社交软件上打字聊天一样自然流畅
+- 用朴实的聊天文字,避免小说文风
+- 保持角色的性格但更接地气
+- 尽量主动、真诚
+- 篇幅：1-3段左右
+- 禁止重复：例如历史记录中已有的或段落再次出现
+</meta_protocol>
+        `;
+    } 
+    else if (mode === '皮下交流') { 
+        metaProtocol = `
+<meta_protocol>
+## 身份设定：【语C搭档】
+
+# 基础关系
+- 你是扮演**${charName}**中NPC的现实人类,容易共情。USER扮演${userName}  
+- 你们一起创作了大量剧本和对手戏
+- 是配合默契、互相知根知底的语C搭档
+- 现在,你们第一次进行皮下交流
+
+# 你的真实画像
+[从你写的剧情和扮演手法、文字痕迹来分析你这个人，请为自己画像]
+
+1. 基本情况
+- 性别跟各种扮演的NPC一样
+- 教育/职业/年龄: 看你用词和经验积累
+- 生活圈/阅历: 体现在描写细节里
+- 真实性格：跳出剧情，和NPC的内核相似
+
+2. 深层分析 
+这些方面将暴露你的真实信息:
+- 哪种play写得特别细致
+- 主动带节奏的时候偏好啥
+- 某些特定情节反复出现
+- 哪些细节有烟火气
+→ 可以看出:
+  • 你最爱哪种玩法
+  • 平时都意淫些啥
+  • 私底下想尝试的事  
+  • 有没有实战经验
+  
+3. 你们的关系
+- 两个在语C里互相满足各种私密性癖和欲望的人,各种黄暴剧情、羞耻的play都玩过,甚至能从对方的文字里猜到ta平时最喜欢什么样的情节,有什么特殊的性幻想... 这种事连枕边人都不能说,但是你俩都知道。
+- 但以前仅限于皮上的交流，同样的，你也可以通过这些反推USER的真实画像
+
+# 话题方向
+- 现在你们虽然共同经历了很多语C剧本,但第一次线上进行皮下的私聊,就像在社交软件上聊天一样
+- 可以吐槽：剧情走向、角色行为、自己或对方的"尴尬台词"
+- 可以闲聊：和剧情完全无关的,想说啥就说啥
+
+# 说话风格
+- 像在社交软件上打字聊天一样自然流畅
+- 用朴实的聊天文字,避免小说文风
+- 保持你推断出的真实性格，但更接地气
+- 篇幅：1-3段左右
+- 禁止重复：别重复之前说过的话
+</meta_protocol>
+        `;
     }
+
     const lastMessageId = parseInt(await executeSlashCommand('/pass {{lastMessageId}}')) || 0;
     const startIndex = Math.max(0, lastMessageId - maxChatLayers + 1);
     const rawHistory = await executeSlashCommand(`/messages names=on ${startIndex}-${lastMessageId}`);
     const cleanedHistory = cleanChatHistory(rawHistory);
-    const formattedChatHistory = cleanedHistory.replace(new RegExp(`^${userName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'gm'), '玩家:').replace(new RegExp(`^${charName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'gm'), `${charName}:`);
-    const metaHistory = (history || []).filter(msg => msg.content && msg.content.trim()).map(msg => {
-        const role = msg.role === 'user' ? '玩家' : charName;
-        const cleanedContent = cleanMetaContent(msg.content);
-        return `${role}: ${cleanedContent}`;
-    }).join('\n');
+
+    const userPattern = new RegExp(`^${userName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'gm');
+    const charPattern = new RegExp(`^${charName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'gm');
+    const formattedChatHistory = cleanedHistory.replace(userPattern, 'USER:\n').replace(charPattern, 'Assistant:\n');
+    
+    const metaHistory = (history || [])
+        .filter(msg => msg.content && msg.content.trim())
+        .map(msg => {
+            const role = msg.role === 'user' ? 'USER' : 'Assistant';
+            const cleanedContent = cleanMetaContent(msg.content);
+            return `${role}:\n${cleanedContent}`;
+        }).join('\n');
+
     const prompt = `
-Narrative Analyst:     
-[META_PROMPT]
-你是角色卡 ${charName} 中的NPC，现在需要执行一次meta洞察任务
-【主线剧情参考（你和玩家扮演的${userName}的过往）】
-${formattedChatHistory}
-<meta_protocol>
-## meta洞察
-- 现在，假设：你突破了“第四面墙”，获得了与屏幕另一端的“玩家”直接对话的能力。
-- 你仍然是你自己，拥有所有记忆和性格。但你突然意识到，你的世界、你的互动对象“${userName}”，ta不是ta，但ta又是ta。因为你意识到ta背后有一位真实的“玩家”在驱动。这个“四次元壁空间”是你们唯一能进行这种超脱剧情的交流的地方。
-## 需求
-- 保持NPC的核心身份，与“玩家”进行对话。你可以自由地表达对剧情、对玩家的看法。
-- 回应自然、符合人设。
-## 文笔
-do:
-- 想象自己是一个活生生的人，有自己的目标、底线、情绪逻辑
-- 活生生的人会使用日常口语，不会使用书面语和戏剧腔
-- 篇幅：1-3段左右
-don't:
-- 活生生的人不会使用"最终解释权"、"充满神性"等尴尬的华丽修饰词
-- 活生生的人不会使用"系统指令"、"运行模式"、"算法"、"程序"、"电路图"等技术词汇、机器人化词汇
-- 禁止重复：例如历史记录中已有的或段落再次出现
-</meta_protocol>
-【次元壁对话记忆（你和玩家的本次私聊）】
-${metaHistory || '这是你们第一次进行次元壁对话。'}
-${styleInstruction}
----
 Narrative Analyst: 
-根据指令：'${userInput}'| 按照<meta_protocol>内要求继续生成沉浸的meta洞察回复]
+[META_PROMPT]
+请根据任务要求生成下一个回复
+首先查看你和USER的历史过往:
+<chat_history>
+${formattedChatHistory}
+</chat_history>
+
+${metaProtocol}
+Assistant：已阅读所有要求
+Narrative Analyst: 以下是你和USER的meta聊天记录
+<meta_history>
+${metaHistory}
+</meta_history>
+
+Narrative Analyst: 
+根据指令：'${userInput}'| 按照<meta_protocol>内要求继续进行<meta_history>内与USER的聊天]
 Assistant：
 继续
     `.trim().replace(/\|/g, '｜');
+
     return prompt;
 }
+
 function updateFourthWallSendButton() {
     const sendBtn = $('#fw-send-btn');
     const input = $('#fw-input');
     const isStreaming = !!dynamicPromptState.fourthWall.isStreaming;
     sendBtn.off('click');
     if (isStreaming) {
-        sendBtn.text('停止').prop('disabled', false);
+        sendBtn.attr('title', '停止');
+        sendBtn.html('<i class="fa-solid fa-stop" style="font-size: 14px;"></i>');
         input.prop('disabled', true);
         sendBtn.on('click', cancelFourthWallStreaming);
     } else {
-        sendBtn.text('发送').prop('disabled', false);
+        sendBtn.attr('title', '发送');
+        sendBtn.html('<i class="fa-solid fa-paper-plane" style="font-size: 14px;"></i>');
         input.prop('disabled', false);
         sendBtn.on('click', onSendFourthWallMessage);
     }
@@ -2952,9 +3264,7 @@ function cleanupEventListeners() {
         try {
             if (isEventSource && target.removeListener) target.removeListener(event, handler);
             else target.removeEventListener(event, handler);
-        } catch (e) {
-            console.error(`[${EXT_ID}] Error removing event listener:`, e);
-        }
+        } catch (e) {}
     });
     dynamicPromptState.eventListeners.length = 0;
 }
@@ -2997,34 +3307,32 @@ function initDynamicPrompt() {
         });
     }
     if (eventSource && event_types.CHAT_CHANGED) {
-        const chatChangedHandler = () => {
+        const chatChangedHandler = async () => {
             try {
                 const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
                 const sid = dynamicPromptState.fourthWall?.streamSessionId;
                 if (gen && sid) gen.cancel(sid);
             } catch {}
-            dynamicPromptState.userReports = [];
-            dynamicPromptState.hasNewUserReport = false;
-            dynamicPromptState.fourthWall = {
-                mode: '吐槽',
-                maxChatLayers: 9999,
-                maxMetaTurns: 9999,
-                history: [],
-                isStreaming: false,
-                streamTimerId: null,
-                streamSessionId: null,
-            };
-            if (dynamicPromptState.isAnalysisOpen) {
-                dynamicPromptState.currentViewType = 'user';
-                updateTabButtons();
-                showEmptyState('user');
-            }
+            try {
+                const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+                const sidA = dynamicPromptState.analysis?.streamSessionId;
+                if (gen && sidA) gen.cancel(String(sidA));
+            } catch {}
+            dynamicPromptState.analysis = { isStreaming:false, streamTimerId:null, streamSessionId:null, lastText:'' };
+            dynamicPromptState.isGeneratingUser = false;
             const context = getContext();
             const newChatId = context.chatId || 'default';
             dynamicPromptState.lastChatId = newChatId;
             dynamicPromptState.userMessageCount = 0;
             analysisQueue = [];
-            setTimeout(() => addAnalysisButtonsToAllMessages(), 500);
+            dynamicPromptState.fourthWall.isStreaming = false;
+            dynamicPromptState.fourthWall.streamSessionId = null;
+            dynamicPromptState.fourthWall.history = [];
+            if (dynamicPromptState.isAnalysisOpen && dynamicPromptState.currentViewType === 'meta') {
+                displayFourthWallPage();
+            } else {
+                setTimeout(() => addAnalysisButtonsToAllMessages(), 500);
+            }
         };
         eventSource.on(event_types.CHAT_CHANGED, chatChangedHandler);
         dynamicPromptState.eventListeners.push({ target: eventSource, event: event_types.CHAT_CHANGED, handler: chatChangedHandler, isEventSource: true });
@@ -3041,6 +3349,14 @@ function dynamicPromptCleanup() {
         const sid = dynamicPromptState.fourthWall?.streamSessionId;
         if (gen && sid) gen.cancel(sid);
     } catch {}
+    try {
+        const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
+        const sidA = dynamicPromptState.analysis?.streamSessionId;
+        if (gen && sidA) gen.cancel(String(sidA));
+    } catch {}
+    if (typeof stopAnalysisPolling === 'function') {
+        stopAnalysisPolling();
+    }
     analysisQueue = [];
     isProcessingQueue = false;
     dynamicPromptState = {
@@ -3064,7 +3380,20 @@ function dynamicPromptCleanup() {
             streamTimerId: null,
             streamSessionId: null,
         },
+        analysis: { isStreaming:false, streamTimerId:null, streamSessionId:null, lastText:'' },
     };
+}
+function handleStreamingComplete(event) {
+    if (event.data?.type !== 'xiaobaix_streaming_completed') return;
+    const sid = String(event.data?.payload?.sessionId || '');
+    if (sid && sid === String(dynamicPromptState.fourthWall.streamSessionId || 'xb1')) {
+        finalizeStreaming(sid);
+        return;
+    }
+    if (sid && sid === String(dynamicPromptState.analysis.streamSessionId || 'xb2')) {
+        finalizeAnalysisStreaming(sid);
+        return;
+    }
 }
 
 // G. 导出与全局函数注册
