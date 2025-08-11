@@ -376,8 +376,189 @@ async function showMessageHistoryPreview(messageId) {
     }
 }
 
+// --- Mirror backend prompt post-processing (STRICT/SEMI/MERGE/SINGLE) ---
+const MIRROR_TYPES = {
+    MERGE: 'merge',
+    MERGE_TOOLS: 'merge_tools',
+    SEMI: 'semi',
+    SEMI_TOOLS: 'semi_tools',
+    STRICT: 'strict',
+    STRICT_TOOLS: 'strict_tools',
+    SINGLE: 'single',
+};
+
+function getNamesFromRequest(requestData) {
+    return {
+        charName: String(requestData?.char_name || ''),
+        userName: String(requestData?.user_name || ''),
+        groupNames: Array.isArray(requestData?.group_names) ? requestData.group_names.map(String) : [],
+        startsWithGroupName: function(message) {
+            return this.groupNames.some((name) => String(message || '').startsWith(`${name}: `));
+        },
+    };
+}
+
+function normalizeMessageContentToText(message) {
+    const content = message?.content;
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+        const parts = content.map((part) => {
+            if (part?.type === 'text') return String(part.text || '');
+            if (part?.type === 'image_url') return '[image]';
+            if (part?.type === 'video_url') return '[video]';
+            if (typeof part === 'string') return part;
+            if (typeof part?.content === 'string') return part.content;
+            return '';
+        });
+        return parts.filter(Boolean).join('\n\n');
+    }
+    return String(content || '');
+}
+
+function applyNamePrefixes(message, names) {
+    const role = message.role;
+    const name = message.name;
+    let text = normalizeMessageContentToText(message);
+
+    if (role === 'system' && name === 'example_assistant') {
+        if (names.charName && !text.startsWith(`${names.charName}: `) && !names.startsWithGroupName(text)) {
+            text = `${names.charName}: ${text}`;
+        }
+    } else if (role === 'system' && name === 'example_user') {
+        if (names.userName && !text.startsWith(`${names.userName}: `)) {
+            text = `${names.userName}: ${text}`;
+        }
+    } else if (name && role !== 'system') {
+        if (!text.startsWith(`${name}: `)) {
+            text = `${name}: ${text}`;
+        }
+    }
+
+    return { ...message, content: text, name: undefined };
+}
+
+function mergeMessagesLikeBackend(messages, names, { strict = false, placeholders = false, single = false, tools = false } = {}) {
+    if (!Array.isArray(messages)) return [];
+
+    // Map/normalize & name-prefix
+    let mapped = messages.map((m) => applyNamePrefixes({ ...m }, names)).map((m) => {
+        const clone = { ...m };
+        // tools handling
+        if (!tools) {
+            if (clone.role === 'tool') clone.role = 'user';
+            delete clone.tool_calls;
+            delete clone.tool_call_id;
+        }
+        if (single) {
+            if (clone.role === 'assistant') {
+                const t = String(clone.content || '');
+                if (names.charName && !t.startsWith(`${names.charName}: `) && !names.startsWithGroupName(t)) {
+                    clone.content = `${names.charName}: ${t}`;
+                }
+            }
+            if (clone.role === 'user') {
+                const t = String(clone.content || '');
+                if (names.userName && !t.startsWith(`${names.userName}: `)) {
+                    clone.content = `${names.userName}: ${t}`;
+                }
+            }
+            clone.role = 'user';
+        }
+        return clone;
+    });
+
+    // Squash consecutive same-role messages
+    const squashed = [];
+    for (const msg of mapped) {
+        if (squashed.length > 0 && squashed[squashed.length - 1].role === msg.role && String(msg.content || '').length > 0 && msg.role !== 'tool') {
+            squashed[squashed.length - 1].content = `${squashed[squashed.length - 1].content}\n\n${msg.content}`;
+        } else {
+            squashed.push(msg);
+        }
+    }
+
+    // Strict adjustments
+    if (strict) {
+        for (let i = 0; i < squashed.length; i++) {
+            if (i > 0 && squashed[i].role === 'system') {
+                squashed[i].role = 'user';
+            }
+        }
+        if (placeholders) {
+            if (squashed.length === 0) {
+                squashed.push({ role: 'user', content: "[Start a new chat]" });
+            } else if (squashed[0].role === 'system' && (squashed.length === 1 || squashed[1].role !== 'user')) {
+                squashed.splice(1, 0, { role: 'user', content: "[Start a new chat]" });
+            } else if (squashed[0].role !== 'system' && squashed[0].role !== 'user') {
+                squashed.unshift({ role: 'user', content: "[Start a new chat]" });
+            }
+        }
+        // secondary pass to re-squash after role tweaks
+        const reSquashed = [];
+        for (const msg of squashed) {
+            if (reSquashed.length > 0 && reSquashed[reSquashed.length - 1].role === msg.role && String(msg.content || '').length > 0 && msg.role !== 'tool') {
+                reSquashed[reSquashed.length - 1].content = `${reSquashed[reSquashed.length - 1].content}\n\n${msg.content}`;
+            } else {
+                reSquashed.push(msg);
+            }
+        }
+        return reSquashed;
+    }
+
+    if (squashed.length === 0) {
+        squashed.push({ role: 'user', content: "[Start a new chat]" });
+    }
+    return squashed;
+}
+
+function mirrorPostProcess(requestData) {
+    try {
+        const type = String(requestData?.custom_prompt_post_processing || '').toLowerCase();
+        const names = getNamesFromRequest(requestData || {});
+        const srcMessages = Array.isArray(requestData?.messages) ? JSON.parse(JSON.stringify(requestData.messages)) : [];
+
+        const make = (opts) => mergeMessagesLikeBackend(srcMessages, names, opts);
+
+        switch (type) {
+            case MIRROR_TYPES.MERGE:
+                return make({ strict: false, placeholders: false, single: false, tools: false });
+            case MIRROR_TYPES.MERGE_TOOLS:
+                return make({ strict: false, placeholders: false, single: false, tools: true });
+            case MIRROR_TYPES.SEMI:
+                return make({ strict: true, placeholders: false, single: false, tools: false });
+            case MIRROR_TYPES.SEMI_TOOLS:
+                return make({ strict: true, placeholders: false, single: false, tools: true });
+            case MIRROR_TYPES.STRICT:
+                return make({ strict: true, placeholders: true, single: false, tools: false });
+            case MIRROR_TYPES.STRICT_TOOLS:
+                return make({ strict: true, placeholders: true, single: false, tools: true });
+            case MIRROR_TYPES.SINGLE:
+                return make({ strict: true, placeholders: false, single: true, tools: false });
+            default:
+                return srcMessages;
+        }
+    } catch {
+        return Array.isArray(requestData?.messages) ? requestData.messages : [];
+    }
+}
+
+function getFinalMessagesForDisplay(data) {
+    try {
+        // Prefer requestData if present (preview or history record)
+        if (data?.requestData && Array.isArray(data.requestData.messages)) {
+            return mirrorPostProcess(data.requestData);
+        }
+        // Fallback to plain messages (no post-processing info available)
+        if (Array.isArray(data?.messages)) return data.messages;
+        return [];
+    } catch {
+        return Array.isArray(data?.messages) ? data.messages : [];
+    }
+}
+
 function formatPreviewContent(data, userInput, isHistory = false) {
-    return formatMessagesArray(data.messages);
+    const finalMessages = getFinalMessagesForDisplay(data);
+    return formatMessagesArray(finalMessages);
 }
 
 function formatMessagesArray(messages) {
@@ -423,7 +604,7 @@ const addHistoryButtonsDebounced = debounce(() => {
     $('#chat .mes').each(function() {
         const mesId = parseInt($(this).attr('mesid'));
         const isUser = $(this).attr('is_user') === 'true';
-        
+
         if (mesId <= 0 || isUser) return;
 
         const historyButton = $(`<div class="mes_btn mes_history_preview" title="查看历史API请求">
