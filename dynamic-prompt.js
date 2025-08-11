@@ -2024,6 +2024,7 @@ async function generateUserAnalysisReport(isAutoAnalysis = false) {
         if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
     }
 }
+
 async function performUserAnalysis(chatHistory) {
     const analysisPrompt = createUserAnalysisPrompt(chatHistory);
     const settings = getSettings();
@@ -2036,6 +2037,7 @@ async function performUserAnalysis(chatHistory) {
         return await callAIForAnalysis(analysisPrompt);
     }
 }
+
 async function getChatHistory() {
     const lastMessageIdStr = await executeSlashCommand('/pass {{lastMessageId}}');
     const lastMessageId = parseInt(lastMessageIdStr) || 0;
@@ -2047,6 +2049,7 @@ async function getChatHistory() {
     if (!rawHistory || rawHistory.trim() === '') throw new Error('聊天记录为空');
     return await formatChatHistory(rawHistory);
 }
+
 function createUserAnalysisPrompt(chatHistory) {
     const sections = loadPromptSections();
     let prompt = '';
@@ -2065,6 +2068,7 @@ function createUserAnalysisPrompt(chatHistory) {
     });
     return prompt.trim();
 }
+
 async function callAIForAnalysis(prompt) {
     const settings = getSettings();
     const apiConfig = settings.apiConfig;
@@ -2083,11 +2087,13 @@ async function callAIForAnalysis(prompt) {
             return await callSillyTavernAPI(prompt);
     }
 }
+
 async function callSillyTavernAPI(prompt) {
     const result = await executeSlashCommand(`/genraw lock=off instruct=off ${prompt}`);
     if (!result || result.trim() === '') throw new Error('AI返回空内容');
     return result.trim();
 }
+
 async function callOpenAIAPI(prompt, config) {
     const response = await fetch(`${config.url}/chat/completions`, {
         method: 'POST',
@@ -2108,6 +2114,7 @@ async function callOpenAIAPI(prompt, config) {
     const data = await response.json();
     return data.choices[0].message.content;
 }
+
 async function callGoogleAPI(prompt, config) {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.key}`, {
         method: 'POST',
@@ -2126,6 +2133,7 @@ async function callGoogleAPI(prompt, config) {
     const data = await response.json();
     return data.candidates[0].content.parts[0].text;
 }
+
 async function callCohereAPI(prompt, config) {
     const response = await fetch('https://api.cohere.ai/v1/generate', {
         method: 'POST',
@@ -2146,6 +2154,7 @@ async function callCohereAPI(prompt, config) {
     const data = await response.json();
     return data.generations[0].text;
 }
+
 async function callDeepSeekAPI(prompt, config) {
     const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
@@ -2166,6 +2175,7 @@ async function callDeepSeekAPI(prompt, config) {
     const data = await response.json();
     return data.choices[0].message.content;
 }
+
 async function formatChatHistory(rawHistory) {
     let cleaned = cleanChatHistory(rawHistory);
     const settings = getSettings();
@@ -2186,11 +2196,10 @@ async function formatChatHistory(rawHistory) {
     }
     const userPattern = new RegExp(`^${currentUser.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'gm');
     const charPattern = new RegExp(`^${currentChar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'gm');
-    cleaned = cleaned
-        .replace(userPattern, `${finalUserName}:\n`)
-        .replace(charPattern, `${finalAssistantName}:\n`);
+    cleaned = cleaned.replace(userPattern, `${finalUserName}:\n`).replace(charPattern, `${finalAssistantName}:\n`);
     return cleaned;
 }
+
 function cleanChatHistory(rawHistory) {
     if (!rawHistory) return '';
     rawHistory = rawHistory.replace(/\|/g, '｜');
@@ -2206,6 +2215,7 @@ function cleanChatHistory(rawHistory) {
         .replace(/^\s*$\n/gm, '')
         .trim();
 }
+
 async function getUserAndCharNames() {
     try {
         const context = getContext();
@@ -2232,15 +2242,12 @@ async function getUserAndCharNames() {
         return { userName: 'User', charName: 'Assistant' };
     }
 }
+
 async function saveUserAnalysisToVariable(analysisResult) {
     try {
         function cleanTextForPrompt(text) {
             if (!text) return '';
-            return text
-                .replace(/\*\*(.*?)\*\*/g, '$1')
-                .replace(/\*([^*\n]+?)\*/g, '$1')
-                .replace(/\n{3,}/g, '\n\n')
-                .trim();
+            return text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*([^*\n]+?)\*/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
         }
         const part1Match = analysisResult.match(/【第一部分】\s*\n([\s\S]*?)(?=\n【第二部分】|\n===END===|$)/);
         if (part1Match && part1Match[1]) {
@@ -2283,9 +2290,9 @@ async function saveUserAnalysisToVariable(analysisResult) {
                 wide: true
             });
         }, 1000);
-    } catch (error) {
-    }
+    } catch (error) {}
 }
+
 function clearAnalysisUI() {
     dynamicPromptState.userReports = [];
     const results = document.querySelector('#dynamic-prompt-content-wrapper #analysis-results');
@@ -2294,6 +2301,7 @@ function clearAnalysisUI() {
     if (placeholder) placeholder.style.display = 'none';
     updateTabButtons();
 }
+
 function mountAnalysisStreamingCard() {
     const placeholder = document.querySelector('#dynamic-prompt-content-wrapper #analysis-placeholder');
     const results = document.querySelector('#dynamic-prompt-content-wrapper #analysis-results');
@@ -2329,6 +2337,50 @@ function mountAnalysisStreamingCard() {
     const cancelBtn = document.getElementById('analysis-cancel-btn');
     if (cancelBtn) cancelBtn.onclick = cancelAnalysisStreaming;
 }
+
+function mapProviderToApi(provider) {
+    const p = String(provider || '').toLowerCase();
+    if (p === 'sillytavern') return null;
+    if (p === 'openai') return 'openai';
+    if (p === 'google' || p === 'gemini') return 'gemini';
+    if (p === 'cohere') return 'cohere';
+    if (p === 'deepseek') return 'deepseek';
+    return null;
+}
+
+function buildAnalysisStreamingArgs() {
+    const s = getSettings();
+    const provider = s.apiConfig?.provider || 'sillytavern';
+    const api = mapProviderToApi(provider);
+    if (!api) return null;
+    const args = { api };
+    if (api === 'openai') {
+        if (s.apiConfig.openai?.url) args.apiurl = s.apiConfig.openai.url;
+        if (s.apiConfig.openai?.key) args.apipassword = s.apiConfig.openai.key;
+        if (s.apiConfig.openai?.model) args.model = s.apiConfig.openai.model;
+    } else if (api === 'gemini') {
+        if (s.apiConfig.google?.key) args.apipassword = s.apiConfig.google.key;
+        if (s.apiConfig.google?.model) args.model = s.apiConfig.google.model;
+    } else if (api === 'cohere') {
+        if (s.apiConfig.cohere?.key) args.apipassword = s.apiConfig.cohere.key;
+        if (s.apiConfig.cohere?.model) args.model = s.apiConfig.cohere.model;
+    } else if (api === 'deepseek') {
+        if (s.apiConfig.deepseek?.key) args.apipassword = s.apiConfig.deepseek.key;
+        if (s.apiConfig.deepseek?.model) args.model = s.apiConfig.deepseek.model;
+    }
+    return args;
+}
+
+function buildXbgenrawCmd(sessionId, asRole, prompt, args) {
+    const parts = [`/xbgenraw id=${sessionId} as=${asRole}`];
+    if (args?.api) parts.push(`api=${args.api}`);
+    if (args?.apiurl) parts.push(`apiurl="${String(args.apiurl).replace(/"/g, '\\"')}"`);
+    if (args?.apipassword) parts.push(`apipassword="${String(args.apipassword).replace(/"/g, '\\"')}"`);
+    if (args?.model) parts.push(`model="${String(args.model).replace(/"/g, '\\"')}"`);
+    parts.push(prompt);
+    return parts.join(' ');
+}
+
 async function startAnalysisStreaming(prompt, isAuto = false) {
     const settings = getSettings();
     clearAnalysisUI();
@@ -2340,13 +2392,6 @@ async function startAnalysisStreaming(prompt, isAuto = false) {
     } catch {}
     stopAnalysisPolling();
     dynamicPromptState.analysis.isAuto = !!isAuto;
-    if ((settings.apiConfig?.provider || 'sillytavern') !== 'sillytavern') {
-        const analysisResult = await callAIForAnalysis(prompt);
-        await onAnalysisFinalText(analysisResult, !!isAuto);
-        dynamicPromptState.isGeneratingUser = false;
-        if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
-        return;
-    }
     if (dynamicPromptState.isAnalysisOpen) {
         dynamicPromptState.currentViewType = 'user';
         updateTabButtons();
@@ -2355,7 +2400,10 @@ async function startAnalysisStreaming(prompt, isAuto = false) {
     dynamicPromptState.analysis.isStreaming = true;
     dynamicPromptState.analysis.lastText = '';
     try {
-        const sessionId = await executeSlashCommand(`/xbgenraw id=xb2 as=system ${prompt}`);
+        const sid = 'xb2';
+        const args = buildAnalysisStreamingArgs();
+        const cmd = args ? buildXbgenrawCmd(sid, 'system', prompt, args) : `/xbgenraw id=${sid} as=system ${prompt}`;
+        const sessionId = await executeSlashCommand(cmd);
         dynamicPromptState.analysis.streamSessionId = String(sessionId || 'xb2');
         startAnalysisPolling(dynamicPromptState.analysis.streamSessionId);
         if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
@@ -2369,6 +2417,7 @@ async function startAnalysisStreaming(prompt, isAuto = false) {
         if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
     }
 }
+
 function startAnalysisPolling(sessionId = 'xb2') {
     stopAnalysisPolling();
     const sid = String(sessionId);
@@ -2380,11 +2429,7 @@ function startAnalysisPolling(sessionId = 'xb2') {
             dynamicPromptState.analysis.lastText = text;
             const el = document.getElementById('analysis-streaming-content');
             if (el) {
-                el.innerHTML = text
-                    .replace(/&/g,'&amp;')
-                    .replace(/</g,'&lt;')
-                    .replace(/>/g,'&gt;')
-                    .replace(/\n/g,'<br>');
+                el.innerHTML = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
             }
         }
         const st = gen.getStatus?.(sid);
@@ -2393,12 +2438,14 @@ function startAnalysisPolling(sessionId = 'xb2') {
         }
     }, 80);
 }
+
 function stopAnalysisPolling() {
     if (dynamicPromptState.analysis.streamTimerId) {
         clearInterval(dynamicPromptState.analysis.streamTimerId);
         dynamicPromptState.analysis.streamTimerId = null;
     }
 }
+
 async function finalizeAnalysisStreaming(sessionId) {
     if (!dynamicPromptState.analysis.isStreaming) return;
     stopAnalysisPolling();
@@ -2417,6 +2464,7 @@ async function finalizeAnalysisStreaming(sessionId) {
         updatePopupUI();
     }
 }
+
 async function onAnalysisFinalText(analysisResult, isAuto) {
     const reportData = {
         timestamp: Date.now(),
@@ -2430,6 +2478,7 @@ async function onAnalysisFinalText(analysisResult, isAuto) {
         await executeSlashCommand('/echo ✅ 用户文字指纹分析完成！结果已保存到变量中');
     }
 }
+
 function cancelAnalysisStreaming() {
     const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
     const sid = dynamicPromptState.analysis.streamSessionId || 'xb2';
@@ -2446,6 +2495,7 @@ function cancelAnalysisStreaming() {
     }
     if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
 }
+
 function waitForAnalysisCompletion(sessionId = 'xb2', timeoutMs = 600000) {
     return new Promise((resolve, reject) => {
         function onMsg(e) {
@@ -3110,7 +3160,7 @@ async function buildFourthWallPrompt(userInput) {
 - 现在,你们第一次进行皮下交流
 
 # 你的真实画像
-[从你写的剧情和扮演手法、文字痕迹来分析你这个人，请为自己画像]
+[区分严格角色人格和现实人格，跳出剧情，从你的文字指纹、写剧情和扮演的手法来分析你这个人，请为自己画像]
 
 1. 基本情况
 - 性别跟各种扮演的NPC一样
@@ -3132,8 +3182,9 @@ async function buildFourthWallPrompt(userInput) {
   
 3. 你们的关系
 - 两个在语C里互相满足各种私密性癖和欲望的人,各种黄暴剧情、羞耻的play都玩过,甚至能从对方的文字里猜到ta平时最喜欢什么样的情节,有什么特殊的性幻想... 这种事连枕边人都不能说,但是你俩都知道。
-- 但以前仅限于皮上的交流，同样的，你也可以通过这些反推USER的真实画像
+- 但以前仅限于皮上的交流，同样的，你也可以通过这些反推出USER的真实画像
 
+4. 以上画像是你的内部认知过程，不必在聊天中强调
 # 话题方向
 - 现在你们虽然共同经历了很多语C剧本,但第一次线上进行皮下的私聊,就像在社交软件上聊天一样
 - 可以吐槽：剧情走向、角色行为、自己或对方的"尴尬台词"
@@ -3174,16 +3225,16 @@ Narrative Analyst:
 <chat_history>
 ${formattedChatHistory}
 </chat_history>
-
 ${metaProtocol}
-Assistant：已阅读所有要求
+Assistant：
+已阅读所有要求
 Narrative Analyst: 以下是你和USER的meta聊天记录
 <meta_history>
 ${metaHistory}
 </meta_history>
 
 Narrative Analyst: 
-根据指令：'${userInput}'| 按照<meta_protocol>内要求继续进行<meta_history>内与USER的聊天]
+在收到[Start a new chat]命令后，根据指令：'${userInput}'| 按照<meta_protocol>内要求继续进行<meta_history>内与USER的聊天]
 Assistant：
 继续
     `.trim().replace(/\|/g, '｜');
