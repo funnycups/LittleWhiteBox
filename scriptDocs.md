@@ -1,6 +1,5 @@
----------------------
 关于小白X插件核心功能:
-1. 常规代码块渲染功能:
+1. 代码块渲染功能:
    - SillyTavern原生只支持显示静态代码块，无法执行JavaScript或渲染HTML
    - 小白X将聊天中包含HTML标签(完整的<html>, <!DOCTYPE>或单独的<script>)的代码块自动转换为交互式iframe，iframe高度为自适应
    - 小白X提供了特殊的桥接API: STscript()函数
@@ -9,53 +8,17 @@
      • 使用await关键字等待命令执行完成并获取结果
      • 这使iframe内的JavaScript代码能与SillyTavern通信并执行各种SillyTavern的斜杠命令，不要尝试通过window.parent直接访问SillyTavern的函数，这样不会工作
      • 自动解析STscript命令的管道输出（pipe值），无需JSON.parse
- 
-   正确用法示例:
+     • 使用方式一般有两类：
+       • 一类是通过酒馆原生正则功能，将AI楼层的格式输出的文本消息替换为html代码，小白X自动渲染
+       • 二类是沉浸式模板功能
 
-   <!DOCTYPE html>
-   <html>
-   <head>
-       <title>交互式界面</title>
-       <style>
-           body { font-family: Arial; padding: 10px; }
-           button { margin: 5px; }
-       </style>
-   </head>
-   <body>
-       <h3>天气查询</h3>
-       <button onclick="checkWeather()">查询天气</button>
-       <div id="display"></div>
-       
-       <script>
-       async function checkWeather() {
-           // 调用STscript函数执行斜杠命令
-           await STscript('/echo 正在查询天气...');
-       
-           // 获取变量值
-           const 天气 = await STscript('/getvar 天气');
-       
-           // 在界面中显示结果
-           document.getElementById('display').innerHTML = 天气 || '晴天';
-       }
-       </script>
-   </body>
-   </html>
-
-2. 定时任务模块:
-   - 拓展菜单中允许设置"在对话中自动执行"的斜杠命令
-   - 可以设置触发频率(每几楼层)、触发条件(AI消息后/用户消息前/每轮对话)
-   - 每个任务包含:名称、要执行的命令、触发间隔、触发类型
-   - 注册了/xbqte命令手动触发任务: \`/xbqte 任务名称\`
-   - 注册了/xbset命令调整任务间隔: \`/xbset 任务名称 间隔数字\`
-   - 任务命令可以使用所有标准STscript斜杠命令
-
-3.  沉浸式模板功能 (Template Editor):
+2.  沉浸式模板功能 (Template Editor):
 
     核心概念：沉浸式界面
-    -   工作原理：与常规代码块渲染功能不同，使用沉浸式模板，在模板设置页放入html后，当AI开始回复时，插件会立即创建你的HTML模板作为该回合的聊天消息。AI流式输出的原始文本对用户不可见；插件会拦截这些文本，提取占位符数据，并用这些数据动态渲染你的HTML界面。
+    -   工作原理：和直接渲染消息楼层的代码块不同。模板功能是先在设置页面放置好html代码，当AI开始回复时，插件会立即创建你的HTML模板作为该回合的聊天消息。AI流式输出的原始文本对用户不可见；插件会拦截这些文本，提取占位符数据，并用这些数据动态渲染你的HTML界面。
 
     生命周期：跨回合的状态管理
-    -   iframe的重建：每次AI回复，都会用你的模板创建一个全新的、独立的iframe。iframe本身是无状态的，不继承上一层楼的任何JavaScript数据或DOM状态。
+    -   iframe的重建：每次AI回复新的楼层，都会用你的模板创建一个全新的、独立的iframe。iframe本身是无状态的，不继承上一层楼的任何JavaScript数据或DOM状态。
     -   状态持久化：所有需要跨楼层保存的状态（如金币、等级、物品）必须存储在SillyTavern的变量系统中。
     -   关键原则：“仅在首次运行时初始化，在每次加载时从SillyTavern同步状态”。
 
@@ -151,8 +114,8 @@ vars.character.name        // "Alice"
 vars.character.stats.hp    // 100
 vars.inventory[0]          // "sword"
 vars.game_time            // "下午"
-
 ## 当你收到要生成一个沉浸式模板的写卡任务时，你必须严格遵循并使用下面的‘黄金模板’作为起点，然后根据用户的具体需求修改其中的HTML布局和JavaScript逻辑：
+```html
 <!DOCTYPE html>
 <html>
 <head>
@@ -306,6 +269,124 @@ vars.game_time            // "下午"
     });
 </script>
 </html>
+
+```
+3. 定时任务模块:
+   - 拓展菜单中允许设置"在对话中自动执行"的斜杠命令
+   - 可以设置触发频率(每几楼层)、触发条件(AI消息后/用户消息前/每轮对话)
+   - 每个任务包含:名称、要执行的命令、触发间隔、触发类型
+   - 注册了/xbqte命令手动触发任务: \`/xbqte 任务名称\`
+   - 注册了/xbset命令调整任务间隔: \`/xbset 任务名称 间隔数字\`
+   - 任务命令可以使用所有标准STscript斜杠命令
+
+### 4. 流式静默生成
+
+这是 /gen 和 /genraw 命令的流式版本，支持流式并发。SillyTavern原生不支持流式并发，插件通过会话槽位(1-10)实现通道隔离，可同时进行多个独立的流式生成任务。
+
+斜杠命令
+
+命令格式:
+/xbgen [参数] 提示文本     // 流式版 /gen (带上下文)
+/xbgenraw [参数] 提示文本  // 流式版 /genraw (纯提示)
+
+可用参数:
+as=system|user|assistant - 消息角色，xbgen默认system，xbgenraw默认user
+id=1-10 或 id=xb1-xb10 - 会话槽位，默认1号
+api=openai|claude|gemini|cohere|deepseek - 后端类型，默认跟随主API
+model=模型名 - 指定模型，默认使用后端默认模型
+apiurl=URL - 自定义API地址(部分后端支持)
+apipassword=密钥 - 配合apiurl使用的密码
+
+返回值: 会话ID字符串
+
+UI侧可用函数
+
+// 获取插件对象
+const streaming = window.parent.xiaobaixStreamingGeneration;
+
+// 1. 获取生成文本
+streaming.getLastGeneration(sessionId)
+// 参数: sessionId可选，不传则获取最后一个会话
+// 返回: 当前生成的文本字符串
+
+// 2. 获取会话状态
+streaming.getStatus(sessionId) 
+// 参数: sessionId可选
+// 返回: {isStreaming: boolean, text: string, sessionId: string}
+
+// 3. 取消生成
+streaming.cancel(sessionId)
+// 参数: sessionId - 要取消的会话ID
+
+// 4. 执行斜杠命令
+await STscript(命令字符串)
+// 参数: 完整的斜杠命令
+// 返回: 会话ID
+
+事件监听
+
+// 监听生成完成事件
+window.addEventListener('message', (e) => {
+    if (e.data?.type === 'xiaobaix_streaming_completed') {
+        const { finalText, originalPrompt, sessionId } = e.data.payload;
+        // finalText: 最终生成文本
+        // originalPrompt: 原始提示词
+        // sessionId: 会话ID
+    }
+});
+
+完整使用示例
+
+单任务流程:
+// 1. 开始生成
+const sessionId = await STscript('/xbgen 写一个故事');
+
+// 2. 轮询显示
+const timer = setInterval(() => {
+    const status = streaming.getStatus(sessionId);
+    if (status.text) {
+        document.getElementById('output').textContent = status.text;
+    }
+}, 100);
+
+// 3. 监听完成
+window.addEventListener('message', (e) => {
+    if (e.data?.type === 'xiaobaix_streaming_completed' && 
+        e.data.payload.sessionId === sessionId) {
+        clearInterval(timer);
+        document.getElementById('output').textContent = e.data.payload.finalText;
+    }
+});
+
+// 4. 可选: 取消生成
+// streaming.cancel(sessionId);
+
+并发任务示例:
+// 同时启动3个任务
+const task1 = await STscript('/xbgen id=1 继续剧情');
+const task2 = await STscript('/xbgenraw id=2 api=claude 总结全文'); 
+const task3 = await STscript('/xbgen id=3 as=user 查看其他NPC生活状态');
+
+// 分别轮询显示
+const timer = setInterval(() => {
+    document.getElementById('story').textContent = streaming.getLastGeneration(1);
+    document.getElementById('trans').textContent = streaming.getLastGeneration(2); 
+    document.getElementById('chat').textContent = streaming.getLastGeneration(3);
+}, 100);
+
+// 监听完成 (会收到3次事件)
+window.addEventListener('message', (e) => {
+    if (e.data?.type === 'xiaobaix_streaming_completed') {
+        const sessionId = e.data.payload.sessionId;
+        console.log(`任务${sessionId}完成:`, e.data.payload.finalText);
+    }
+});
+
+使用注意事项
+
+1. 会话槽位: 不指定id默认使用1号，并发时必须指定不同id
+2. 轮询频率: 建议80-200ms间隔，避免过于频繁
+3. 资源清理: 完成后记得clearInterval，长期运行可定期取消不用的会话
 
 5.  以下是SillyTavern的官方STscript脚本文档，可结合小白X功能创作深度定制的SillyTavern角色卡。
 ----------------------
