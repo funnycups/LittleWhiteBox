@@ -518,6 +518,10 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
     white-space: nowrap;
 }
 
+.update-container .menu_button {
+    width: auto;
+}
+
 .character-update-notification:hover {
     background: rgba(46, 204, 113, 1);
     transform: scale(1.05);
@@ -571,6 +575,13 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
 #character-updater-edit-button.has-update:hover:not(:disabled) {
     background-color: rgba(46, 204, 113, 0.2);
     border-color: #2ecc71;
+}
+
+.character-menu-content .menu-footer .menu_button {
+    width: fit-content;
+    display: flex;
+    gap: 10px;
+    flex-direction: row;
 }
 
 /* ==================== 菜单覆盖层样式 - 全局 ==================== */
@@ -980,4 +991,3 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
 .xiaobai_template_editor::-webkit-scrollbar-thumb:hover {
     background: var(--SmartThemeAccent);
 }
-

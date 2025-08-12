@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>小白X - 公告与更新</title>
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background: #121212;
+            color: #e9e9e9;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+        }
+
+        a {
+            color: #7ec8ff;
+        }
+
+        .wrap {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #2a2a2a;
+            background: #141414;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0;
+        }
+
+        main {
+            flex: 1;
+            overflow: auto;
+            padding: 14px 16px;
+        }
+
+        .section {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 14px;
+        }
+
+        .grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        @media (max-width: 680px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .muted {
+            color: #bdbdbd;
+            font-size: 12px;
+        }
+
+        #LATESTUPDATE .loading {
+            opacity: 0.7;
+            font-style: italic;
+        }
+
+        #LATESTUPDATE .error {
+            color: #ff8a8a;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <header>
+            <h1>小白X - 公告与更新</h1>
+        </header>
+        <main>
+
+
+            <section class="section" id="LATESTUPDATE">
+                <h2>更新说明</h2>
+                <div class="loading">2025/8/12更新：新增了四次元壁，流式并发，改善了消息日志的后处理效果。</div>
+            </section>
+            <hr class="sysHR">
+
+            <section class="section">
+                <div>
+                    <h3>详细说明文档:<a
+                            href="https://nine-yellowhorn-b13.notion.site/X-22eb5c27428180bfacbed6e9006a1908?pvs=74"
+                            target="_blank" rel="noopener noreferrer">小白X 文档</a></h3>
+                </div>
+            </section>
+            <hr class="sysHR">
+
+            <section class="section">
+                <h2>插件简介</h2>
+                <div class="grid">
+                    <div>
+                        <h3>小白X模板</h3>
+                        <h4>总开关</h4>
+                        <ul>
+                            <li>控制功能的总开关，并提供了代码块基础渲染功能</li>
+                            <li>在基础渲染中，STscript()函数是一个异步函数，使用await STscript('/echo Hello World'); 可以执行酒馆命令</li>
+                            <li>使用/xbgen和/xbgenraw命令，是/gen和/xbgen命令的流式版本，支持(1-10)的流式并发，使用window.parent.xiaobaixStreamingGeneration.getLastGeneration('1')获取流式内容
+                            </li>
+                        </ul>
+                        <h4>沙盒模式</h4>
+                        <ul>
+                            <li>使用沙盒模式可以让iframe隔离酒馆的主窗口，使副窗口不能访问主窗口的函数</li>
+                        </ul>
+                        <h4>沉浸式模板</h4>
+                        <ul>
+                            <li>实现多楼层的进阶渲染，这是一个随着数据流而实时更新的、可交互的UI</li>
+                            <li>通过window.updateTemplateVariables(vars)获取流式输出的数据</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3>循环任务</h3>
+                        <ul>
+                            <li>通过楼层数自动执行 STscript 和JS的混合多脚本，实现自动事件</li>
+                            <li>使用 <<taskjs>> << /taskjs>> 标签包裹 JavaScript 代码</li>
+                            <li>可以选择五种触发时机：用户发送AI消息前/AI发送消息后/任意楼层生成后触发/仅在特定楼层触发/还有初始化-每次新开聊天时触发一次</li>
+                            <li>快捷任务按钮：任务可注册为按钮，与快速回复(QR)显示在同一位置</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3>数据互动</h3>
+
+                        <h4>好感度统计</h4>
+                        <ul>
+                            <li>通过本地分析聊天内容，实时记录角色行为、情绪、关系演变，并注入 AI 提示词中。</li>
+                            <li>支持编辑关系阶段，每阶段提供详细行为准则</li>
+                        </ul>
+
+                        <h4>动态提示词</h4>
+                        <ul>
+                            <li>智能分析：根据聊天内容自动生成针对性的提示词</li>
+                            <li>两种模式：娱乐向：AI对用户文字指纹进行心理分析，生成个性化互动建议；实用向：根据剧情发展动态调整AI的输出风格</li>
+                            <li>四次元壁：让当前角色卡的角色跳出故事框架，与用户进行META对话</li>
+                        </ul>
+
+                        <h4>变量面板</h4>
+                        <ul>
+                            <li>提供一个可视化编辑和查看酒馆的变量，并可以新增文件夹以进行变量的分类组织</li>
+                            <li>支持一键复制{{}}宏命令或getvar的酒馆命令</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <h3>辅助工具</h3>
+                        <h4>角色卡云端同步与更新提醒</h4>
+                        <ul>
+                            <li>作者端：绑定角色卡后，可在扩展栏发布更新说明（分为静默更新（不提醒用户）与公开更新（提醒用户））</li>
+                            <li>用户端：角色卡有更新时自动收到更新提示</li>
+                        </ul>
+                        <h4>消息日志</h4>
+                        <ul>
+                            <li>查看消息的结构，帮助你调试角色预设、提示、格式化标记、世界书深度等内容</li>
+                            <li>长按三秒后红色持续拦截模式，可将所有发往AI的请求都会被拦截（包括前端经由酒馆处理的文本，如/gen）、以log形式弹窗显示，再次长按五秒后关闭</li>
+                        </ul>
+                        <h4>写卡助手</h4>
+                        <ul>
+                            <li>写卡助手会为酒馆注入特定提示词，使AI可以访问小白X 插件功能描述与完整的STscript语言（斜杠命令）文档。</li>
+                        </ul>
+                        <h4>视觉增强</h4>
+                        <ul>
+                            <li>沉浸式显示布局：优化聊天视图，让前端在手机上更优化地全屏显示，设有传统多楼层和锁定单楼层模式，可以随时切换</li>
+                            <li>自动消息配图：根据AI消息内容，自动为聊天插入一张匹配主题的背景图。</li>
+                        </ul>
+
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            // 通过查询参数 repo/path/branch 指定远程仓库与文件位置
+            // 例如：?repo=user/repo&path=public/scripts/extensions/third-party/LittleWhiteBox/info&upda.html&branch=main
+            const params = new URLSearchParams(location.search);
+            const repo = params.get('repo');
+            const path = params.get('path') || 'public/scripts/extensions/third-party/LittleWhiteBox/info&upda.html';
+            const branch = params.get('branch') || 'main';
+
+            const latestEl = document.getElementById('LATESTUPDATE');
+            const loadingEl = latestEl?.querySelector('.loading');
+
+            async function fetchLatestUpdateFromGitHub() {
+                if (!repo) {
+                    // 默认仓库：RT15548/LittleWhiteBox，默认路径：info&upda.html，默认分支：main
+                    params.set('repo', 'RT15548/LittleWhiteBox');
+                    params.set('path', 'info&upda.html');
+                    params.set('branch', 'main');
+                    history.replaceState(null, '', location.pathname + '?' + params.toString());
+                    return fetchLatestUpdateFromGitHub();
+                }
+
+                try {
+                    const url = `https://raw.githubusercontent.com/${repo}/${branch}/${path}`;
+                    const resp = await fetch(url, { cache: 'no-store' });
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const html = await resp.text();
+
+                    // 解析远程 HTML，抽取 #LATESTUPDATE 内容
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    const remote = doc.getElementById('LATESTUPDATE');
+                    if (!remote) throw new Error('远程页面缺少 #LATESTUPDATE 区块');
+
+                    // 将远程 #LATESTUPDATE 的子内容注入本地 #LATESTUPDATE
+                    const remoteChildren = Array.from(remote.children).filter(el => el.tagName.toLowerCase() !== 'h2');
+                    if (remoteChildren.length === 0) throw new Error('远程更新区块为空');
+                    // 清空 loading
+                    latestEl.innerHTML = '<h2>最新更新</h2>';
+                    remoteChildren.forEach(el => latestEl.appendChild(el));
+                } catch (err) {
+                    if (loadingEl) loadingEl.remove();
+                    const div = document.createElement('div');
+                    div.className = 'error';
+                    div.textContent = `获取失败：${err.message}。已显示本地默认信息。`;
+                    latestEl.appendChild(div);
+                    // 默认兜底内容
+                    const fallback = document.createElement('ul');
+                    fallback.innerHTML = '<li>新增“公告”按钮与弹窗（移动端适配）</li><li>优化模板与流式生成交互细节</li><li>日志历史查看入口与预览格式更直观</li>';
+                    latestEl.appendChild(fallback);
+                }
+            }
+
+            fetchLatestUpdateFromGitHub();
+        })();
+    </script>
+</body>
+
+</html>

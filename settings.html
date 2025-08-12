@@ -22,13 +22,17 @@
                 <div class="js-memory settings-section" style="display: block;">
                     <div class="section-divider" style="margin-bottom: 0px;margin-top: 0px;">总开关</div>
                     <hr class="sysHR" />
-                    <div class="flex-container">
+                    <div class="flex-container alignItemsCenter" style="gap: 8px; flex-wrap: wrap;">
                         <input type="checkbox" id="xiaobaix_enabled" />
                         <label for="xiaobaix_enabled" class="has-tooltip" data-tooltip="渲染被```包裹的html、!DOCTYPE、script的代码块内容为交互式界面
 
                         提供STscript(command)异步函数执行酒馆命令:
 
                         await STscript('/echo 你好世界！')">启用小白X</label>
+                        <button id="xiaobaix_info_btn" class="menu_button menu_button_icon" type="button" title="查看功能与更新公告">
+                            <i class="fa-solid fa-circle-info"></i>
+                            <small>公告</small>
+                        </button>
                     </div>
                     <div class="section-divider">内容隔离
                         <hr class="sysHR" />
@@ -624,5 +628,160 @@
         }
 
         window.setupUpdateButtonInSettings = setupUpdateButtonHandlers;
+
+        // 公告弹窗逻辑
+        async function openInfoModal() {
+            const modal = document.getElementById('xiaobaix_info_modal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+
+            const container = document.getElementById('xiaobaix_info_content');
+            if (!container) return;
+
+            // 已经加载过则不重复拉取
+            if (container.dataset.loaded === 'true') return;
+
+            // 先加载本地 info&upda.html，抽取结构（不执行脚本）
+            try {
+                const localResp = await fetch('/scripts/extensions/third-party/LittleWhiteBox/info&upda.html', { cache: 'no-store' });
+                if (localResp.ok) {
+                    const html = await localResp.text();
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    const mainSections = doc.querySelectorAll('main > .section, .section');
+                    container.innerHTML = '';
+                    mainSections.forEach(s => container.appendChild(s.cloneNode(true)));
+                }
+            } catch {}
+
+            // 尝试远端 GitHub 拉取 LATESTUPDATE（默认指向 RT15548/LittleWhiteBox 仓库根目录的 info&upda.html）
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const repo = params.get('repo') || 'RT15548/LittleWhiteBox';
+                const path = params.get('path') || 'info&upda.html';
+                const branch = params.get('branch') || 'main';
+
+                const url = `https://raw.githubusercontent.com/${repo}/${branch}/${path}`;
+                const r = await fetch(url, { cache: 'no-store' });
+                if (r.ok) {
+                    const remoteHtml = await r.text();
+                    const remoteDoc = new DOMParser().parseFromString(remoteHtml, 'text/html');
+                    const remoteLatest = remoteDoc.getElementById('LATESTUPDATE');
+                    const localLatest = container.querySelector('#LATESTUPDATE');
+                    if (remoteLatest && localLatest) {
+                        const keepTitle = localLatest.querySelector('h2')?.outerHTML || '<h2>最新更新</h2>';
+                        const children = Array.from(remoteLatest.children).filter(el => el.tagName.toLowerCase() !== 'h2');
+                        if (children.length > 0) {
+                            localLatest.innerHTML = keepTitle + children.map(el => el.outerHTML).join('');
+                        }
+                    }
+                }
+            } catch {}
+
+            container.dataset.loaded = 'true';
+        }
+
+        function closeInfoModal() {
+            const modal = document.getElementById('xiaobaix_info_modal');
+            if (!modal) return;
+            modal.style.display = 'none';
+        }
+
+        function setupInfoButton() {
+            const btn = document.getElementById('xiaobaix_info_btn');
+            if (!btn) return;
+            // 解绑后再绑定，避免重复监听
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            newBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openInfoModal(); });
+        }
+
+        function setupInfoModal() {
+            const closeBtn = document.getElementById('xiaobaix_info_close');
+            const modal = document.getElementById('xiaobaix_info_modal');
+            if (closeBtn) closeBtn.addEventListener('click', closeInfoModal);
+            if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) closeInfoModal(); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInfoModal(); });
+        }
+
+        function initInfoAnnouncement() {
+            setupInfoButton();
+            setupInfoModal();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initInfoAnnouncement);
+        } else {
+            initInfoAnnouncement();
+        }
     })();
 </script>
+
+<!-- 公告弹窗结构 -->
+<div id="xiaobaix_info_modal" class="xiaobaix-modal" style="display:none;">
+    <div class="xiaobaix-modal-content">
+        <div class="xiaobaix-modal-header">
+            <span class="xiaobaix-modal-title">小白X 功能与更新公告</span>
+            <button id="xiaobaix_info_close" class="menu_button menu_button_icon" title="关闭"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="xiaobaix-modal-body">
+            <div id="xiaobaix_info_content" class="xiaobaix-info-content"></div>
+        </div>
+    </div>
+    <style>
+
+        #xiaobaix_info_btn {
+            align-items: flex-end;
+            margin-bottom: 0px;
+        }
+        .xiaobaix-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            padding: 10px;
+            padding-bottom: max(10px, env(safe-area-inset-bottom));
+        }
+        .xiaobaix-modal-content {
+            background: var(--SmartThemeBlurTintColor, #1e1e1e);
+            border: 1px solid var(--SmartThemeBorderColor, #333);
+            border-radius: 10px;
+            width: min(900px, 90vw);
+            height: min(85vh, 92vh);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            backdrop-filter: blur(var(--SmartThemeBlurStrength, 0px));
+        }
+        .xiaobaix-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--SmartThemeBorderColor, #2a2a2a);
+            background: var(--SmartThemeBlurTintColor, #1e1e1e);
+            border-radius: 10px 10px 0 0;
+        }
+        .xiaobaix-modal-title { color: var(--SmartThemeBodyColor, #e9e9e9); font-weight: 600; }
+        .xiaobaix-modal-body { flex: 1; overflow: auto; }
+        .xiaobaix-info-content { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+        .xiaobaix-info-content h3, .xiaobaix-info-content h4 { margin: 4px 0 8px; color: var(--SmartThemeBodyColor, #e9e9e9); }
+        .xiaobaix-info-content p { margin: 0; color: var(--SmartThemeBodyColor, #ccc); }
+        .xiaobaix-info-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .xiaobaix-info-grid h4 { margin: 0 0 6px; color: var(--SmartThemeEmColor, #9be49b); }
+        .xiaobaix-info-grid ul { margin: 0; padding-left: 18px; }
+        .xiaobaix-info-grid li { margin: 4px 0; }
+        @media (max-width: 680px) { .xiaobaix-info-grid { grid-template-columns: 1fr; } }
+        /* 参考 variables-panel.js 的移动端容器适配 */
+        @media (max-width: 999px) {
+            .xiaobaix-modal { align-items: flex-start; }
+            .xiaobaix-modal-content {
+                width: 100vw;
+                height: calc(100svh - var(--topBarBlockSize, 0px) - 10px);
+                margin-top: var(--topBarBlockSize, 0px);
+                border-radius: 12px;
+            }
+        }
+    </style>
