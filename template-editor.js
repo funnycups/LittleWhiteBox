@@ -19,6 +19,7 @@ const DEFAULT_CHAR_SETTINGS = {
     enabled: false,
     template: "",
     customRegex: "\\[([^\\]]+)\\]([\\s\\S]*?)\\[\\/\\1\\]",
+    disableParsers: false,
     limitToRecentMessages: false,
     recentMessageCount: 5,
     skipFirstMessage: false
@@ -798,7 +799,7 @@ class TemplateProcessor {
 	    return tmpl?.replace(/\[\[([^\]]+)\]\]/g, (match, varName) => {
 	        const cleanVarName = varName.trim();
 	        let value = vars[cleanVarName];
-	        
+
 	        if (value === null || value === undefined) {
 	            value = '';
 	        } else if (Array.isArray(value)) {
@@ -808,10 +809,36 @@ class TemplateProcessor {
 	        } else {
 	            value = String(value);
 	        }
-	        
+
 	        return `<bdi data-xiaobaix-var="${cleanVarName}">${value}</bdi>`;
 	    }) || '';
 	}
+
+    static getTemplateVarNames(tmpl) {
+        if (!tmpl || typeof tmpl !== 'string') return [];
+        const names = new Set();
+        const regex = /\[\[([^\]]+)\]\]/g;
+        let match;
+        while ((match = regex.exec(tmpl))) {
+            const name = String(match[1] || '').trim();
+            if (name) names.add(name);
+        }
+        return Array.from(names);
+    }
+
+    static buildVarsFromWholeText(tmpl, text) {
+        const vars = {};
+        const names = this.getTemplateVarNames(tmpl);
+        for (const n of names) vars[n] = String(text ?? '');
+        return vars;
+    }
+
+    static extractVarsWithOption(content, tmpl, settings) {
+        if (!content || typeof content !== 'string') return {};
+        if (settings && settings.disableParsers) return this.buildVarsFromWholeText(tmpl, content);
+        const customRegex = settings ? settings.customRegex : null;
+        return this.extractVars(content, customRegex);
+    }
 }
 
 class IframeManager {
@@ -900,11 +927,11 @@ static createWrapper(content) {
 		            el.style.display = '';
 		        });
 		    });
-		
+
 		    if (typeof window.updateAllData === 'function') {
 		        window.updateAllData();
 		    }
-		
+
 		    window.dispatchEvent(new Event('contentUpdated'));
 		    window.STBridge.updateHeight();
 		};
@@ -1042,10 +1069,12 @@ class MessageHandler {
         }
 
         const vars = TemplateProcessor.extractVars(msg.mes, tmplSettings.customRegex);
-        state.messageVariables.set(messageId, vars);
-        this.updateHistory(messageId, vars);
+        // 若用户启用“禁用解析器”，改为整段文本填充所有占位符
+        const effectiveVars = TemplateProcessor.extractVarsWithOption(msg.mes, tmplSettings.template, tmplSettings);
+        state.messageVariables.set(messageId, effectiveVars);
+        this.updateHistory(messageId, effectiveVars);
 
-        let displayText = TemplateProcessor.replaceVars(tmplSettings.template, vars);
+        let displayText = TemplateProcessor.replaceVars(tmplSettings.template, effectiveVars);
 
         if (utils.isCustomTemplate(displayText)) {
             displayText = IframeManager.createWrapper(displayText);
@@ -1054,7 +1083,7 @@ class MessageHandler {
                 this.clearPreviousIframes(messageId, avatar);
             }
 
-            setTimeout(() => IframeManager.updateVariables(messageId, vars), 300);
+            setTimeout(() => IframeManager.updateVariables(messageId, effectiveVars), 300);
         }
 
         if (displayText) {
@@ -1064,7 +1093,7 @@ class MessageHandler {
         }
 
         setTimeout(async () => {
-            await IframeManager.sendUpdate(messageId, vars);
+            await IframeManager.sendUpdate(messageId, effectiveVars);
         }, 300);
     }
 
@@ -1264,7 +1293,7 @@ const interceptor = {
 
                                     if (this.querySelector('.xiaobaix-iframe-wrapper')) return;
 
-                                    const vars = TemplateProcessor.extractVars(msg.mes, tmplSettings.customRegex);
+                                    const vars = TemplateProcessor.extractVarsWithOption(msg.mes, tmplSettings.template, tmplSettings);
                                     state.messageVariables.set(id, vars);
                                     MessageHandler.updateHistory(id, vars);
 
@@ -1308,7 +1337,7 @@ const eventHandlers = {
                 const avatar = utils.getCharAvatar(msg);
                 const tmplSettings = TemplateSettings.getCharTemplate(avatar);
                 if (tmplSettings) {
-                    const vars = TemplateProcessor.extractVars(msg.mes, tmplSettings.customRegex);
+                    const vars = TemplateProcessor.extractVarsWithOption(msg.mes, tmplSettings.template, tmplSettings);
                     setTimeout(() => IframeManager.updateVariables(id, vars), 300);
                 }
             }
@@ -1381,6 +1410,7 @@ async function openEditor() {
     $html.find('h3 strong').text(`模板编辑器 - ${name}`);
     $html.find('#fixed_text_template').val(charSettings.template);
     $html.find('#fixed_text_custom_regex').val(charSettings.customRegex || DEFAULT_CHAR_SETTINGS.customRegex);
+    $html.find('#disable_parsers').prop('checked', !!charSettings.disableParsers);
     $html.find('#limit_to_recent_messages').prop('checked', charSettings.limitToRecentMessages || false);
     $html.find('#recent_message_count').val(charSettings.recentMessageCount || 5);
     $html.find('#skip_first_message').prop('checked', charSettings.skipFirstMessage || false);
@@ -1389,6 +1419,7 @@ async function openEditor() {
         const data = {
             template: $html.find('#fixed_text_template').val() || '',
             customRegex: $html.find('#fixed_text_custom_regex').val() || DEFAULT_CHAR_SETTINGS.customRegex,
+            disableParsers: $html.find('#disable_parsers').prop('checked'),
             limitToRecentMessages: $html.find('#limit_to_recent_messages').prop('checked'),
             recentMessageCount: parseInt(String($html.find('#recent_message_count').val())) || 5,
             skipFirstMessage: $html.find('#skip_first_message').prop('checked')
@@ -1412,6 +1443,7 @@ async function openEditor() {
                 var data = JSON.parse(typeof result === 'string' ? result : '');
                 $html.find('#fixed_text_template').val(data.template || '');
                 $html.find('#fixed_text_custom_regex').val(data.customRegex || DEFAULT_CHAR_SETTINGS.customRegex);
+                $html.find('#disable_parsers').prop('checked', !!data.disableParsers);
                 $html.find('#limit_to_recent_messages').prop('checked', data.limitToRecentMessages || false);
                 $html.find('#recent_message_count').val(data.recentMessageCount || 5);
                 $html.find('#skip_first_message').prop('checked', data.skipFirstMessage || false);
@@ -1431,6 +1463,7 @@ async function openEditor() {
             enabled: true,
             template: $html.find('#fixed_text_template').val() || '',
             customRegex: $html.find('#fixed_text_custom_regex').val() || DEFAULT_CHAR_SETTINGS.customRegex,
+            disableParsers: $html.find('#disable_parsers').prop('checked'),
             limitToRecentMessages: $html.find('#limit_to_recent_messages').prop('checked'),
             recentMessageCount: parseInt(String($html.find('#recent_message_count').val())) || 5,
             skipFirstMessage: $html.find('#skip_first_message').prop('checked')
