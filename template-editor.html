@@ -17,7 +17,7 @@
                 <div class="flex-container" style="margin-top: 6px;">
                     <label class="checkbox_label">
                         <input type="checkbox" id="disable_parsers" />
-                        <span>文本不使用插件预设的正则及格式解析器</span>
+                        <span>禁用插件里的正则和JSON，YAML解析，自己处理AI消息文本</span>
                     </label>
                 </div>
             </div>
@@ -57,18 +57,6 @@
                     <textarea id="fixed_text_template" class="text_pole textarea_compact" rows="3"
                         placeholder="例如：hi[[var1]], hello[[var2]], xx[[profile1]]" style="min-height: 20vh;"></textarea>
                 </div>
-        </div>
-        <hr />
-        <div class="flex-container">
-            <div class="flex1 wi-enter-footer-text flex-container flexFlowColumn flexNoGap alignitemsstart">
-                <small>使用示例</small>
-                <div class="example-text">
-                    <p><strong>1. 把你的正则和HTML代码复制进正则和模板处</strong></p>
-                    <p><strong>2. 查找到你的HTML代码裡用 $1, $2, $3形式的占位符，给每个都起个名字，并用双中括号 [[]] 把名字包起来，例如[[map]]、[[hp]]，替换掉$，例如：<br>
-以前是&lt;script&gt;const logDataSource = `$1`;&lt;/script&gt;，变为&lt;script&gt;const logDataSource = `[[log]]`;&lt;/script&gt;</strong></p>
-                    <p><strong>3. 设定ai输出的格式为正则/json/yaml, 并确保键为你在模板填写的参数。这里只写名字本身，不需要加 [[]]</strong></p>
-                </div>
-            </div>
         </div>
     </div>
 </div>
