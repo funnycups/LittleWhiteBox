@@ -38,7 +38,27 @@ const PROXY_SUPPORTED = new Set([
 
 const inferFromMainApi = () => {
     const m = String(main_api || '').toLowerCase();
-    return ['deepseek', 'claude', 'gemini', 'cohere', 'openai'].find(api =>
+
+    // 当 main_api 是 "openai" 时，需要进一步检查实际的聊天补全源
+    if (m === 'openai') {
+        const chatCompletionSource = oai_settings?.chat_completion_source;
+        if (chatCompletionSource === 'makersuite' || chatCompletionSource === 'vertexai') {
+            return 'gemini';
+        }
+        if (chatCompletionSource === 'claude') {
+            return 'claude';
+        }
+        if (chatCompletionSource === 'cohere') {
+            return 'cohere';
+        }
+        if (chatCompletionSource === 'deepseek') {
+            return 'deepseek';
+        }
+        // 其他情况保持 openai
+        return 'openai';
+    }
+
+    return ['deepseek', 'claude', 'gemini', 'cohere'].find(api =>
         m.includes(api) || (api === 'gemini' && (m.includes('maker') || m.includes('google')))
     ) || null;
 };
