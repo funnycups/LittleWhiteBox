@@ -116,10 +116,10 @@ async function processTaskCommands(commands) {
     while ((match = jsTagRegex.exec(commands)) !== null) {
         const beforeJs = commands.slice(lastIndex, match.index).trim();
         if (beforeJs) result = await executeSlashCommand(beforeJs);
-        
+
         const jsCode = match[1].trim();
         if (jsCode) {
-            try { await executeTaskJS(jsCode); } 
+            try { await executeTaskJS(jsCode); }
             catch (error) { console.error(`[任务JS执行错误] ${error.message}`); }
         }
         lastIndex = match.index + match[0].length;
@@ -203,7 +203,7 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
         if (task.disabled || isTaskInCooldown(task.name)) return false;
 
         const taskTriggerTiming = task.triggerTiming || 'after_ai';
-        
+
         if (taskTriggerTiming === 'initialization') {
             return triggerContext === 'chat_created';
         }
@@ -241,8 +241,8 @@ async function onMessageReceived(messageId, type) {
     if (typeof messageId !== 'number' || messageId < 0 || !chat[messageId]) return;
 
     const message = chat[messageId];
-    if (message.is_user || message.is_system || message.mes === '...' || 
-        state.isCommandGenerated || state.isExecutingTask || 
+    if (message.is_user || message.is_system || message.mes === '...' ||
+        state.isCommandGenerated || state.isExecutingTask ||
         (message.swipe_id !== undefined && message.swipe_id > 0)) return;
 
     const settings = getSettings();
@@ -261,10 +261,10 @@ async function onUserMessage() {
     const settings = getSettings();
     const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
     if (!settings.enabled || !globalEnabled) return;
-    
+
     const messageKey = `${getContext().chatId}_user_${chat.length}`;
     if (isMessageProcessed(messageKey)) return;
-    
+
     markMessageAsProcessed(messageKey);
     await checkAndExecuteTasks('before_user');
     state.chatJustChanged = state.isNewChat = false;
@@ -309,7 +309,7 @@ function getTasksHash() {
 
 function createTaskItem(task, index, isCharacterTask = false) {
     if (!task.id) task.id = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     const taskType = isCharacterTask ? 'character' : 'global';
     const floorTypeText = { user: '用户楼层', llm: 'LLM楼层' }[task.floorType] || '全部楼层';
     const triggerTimingText = { before_user: '用户前', any_message: '任意对话', initialization: '初始化', only_this_floor: '仅该楼层' }[task.triggerTiming] || 'AI后';
@@ -333,7 +333,7 @@ function createTaskItem(task, index, isCharacterTask = false) {
     taskElement.find('.test_task').on('click', () => testTask(index, taskType));
     taskElement.find('.edit_task').on('click', () => editTask(index, taskType));
     taskElement.find('.delete_task').on('click', () => deleteTask(index, taskType));
-    
+
     return taskElement;
 }
 
@@ -364,12 +364,12 @@ function getActivatedTasks() {
 function createTaskBar() {
     const activatedTasks = getActivatedTasks();
     $('#xiaobaix_task_bar').remove();
-    
+
     if (activatedTasks.length === 0 || !state.taskBarVisible) return;
 
     const taskBar = $(`
         <div id="xiaobaix_task_bar">
-            <div style="display: flex; gap: 5px; justify-content: center; border: 1px solid var(--SmartThemeBorderColor); border-bottom : 0px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; border: 1px solid var(--SmartThemeBorderColor); border-bottom : 0px;">
             </div>
         </div>
     `);
@@ -383,7 +383,7 @@ function createTaskBar() {
             </button>
         `);
         button.on('click', async () => {
-            try { await window.xbqte(task.name); } 
+            try { await window.xbqte(task.name); }
             catch (error) { console.error(`执行任务失败: ${error.message}`); }
         });
         buttonContainer.append(button);
@@ -401,7 +401,7 @@ function toggleTaskBarVisibility() {
 
     const toggleButton = $('#toggle_task_bar');
     const smallText = toggleButton.find('small');
-    
+
     if (state.taskBarVisible) {
         smallText.css({ 'opacity': '1', 'text-decoration': 'none' });
         toggleButton.attr('title', '隐藏任务栏');
@@ -414,7 +414,7 @@ function toggleTaskBarVisibility() {
 function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
     state.currentEditingTask = task;
     state.currentEditingIndex = isEdit ? (isCharacterTask ? getCharacterTasks() : getSettings().globalTasks).indexOf(task) : -1;
-    
+
     const editorTemplate = $('#task_editor_template').clone().removeAttr('id').show();
     editorTemplate.find('.task_name_edit').val(task?.name || '');
     editorTemplate.find('.task_commands_edit').val(task?.commands || '');
@@ -428,7 +428,7 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
     function updateControlStates() {
         const interval = parseInt(editorTemplate.find('.task_interval_edit').val()) || 0;
         const triggerTiming = editorTemplate.find('.task_trigger_timing_edit').val();
-        
+
         const intervalControl = editorTemplate.find('.task_interval_edit');
         const floorTypeControl = editorTemplate.find('.task_floor_type_edit');
         const triggerTimingControl = editorTemplate.find('.task_trigger_timing_edit');
@@ -469,7 +469,7 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
             editorTemplate.find('.task_trigger_timing_edit').parent().append(warningElement);
         }
 
-        const shouldShowWarning = interval > 0 && floorType === 'all' && 
+        const shouldShowWarning = interval > 0 && floorType === 'all' &&
                                  (triggerTiming === 'after_ai' || triggerTiming === 'before_user');
 
         if (shouldShowWarning) {
@@ -683,7 +683,7 @@ function cleanup() {
     }
     state.taskLastExecutionTime.clear();
 
-    [event_types.CHARACTER_MESSAGE_RENDERED, event_types.USER_MESSAGE_RENDERED, 
+    [event_types.CHARACTER_MESSAGE_RENDERED, event_types.USER_MESSAGE_RENDERED,
      event_types.CHAT_CHANGED, event_types.CHAT_CREATED, event_types.MESSAGE_DELETED,
      event_types.MESSAGE_SWIPED, event_types.CHARACTER_DELETED].forEach(eventType => {
         eventSource.removeListener(eventType);
@@ -740,11 +740,11 @@ window.setScheduledTaskInterval = async (name, interval) => {
     throw new Error(`找不到名为 "${name}" 的任务`);
 };
 
-Object.assign(window, { 
+Object.assign(window, {
     clearTasksProcessedMessages: clearProcessedMessages,
-    clearTaskCooldown, 
-    getTaskCooldownStatus, 
-    getTasksMemoryUsage: getMemoryUsage 
+    clearTaskCooldown,
+    getTaskCooldownStatus,
+    getTasksMemoryUsage: getMemoryUsage
 });
 
 function registerSlashCommands() {
@@ -753,7 +753,7 @@ function registerSlashCommands() {
             name: 'xbqte',
             callback: async (args, value) => {
                 if (!value) return '请提供任务名称。用法: /xbqte 任务名称';
-                try { return await window.xbqte(value); } 
+                try { return await window.xbqte(value); }
                 catch (error) { return `错误: ${error.message}`; }
             },
             unnamedArgumentList: [SlashCommandArgument.fromProps({
@@ -775,7 +775,7 @@ function registerSlashCommands() {
                 }
                 const interval = parts.pop();
                 const taskName = parts.join(' ');
-                try { return await window.setScheduledTaskInterval(taskName, interval); } 
+                try { return await window.setScheduledTaskInterval(taskName, interval); }
                 catch (error) { return `错误: ${error.message}`; }
             },
             unnamedArgumentList: [SlashCommandArgument.fromProps({

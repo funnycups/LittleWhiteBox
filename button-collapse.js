@@ -23,6 +23,7 @@ const createCollapseButton = () => {
         display: flex;
         width: 32px;
         height: 32px;
+        margin-right: 100px;
         align-items: center;
         justify-content: center;
         gap: inherit;

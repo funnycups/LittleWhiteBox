@@ -48,7 +48,7 @@
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_template_enabled" />
                         <label for="xiaobaix_template_enabled" class="has-tooltip"
-                            data-tooltip="将你的UI界面作为AI消息提前展示，再从流式文本中动态渲染。">启用沉浸式模板</label>
+                            data-tooltip="流式多楼层动态渲染">启用沉浸式模板</label>
                     </div>
                     <div id="current_template_settings">
                         <div class="template-replacer-header">
@@ -82,14 +82,14 @@
                     <div class="flex-container">
                         <input type="checkbox" id="character_updater_enabled" />
                         <label for="character_updater_enabled" class="has-tooltip"
-                            data-tooltip="启用角色卡云端同步和更新功能">启用角色卡更新</label>
+                            data-tooltip="启用角色卡推送通知及更新提示功能">启用角色卡更新提示</label>
                     </div>
                     <div class="current-character-info" id="current-character-info-trigger" title="单击更新角色，长按3秒绑定/重绑定">
                         <span id="current-character-name" class="current-character-name">未选择角色</span>
                         <span id="current-character-status" class="character-status"></span>
                     </div>
                     <br>
-                    <div class="section-divider">查看发送给AI的消息日志
+                    <div class="section-divider">消息日志与拦截
                         <hr class="sysHR">
                     </div>
                     <div class="flex-container">
@@ -106,7 +106,7 @@
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_script_assistant" />
                         <label for="xiaobaix_script_assistant" class="has-tooltip"
-                            data-tooltip="勾选后，AI将获取小白X功能和ST脚本语言知识，帮助您创作角色卡">启用写卡助手</label>
+                            data-tooltip="勾选后，AI将获取小白X功能和ST脚本语言知识，内置 STscript 语法与示例，帮助您创作角色卡">启用写卡助手</label>
                     </div>
                     <div class="section-divider">视觉增强
                         <hr class="sysHR" />
@@ -114,12 +114,12 @@
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_immersive_enabled" />
                         <label for="xiaobaix_immersive_enabled" class="has-tooltip"
-                            data-tooltip="优化聊天视图，提升沉浸感，尤其是手机的显示">沉浸式显示布局</label>
+                            data-tooltip="重构界面布局与细节优化">沉浸型布局显示（宽屏 UI 优化）</label>
                     </div>
                     <div class="flex-container">
                         <input type="checkbox" id="wallhaven_enabled" />
                         <label for="wallhaven_enabled" class="has-tooltip"
-                            data-tooltip="AI回复时自动提取消息内容，转换为标签并获取Wallhaven图片作为聊天背景">自动消息配图</label>
+                            data-tooltip="AI回复时自动提取消息内容，转换为标签并获取Wallhaven图片作为聊天背景">Wallhaven自动消息配背景图</label>
                     </div>
                     <div id="wallhaven_settings_container" style="display: none;">
                         <div class="flex-container">
@@ -156,7 +156,7 @@
                         <div class="flex-container">
                             <input type="text" id="wallhaven_custom_tag_input" placeholder="输入英文标签，如: beautiful girl"
                                 class="text_pole wide50p" />
-                            <button id="wallhaven_add_custom_tag" class="menu_button" type="button">+自定义TAG</button>
+                            <button id="wallhaven_add_custom_tag" class="menu_button" type="button" style="width: auto;">+自定义TAG</button>
                         </div>
                         <div id="wallhaven_custom_tags_container" class="custom-tags-container">
                             <div id="wallhaven_custom_tags_list" class="custom-tags-list"></div>
@@ -258,7 +258,7 @@
                 <input class="task_name_edit text_pole textarea_compact" type="text" placeholder="输入任务名称" />
             </div>
             <div class="flex1">
-                <label for="task_commands_edit">斜杠命令</label>
+                <label for="task_commands_edit">脚本命令</label>
                 <textarea class="task_commands_edit text_pole wide100p textarea_compact"
                     placeholder="输入要执行的斜杠命令或js, eg: &#10;&lt;&lt;taskjs&gt;&gt;&#10;count++;&#10;&lt;&lt;/taskjs&gt;&gt;&#10;/echo 已完成脚本！"></textarea>
             </div>
@@ -629,7 +629,6 @@
 
         window.setupUpdateButtonInSettings = setupUpdateButtonHandlers;
 
-        // 公告弹窗逻辑
         async function openInfoModal() {
             const modal = document.getElementById('xiaobaix_info_modal');
             if (!modal) return;
@@ -638,10 +637,8 @@
             const container = document.getElementById('xiaobaix_info_content');
             if (!container) return;
 
-            // 已经加载过则不重复拉取
             if (container.dataset.loaded === 'true') return;
 
-            // 先加载本地 info&upda.html，抽取结构（不执行脚本）
             try {
                 const localResp = await fetch('/scripts/extensions/third-party/LittleWhiteBox/info&upda.html', { cache: 'no-store' });
                 if (localResp.ok) {
@@ -653,7 +650,6 @@
                 }
             } catch {}
 
-            // 尝试远端 GitHub 拉取 LATESTUPDATE（默认指向 RT15548/LittleWhiteBox 仓库根目录的 info&upda.html）
             try {
                 const params = new URLSearchParams(window.location.search);
                 const repo = params.get('repo') || 'RT15548/LittleWhiteBox';
@@ -689,7 +685,6 @@
         function setupInfoButton() {
             const btn = document.getElementById('xiaobaix_info_btn');
             if (!btn) return;
-            // 解绑后再绑定，避免重复监听
             const newBtn = btn.cloneNode(true);
             btn.parentNode.replaceChild(newBtn, btn);
             newBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openInfoModal(); });
@@ -716,7 +711,6 @@
     })();
 </script>
 
-<!-- 公告弹窗结构 -->
 <div id="xiaobaix_info_modal" class="xiaobaix-modal" style="display:none;">
     <div class="xiaobaix-modal-content">
         <div class="xiaobaix-modal-header">
@@ -774,7 +768,6 @@
         .xiaobaix-info-grid ul { margin: 0; padding-left: 18px; }
         .xiaobaix-info-grid li { margin: 4px 0; }
         @media (max-width: 680px) { .xiaobaix-info-grid { grid-template-columns: 1fr; } }
-        /* 参考 variables-panel.js 的移动端容器适配 */
         @media (max-width: 999px) {
             .xiaobaix-modal { align-items: flex-start; }
             .xiaobaix-modal-content {

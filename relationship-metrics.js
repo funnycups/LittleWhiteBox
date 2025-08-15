@@ -1492,9 +1492,9 @@ class TextAnalysisEngine {
         text = this.filterXmlTags(text);
 
         if (originalText !== text) {
-            logs.push(`⚠️ 检测到特定XML标签，将自动过滤标签: ${this.excludedXmlTags.join(', ')}`);
+            const excluded = Array.isArray(this.filterConfig?.xmlTags) ? this.filterConfig.xmlTags.join(', ') : '';
+            logs.push(`⚠️ 检测到特定XML标签，将自动过滤标签: ${excluded}`);
             logs.push(`过滤后文本长度: ${text.length}`);
-
             if (!text.trim()) {
                 logs.push(`⚠️ 过滤后文本为空，不进行好感度计算`);
                 return logs.join('\n');
