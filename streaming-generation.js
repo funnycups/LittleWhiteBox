@@ -39,7 +39,6 @@ const PROXY_SUPPORTED = new Set([
 const inferFromMainApi = () => {
     const m = String(main_api || '').toLowerCase();
 
-    // 当 main_api 是 "openai" 时，需要进一步检查实际的聊天补全源
     if (m === 'openai') {
         const chatCompletionSource = oai_settings?.chat_completion_source;
         if (chatCompletionSource === 'makersuite' || chatCompletionSource === 'vertexai') {
@@ -54,7 +53,6 @@ const inferFromMainApi = () => {
         if (chatCompletionSource === 'deepseek') {
             return 'deepseek';
         }
-        // 其他情况保持 openai
         return 'openai';
     }
 
@@ -293,11 +291,6 @@ class StreamingGeneration {
 		}
 	}
 
-	/**
-	 * 临时切换 PromptManager 中各项启用状态，执行回调后还原。
-	 * @param {Set<string>} addonSet - 传入的 addon 集合
-	 * @param {Function} fn - 实际执行函数，应返回 Promise
-	 */
 	async _withTemporaryPromptToggles(addonSet, fn) {
 		await this._waitForToggleFree();
 		this._toggleBusy = true;
@@ -307,17 +300,13 @@ class StreamingGeneration {
 			const activeChar = pm?.activeCharacter ?? null;
 			const order = pm?.getPromptOrderForCharacter(activeChar) ?? [];
 
-			// 快照原始 enabled 状态
 			snapshot = order.map(e => ({ identifier: e.identifier, enabled: !!e.enabled }));
 			this._lastToggleSnapshot = snapshot.map(s => ({ ...s }));
 
-			// 先全部禁用（含 main）
 			order.forEach(e => { e.enabled = false; });
 
-			// addon 映射
 			const enableIds = new Set();
 
-			// preset: 启用“原预设中原本启用”的项，但排除指定 6 类（除非这些类别也显式出现在 addon 中）
 			const PRESET_EXCLUDES = new Set([
 				'chatHistory',
 				'worldInfoBefore', 'worldInfoAfter',
@@ -331,7 +320,6 @@ class StreamingGeneration {
 				}
 			}
 
-			// 单项 addon 精确开启
 			if (addonSet.has('chatHistory')) enableIds.add('chatHistory');
 			if (addonSet.has('worldInfo')) { enableIds.add('worldInfoBefore'); enableIds.add('worldInfoAfter'); }
 			if (addonSet.has('charDescription')) enableIds.add('charDescription');
@@ -339,13 +327,10 @@ class StreamingGeneration {
 			if (addonSet.has('scenario')) enableIds.add('scenario');
 			if (addonSet.has('personaDescription')) enableIds.add('personaDescription');
 
-			// 如果仅请求 worldInfo 而未请求 chatHistory，则为触发深度/作者注释注入，临时启用 chatHistory（捕获后会剔除历史内容）
 			if (addonSet.has('worldInfo') && !addonSet.has('chatHistory')) enableIds.add('chatHistory');
 
-			// 应用启用集
 			order.forEach(e => { if (enableIds.has(e.identifier)) e.enabled = true; });
 
-			// 执行回调
 			return await fn();
 		} finally {
 			try {
@@ -402,12 +387,9 @@ class StreamingGeneration {
             return String(sessionId);
         }
 
-        // 异步处理复杂逻辑
         (async () => {
             try {
 				const context = getContext();
-				/** @type {any} */
-				/** @type {any} */
 				let capturedData = null;
 
                 const dataListener = (data) => {
@@ -420,21 +402,14 @@ class StreamingGeneration {
 
 				const tempKeys = [];
 				const pushTemp = () => {};
-				// 不再在捕获阶段注入 top/bottom，避免重复进入 capturedData
-
-			// 计算 skipWIAN：仅当显式需要 worldInfo 时才包含世界书；
-			// addon=preset 时默认跳过 WI（你的要求）
 			const skipWIAN = addonSet.has('worldInfo') ? false : true;
 
-			// 临时开关：默认全关，按 addon 开
 			await this._withTemporaryPromptToggles(addonSet, async () => {
-				// 方案A：若仅 worldInfo，需要历史锚点触发深度与作者注释，但无需真实大历史 → 注入极简占位历史
 				const sandboxed = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
 				let chatBackup = null;
 				if (sandboxed) {
 					try {
 						chatBackup = chat.slice();
-						// 用一条极简占位消息作为历史锚点
 						chat.length = 0;
 						chat.push({ name: name1 || 'User', is_user: true, is_system: false, mes: '[hist]', send_date: new Date().toISOString() });
 					} catch {}
@@ -465,7 +440,6 @@ class StreamingGeneration {
 					src = capturedData.slice();
 				}
 
-				// 直接使用捕获的 prompt；若为 sandbox 模式（仅 worldInfo），剔除历史 user/assistant
 				const sandboxedAfter = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
 				const isFromChat = this._createIsFromChat();
 				const finalPromptMessages = src.filter(m => {
@@ -476,7 +450,6 @@ class StreamingGeneration {
 					return true;
 				});
 				const norm = this._normStrip;
-				// 轻量地让 position 生效：如果捕获中已有与当前提示相同内容，则将其移动到指定位置
 				const position = ['history', 'after_history', 'afterhistory', 'chathistory']
 					.includes(String(args?.position || '').toLowerCase()) ? 'history' : 'bottom';
 				const targetIdx = finalPromptMessages.findIndex(m => m && typeof m.content === 'string' && norm(m.content) === norm(prompt));
@@ -491,7 +464,6 @@ class StreamingGeneration {
 								lastHistoryIndex = i;
 							}
 						}
-						// 极轻：若找不到历史锚点（例如未启用 chatHistory），则插入到最后一个 system 之后；再不然插到数组末尾
 						if (lastHistoryIndex >= 0) finalPromptMessages.splice(lastHistoryIndex + 1, 0, msg);
 						else {
 							let lastSystemIndex = -1;
@@ -506,7 +478,6 @@ class StreamingGeneration {
 					}
 				}
 
-				// 合并 top/bottom 与捕获内容，并去重相同 role+content 的重复项（避免 top/bottom 重复）
 				const mergedOnce = ([]).concat(topMsgs).concat(finalPromptMessages).concat(bottomMsgs);
 				const seenKey = new Set();
 				const finalMessages = [];
@@ -583,7 +554,6 @@ class StreamingGeneration {
                     apipassword: args?.apipassword, model: args?.model
                 };
 
-                /** @type {any} */
                 const cd = capturedData;
 				let finalPromptMessages = [];
 				if (cd && typeof cd === 'object' && Array.isArray(cd.prompt)) {
@@ -592,7 +562,6 @@ class StreamingGeneration {
 					finalPromptMessages = cd.slice();
 				}
 
-                // 去重并插入消息
                 const norm = this._normStrip;
                 const promptNorm = norm(prompt);
                 for (let i = finalPromptMessages.length - 1; i >= 0; i--) {
@@ -623,7 +592,6 @@ class StreamingGeneration {
                     finalPromptMessages.push(messageToInsert);
                 }
 
-				/** @type {any} */
 				const cd2 = capturedData;
 				let dataWithOptions;
 				if (cd2 && typeof cd2 === 'object' && !Array.isArray(cd2)) {
@@ -686,7 +654,6 @@ class StreamingGeneration {
         }));
     }
 
-    // 简化的工具方法
     getLastGeneration = (sessionId) => sessionId !== undefined ?
         (this.sessions.get(this._getSlotId(sessionId))?.text || '') : this.tempreply;
 
