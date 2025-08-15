@@ -2818,7 +2818,7 @@ async function displayFourthWallPage() {
                     <i class="fa-solid fa-chevron-down" id="fw-settings-toggle-icon" style="transition: transform 0.2s;"></i>
                     <span>设置</span>
                 </h4>
-                <button id="fw-reset-btn" class="menu_button" style="padding: 4px 10px; font-size: 12px;">重开对话</button>
+                <button id="fw-reset-btn" class="menu_button" style="padding: 4px 10px; font-size: 12px; width: auto;">重开对话</button>
             </div>
             <div id="fw-settings-content" style="display: none; padding-top: 15px; display: flex; flex-wrap: wrap; gap: 15px; font-size: 13px;">
                 <div>
