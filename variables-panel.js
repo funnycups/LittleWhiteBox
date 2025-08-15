@@ -198,19 +198,14 @@ class VariablesPanel {
     if (!this.state.container?.length) return;
     this.unbindEvents();
     const ns = '.vm';
-    // 顶部按钮动作/添加表单
     $(document).on(`click${ns}`, '.vm-section [data-act]', (e)=>this.onHeaderAction(e));
-    // ADD按钮：短按添加变量，长按添加文件夹
     this.bindLongPress('.vm-section [data-act="add"]', (e)=>this.showAddForm($(e.currentTarget).data('type')), (e)=>this.createFolderDialog($(e.currentTarget).data('type')), CONFIG.folderLongPressDelay);
-    // 搜索
     ['character','global'].forEach(t=> $(`#${t}-vm-search`).on('input', e=>this.searchVariables(t,e.target.value)));
-    // 树交互
     $(document)
       .on(`touchstart${ns}`, '.vm-item>.vm-item-header', (e)=>this.handleTouch(e))
       .on(`click${ns}`, '.vm-item>.vm-item-header', (e)=>this.handleItemClick(e))
       .on(`click${ns}`, '.vm-item-controls [data-act]', (e)=>this.onItemAction(e))
       .on(`click${ns}`, '.vm-inline-form [data-act]', (e)=>this.onInlineAction(e));
-    // 复制：长按/短按
     $(document).on(`mousedown${ns} touchstart${ns}`, '[data-act="copy"]', (e)=>this.bindCopyPress(e));
   }
   unbindEvents(){ $(document).off('.vm'); ['character','global'].forEach(t=> $(`#${t}-vm-search`).off('input')); }
@@ -512,7 +507,6 @@ class VariablesPanel {
   }
   createFolderDialog(t){ const n=prompt('请输入文件夹名称:','新文件夹'); if(n?.trim()){ this.folder.create(t,n.trim()); this.loadVariables(); toastr.success(`文件夹 "${n}" 已创建`); } }
 
-  // 消息按钮：仅使用 registerButtonToSubContainer（移除降级方案）
   ensureSharedButton(){
     if (this.sharedBtn) return this.sharedBtn;
     const btn=document.createElement('div'); btn.title='变量面板'; btn.className='mes_btn mes_variables_panel'; btn.innerHTML='<i class="fa-solid fa-database"></i>';
@@ -572,3 +566,4 @@ export async function initVariablesPanel(){
 
 export function getVariablesPanelInstance(){ return variablesPanelInstance; }
 export function cleanupVariablesPanel(){ if(variablesPanelInstance){ variablesPanelInstance.cleanup(); variablesPanelInstance=null; } }
+
