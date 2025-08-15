@@ -29,7 +29,8 @@
                         提供STscript(command)异步函数执行酒馆命令:
 
                         await STscript('/echo 你好世界！')">启用小白X</label>
-                        <button id="xiaobaix_info_btn" class="menu_button menu_button_icon" type="button" title="查看功能与更新公告">
+                        <button id="xiaobaix_info_btn" class="menu_button menu_button_icon" type="button"
+                            title="查看功能与更新公告">
                             <i class="fa-solid fa-circle-info"></i>
                             <small>公告</small>
                         </button>
@@ -156,7 +157,8 @@
                         <div class="flex-container">
                             <input type="text" id="wallhaven_custom_tag_input" placeholder="输入英文标签，如: beautiful girl"
                                 class="text_pole wide50p" />
-                            <button id="wallhaven_add_custom_tag" class="menu_button" type="button" style="width: auto;">+自定义TAG</button>
+                            <button id="wallhaven_add_custom_tag" class="menu_button" type="button"
+                                style="width: auto;">+自定义TAG</button>
                         </div>
                         <div id="wallhaven_custom_tags_container" class="custom-tags-container">
                             <div id="wallhaven_custom_tags_list" class="custom-tags-list"></div>
@@ -648,7 +650,7 @@
                     container.innerHTML = '';
                     mainSections.forEach(s => container.appendChild(s.cloneNode(true)));
                 }
-            } catch {}
+            } catch { }
 
             try {
                 const params = new URLSearchParams(window.location.search);
@@ -671,7 +673,7 @@
                         }
                     }
                 }
-            } catch {}
+            } catch { }
 
             container.dataset.loaded = 'true';
         }
@@ -715,22 +717,23 @@
     <div class="xiaobaix-modal-content">
         <div class="xiaobaix-modal-header">
             <span class="xiaobaix-modal-title">小白X 功能与更新公告</span>
-            <button id="xiaobaix_info_close" class="menu_button menu_button_icon" title="关闭"><i class="fa-solid fa-xmark"></i></button>
+            <button id="xiaobaix_info_close" class="menu_button menu_button_icon" title="关闭"><i
+                    class="fa-solid fa-xmark"></i></button>
         </div>
         <div class="xiaobaix-modal-body">
             <div id="xiaobaix_info_content" class="xiaobaix-info-content"></div>
         </div>
     </div>
     <style>
-
         #xiaobaix_info_btn {
             align-items: flex-end;
             margin-bottom: 0px;
         }
+
         .xiaobaix-modal {
             position: fixed;
             inset: 0;
-            background: rgba(0,0,0,0.6);
+            background: rgba(0, 0, 0, 0.6);
             display: none;
             align-items: center;
             justify-content: center;
@@ -738,6 +741,7 @@
             padding: 10px;
             padding-bottom: max(10px, env(safe-area-inset-bottom));
         }
+
         .xiaobaix-modal-content {
             background: var(--SmartThemeBlurTintColor, #1e1e1e);
             border: 1px solid var(--SmartThemeBorderColor, #333);
@@ -746,9 +750,10 @@
             height: min(85vh, 92vh);
             display: flex;
             flex-direction: column;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             backdrop-filter: blur(var(--SmartThemeBlurStrength, 0px));
         }
+
         .xiaobaix-modal-header {
             display: flex;
             align-items: center;
@@ -758,23 +763,103 @@
             background: var(--SmartThemeBlurTintColor, #1e1e1e);
             border-radius: 10px 10px 0 0;
         }
-        .xiaobaix-modal-title { color: var(--SmartThemeBodyColor, #e9e9e9); font-weight: 600; }
-        .xiaobaix-modal-body { flex: 1; overflow: auto; }
-        .xiaobaix-info-content { padding: 12px; display: flex; flex-direction: column; gap: 12px; word-break: break-all; word-wrap: break-word;}
-        .xiaobaix-info-content h3, .xiaobaix-info-content h4 { margin: 4px 0 8px; color: var(--SmartThemeBodyColor, #e9e9e9); }
-        .xiaobaix-info-content p { margin: 0; color: var(--SmartThemeBodyColor, #ccc); }
-        .xiaobaix-info-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .xiaobaix-info-grid h4 { margin: 0 0 6px; color: var(--SmartThemeEmColor, #9be49b); }
-        .xiaobaix-info-grid ul { margin: 0; padding-left: 18px; }
-        .xiaobaix-info-grid li { margin: 4px 0; }
-        @media (max-width: 680px) { .xiaobaix-info-grid { grid-template-columns: 1fr; } }
+
+        .xiaobaix-modal-title {
+            color: var(--SmartThemeBodyColor, #e9e9e9);
+            font-weight: 600;
+        }
+
+        .xiaobaix-modal-body {
+            flex: 1;
+            overflow: auto;
+        }
+
+        .xiaobaix-info-content {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            word-break: break-all;
+            word-wrap: break-word;
+        }
+
+        .xiaobaix-info-content h3,
+        .xiaobaix-info-content h4 {
+            margin: 4px 0 8px;
+            color: var(--SmartThemeBodyColor, #e9e9e9);
+        }
+
+        .xiaobaix-info-content p {
+            margin: 0;
+            color: var(--SmartThemeBodyColor, #ccc);
+        }
+
+        .xiaobaix-info-grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .xiaobaix-info-grid h4 {
+            margin: 0 0 6px;
+            color: var(--SmartThemeEmColor, #9be49b);
+        }
+
+        .xiaobaix-info-grid ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .xiaobaix-info-grid li {
+            margin: 4px 0;
+        }
+
+        @media (max-width: 680px) {
+            .xiaobaix-info-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         @media (max-width: 999px) {
-            .xiaobaix-modal { align-items: flex-start; }
+            .xiaobaix-modal {
+                align-items: flex-start;
+            }
+
             .xiaobaix-modal-content {
                 width: 100vw;
                 height: calc(100svh - var(--topBarBlockSize, 0px) - 10px);
                 margin-top: var(--topBarBlockSize, 0px);
                 border-radius: 12px;
             }
+        }
+    </style>
+    <style>
+        .collapsible .toggle {
+            display: none;
+        }
+
+        .collapsible .title {
+            cursor: pointer;
+            display: block;
+        }
+
+        .collapsible .title h4::after {
+            content: ' ▼';
+            font-size: 0.8em;
+            transition: transform 0.3s;
+        }
+
+        .collapsible .content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .collapsible .toggle:checked~.content {
+            max-height: 200px;
+        }
+
+        .collapsible .toggle:checked~.title h4::after {
+            transform: rotate(-180deg);
         }
     </style>
