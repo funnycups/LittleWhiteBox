@@ -351,6 +351,7 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
     font-size: 12px;
     line-height: 1.4;
     text-align: left;
+    padding-bottom: 80px;
 }
 
 .mes_history_preview {
