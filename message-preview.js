@@ -55,168 +55,134 @@ function debounce(fn, wait) {
 }
 
 let __installed = false;
-let __originalDesc = null;
-let __lastKnownImpl = null;
-let __ensureTimer = null;
-let __pollTimer = null;
-let __guardFetch = null;
-const ENSURE_INTERVAL = 1500;
+const FETCH_MW_KEY = Symbol.for("lwbox.fetchMiddlewareStack");
+const FETCH_BASE_KEY = Symbol.for("lwbox.fetchBase");
+const OUR_MW_ID = Symbol.for("lwbox.middleware.identity");
+const ORIG_DESC_KEY = Symbol.for("lwbox.fetch.origDesc");
 
-function getLatestFetchImpl() {
+function getRealFetchCandidate(desc) {
   try {
-    if (typeof __lastKnownImpl === "function") return __lastKnownImpl;
-    const d = Object.getOwnPropertyDescriptor(window, "fetch");
-    if (d) {
-      if (typeof d.value === "function" && d.value !== getGuardFetch && d.value !== __guardFetch) return d.value;
-      if (typeof d.get === "function" && d.get !== getGuardFetch) {
-        try {
-          const v = d.get.call(window);
-          if (typeof v === "function" && v !== __guardFetch) return v;
-        } catch {}
-      }
+    if (desc?.value && typeof desc.value === "function") return desc.value;
+    if (typeof desc?.get === "function") {
+      const v = desc.get.call(window);
+      if (typeof v === "function") return v;
     }
-    if (typeof globalThis.fetch === "function" && globalThis.fetch !== __guardFetch) return globalThis.fetch;
-    if (typeof fetch === "function" && fetch !== __guardFetch) return fetch;
-    return Function.prototype;
+  } catch {}
+  return (typeof globalThis.fetch === "function") ? globalThis.fetch : Function.prototype;
+}
+function compose(base, stack) {
+  return stack.reduce((acc, mw) => mw(acc), base);
+}
+function reapplyFetch() {
+  try {
+    const base = window[FETCH_BASE_KEY] || globalThis.fetch;
+    const stack = window[FETCH_MW_KEY] || [];
+    const combined = compose(base, stack);
+    return combined || base;
   } catch {
-    return (typeof fetch === "function" && fetch !== __guardFetch) ? fetch : Function.prototype;
+    return globalThis.fetch;
   }
 }
-
-function getGuardFetch() { return __guardFetch; }
-function makeGuardFetch() {
-  const guard = function (url, options = {}) {
-    const latest = getLatestFetchImpl();
-    try {
-      if (isTarget(url, options)) {
-        if (S.isPreview || S.isLong) {
-          return interceptPreview(url, options).catch(
-            () => new Response(JSON.stringify({ error: { message: "拦截失败，请手动中止消息生成。" } }), { status: 500, headers: { "Content-Type": "application/json" } })
-          );
-        } else {
-          try { recordRealApiRequest(url, options); } catch {}
+function makeLwboxMiddleware() {
+  const mw = function (next) {
+    return function guardedFetch(url, options = {}) {
+      try {
+        if (isTarget(url, options)) {
+          if (S.isPreview || S.isLong) {
+            return interceptPreview(url, options).catch(
+              () => new Response(JSON.stringify({ error: { message: "拦截失败，请手动中止消息生成。" } }), { status: 500, headers: { "Content-Type": "application/json" } })
+            );
+          } else {
+            try { recordRealApiRequest(url, options); } catch {}
+          }
         }
-      }
-    } catch {}
-    return Reflect.apply(latest, this, arguments);
+      } catch {}
+      return Reflect.apply(next, this, arguments);
+    };
   };
-  return guard;
+  mw[OUR_MW_ID] = true;
+  return mw;
 }
+function ensureAccessorLightly() {
+  try {
+    const d = Object.getOwnPropertyDescriptor(window, "fetch");
+    const ourAccessor = d && typeof d.get === "function" && typeof d.set === "function" && d.get.toString().includes("return reapplyFetch()");
+    if (ourAccessor) return;
 
+    if (!window[ORIG_DESC_KEY]) window[ORIG_DESC_KEY] = d || null;
+
+    const latest = getRealFetchCandidate(d);
+    Object.defineProperty(window, "fetch", {
+      configurable: d?.configurable ?? true,
+      enumerable: d?.enumerable ?? true,
+      get() { return reapplyFetch(); },
+      set(v) { if (typeof v === "function") window[FETCH_BASE_KEY] = v; },
+    });
+    if (typeof latest === "function") window[FETCH_BASE_KEY] = latest;
+  } catch {}
+}
 function installUltimateFetchGuard() {
   if (__installed) return; __installed = true;
   try {
-    __originalDesc = Object.getOwnPropertyDescriptor(window, "fetch") || { configurable: true, enumerable: true, value: window.fetch };
-    __guardFetch = makeGuardFetch();
-
-    Object.defineProperty(window, "fetch", {
-      configurable: true,
-      enumerable: __originalDesc.enumerable ?? true,
-      get: getGuardFetch,
-      set(v) { __lastKnownImpl = (typeof v === "function") ? v : (__originalDesc?.value || fetch); },
-    });
-
-    if (typeof __originalDesc.value === "function") {
-      __lastKnownImpl = __originalDesc.value;
-    } else if (typeof window.fetch === "function" && window.fetch !== __guardFetch) {
-      __lastKnownImpl = window.fetch;
+    if (!window[FETCH_MW_KEY]) window[FETCH_MW_KEY] = [];
+    if (!window[FETCH_BASE_KEY]) {
+      const desc = Object.getOwnPropertyDescriptor(window, "fetch");
+      window[FETCH_BASE_KEY] = getRealFetchCandidate(desc);
     }
 
-const ensure = () => {
-  if (__ensureTimer) return;
-  __ensureTimer = setTimeout(() => {
-    __ensureTimer = null;
-    try {
-      const desc = Object.getOwnPropertyDescriptor(window, "fetch");
-      if (!desc || desc.get !== getGuardFetch) {
-        let latestVal = null;
-        try {
-          if (desc?.value && typeof desc.value === "function") {
-            latestVal = desc.value;
-          } else if (typeof desc?.get === "function" && desc.get !== getGuardFetch) {
-            latestVal = desc.get.call(window);
-          }
-        } catch {}
-        if (typeof latestVal === "function") __lastKnownImpl = latestVal;
+    ensureAccessorLightly();
 
-        __originalDesc = desc || __originalDesc;
-        Object.defineProperty(window, "fetch", {
-          configurable: true,
-          enumerable: (desc?.enumerable ?? __originalDesc?.enumerable ?? true),
-          get: getGuardFetch,
-          set(v) { __lastKnownImpl = (typeof v === "function") ? v : (__originalDesc?.value || fetch); },
-        });
-      }
-    } catch {}
-  }, 0);
-};
+    const stack = window[FETCH_MW_KEY];
+    if (!stack.some((mw) => mw && mw[OUR_MW_ID])) {
+      stack.push(makeLwboxMiddleware());
+    }
 
-    __pollTimer = setInterval(() => {
-    try {
-        const desc = Object.getOwnPropertyDescriptor(window, "fetch");
-        if (!desc || desc.get !== getGuardFetch) {
-        let latestVal = null;
-        try {
-            if (desc?.value && typeof desc.value === "function") {
-            latestVal = desc.value;
-            } else if (typeof desc?.get === "function" && desc.get !== getGuardFetch) {
-            latestVal = desc.get.call(window);
-            }
-        } catch {}
-        if (typeof latestVal === "function") __lastKnownImpl = latestVal;
+    reapplyFetch();
 
-        Object.defineProperty(window, "fetch", {
-            configurable: true,
-            enumerable: (desc?.enumerable ?? __originalDesc?.enumerable ?? true),
-            get: getGuardFetch,
-            set(v) { __lastKnownImpl = (typeof v === "function") ? v : (__originalDesc?.value || fetch); },
-        });
-        }
-    } catch {}
-    }, ENSURE_INTERVAL);
+    [50, 200, 800, 2000].forEach(t => setTimeout(ensureAccessorLightly, t));
 
-    if (document.readyState === "complete") ensure(); else window.addEventListener("load", ensure, { once: true });
-
-    __pollTimer = setInterval(() => {
-      try {
-        const desc = Object.getOwnPropertyDescriptor(window, "fetch");
-        if (!desc || desc.get !== getGuardFetch) {
-          Object.defineProperty(window, "fetch", {
-            configurable: true,
-            enumerable: (desc?.enumerable ?? __originalDesc?.enumerable ?? true),
-            get: getGuardFetch,
-            set(v) { __lastKnownImpl = (typeof v === "function") ? v : (__originalDesc?.value || fetch); },
-          });
-        }
-      } catch {}
-    }, ENSURE_INTERVAL);
+    const reapply = () => { try { ensureAccessorLightly(); reapplyFetch(); } catch {} };
+    if (document.readyState === "complete") {
+      queueMicrotask(reapply);
+      setTimeout(reapply, 0);
+      if ("requestIdleCallback" in window) requestIdleCallback(reapply, { timeout: 1500 });
+    } else {
+      window.addEventListener("load", () => {
+        queueMicrotask(reapply);
+        setTimeout(reapply, 0);
+        if ("requestIdleCallback" in window) requestIdleCallback(reapply, { timeout: 1500 });
+      }, { once: true });
+    }
   } catch (e) { console.error("[LittleWhiteBox] installUltimateFetchGuard error", e); }
 }
 function uninstallUltimateFetchGuard() {
+  if (!__installed) return;
   try {
-    if (!__installed) return; __installed = false;
-    if (__ensureTimer) { clearTimeout(__ensureTimer); __ensureTimer = null; }
-    if (__pollTimer) { clearInterval(__pollTimer); __pollTimer = null; }
-    if (__originalDesc) {
-      try {
-        if (typeof __lastKnownImpl === "function") {
-          Object.defineProperty(window, "fetch", {
-            configurable: true,
-            enumerable: __originalDesc.enumerable ?? true,
-            writable: true,
-            value: __lastKnownImpl,
-          });
-        } else {
-          Object.defineProperty(window, "fetch", __originalDesc);
+    const stack = window[FETCH_MW_KEY];
+    if (Array.isArray(stack) && stack.length) {
+      const idx = stack.findIndex((mw) => mw && mw[OUR_MW_ID]);
+      if (idx >= 0) stack.splice(idx, 1);
+    }
+    const hasOthers = Array.isArray(window[FETCH_MW_KEY]) && window[FETCH_MW_KEY].length > 0;
+    const orig = window[ORIG_DESC_KEY];
+
+    if (!hasOthers) {
+      if (orig) {
+        try {
+          Object.defineProperty(window, "fetch", orig);
+        } catch {
+          const base = window[FETCH_BASE_KEY] || getRealFetchCandidate(Object.getOwnPropertyDescriptor(window, "fetch")) || globalThis.fetch;
+          Object.defineProperty(window, "fetch", { configurable: true, enumerable: true, writable: true, value: base });
         }
-      } catch {
-        window.fetch = __lastKnownImpl || __originalDesc?.value || fetch;
+      } else {
+        const base = window[FETCH_BASE_KEY] || globalThis.fetch;
+        Object.defineProperty(window, "fetch", { configurable: true, enumerable: true, writable: true, value: base });
       }
     } else {
-      window.fetch = __lastKnownImpl || window.fetch || fetch;
+      reapplyFetch();
     }
   } catch (e) { console.error("[LittleWhiteBox] uninstallUltimateFetchGuard error", e); }
-  finally { __originalDesc = __lastKnownImpl = __guardFetch = null; }
+  finally { __installed = false; }
 }
 function setupFetchWrapperOnce() { if (!S.active) { installUltimateFetchGuard(); S.active = true; } }
 function restoreFetch() { if (S.active) { uninstallUltimateFetchGuard(); S.active = false; } }
@@ -225,7 +191,6 @@ function updateFetchState() {
   if (need && !S.active) setupFetchWrapperOnce();
   if (!need && S.active) restoreFetch();
 }
-/* ========================== end fetch guard ========================== */
 
 function manageSendButton(disable = true) {
   const $b = q("#send_but");
@@ -287,24 +252,61 @@ async function interceptPreview(url, options) {
   } else if (S.resolve) { S.resolve({ success: true, data: S.previewData }); S.resolve = S.reject = null; }
   return new Response(JSON.stringify({ choices: [{ message: { content: "" }, finish_reason: "stop" }] }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
+
+let __mo = null;
+function startMessageRenderBypass() {
+  if (__mo) return;
+  const chat = document.querySelector("#chat");
+  if (!chat) return;
+  __mo = new MutationObserver((muts) => {
+    if (!S.isPreview && !S.isLong) return;
+    for (const m of muts) {
+      if (!m.addedNodes) continue;
+      m.addedNodes.forEach((node) => {
+        if (node instanceof HTMLElement && node.classList.contains("mes")) {
+          const mesidAttr = node.getAttribute("mesid");
+          const id = mesidAttr ? parseInt(mesidAttr) : NaN;
+          if (!Number.isNaN(id)) recordInterceptedMessage(id);
+          node.remove();
+        }
+      });
+    }
+  });
+  __mo.observe(chat, { childList: true, subtree: true });
+}
+function stopMessageRenderBypass() {
+  if (__mo) {
+    try { __mo.disconnect(); } catch {}
+    __mo = null;
+  }
+}
+
 function hijackMessageCreation() {
   const ctx = getContext(), origPush = ctx.chat.push, beforeLen = ctx.chat.length;
+  startMessageRenderBypass();
+
   ctx.chat.push = function (...items) {
+    const start = this.length;
+    const res = origPush.apply(this, items);
     if (S.isPreview || S.isLong) {
-      const start = this.length, res = origPush.apply(this, items);
-      for (let i = 0; i < items.length; i++) { const id = start + i; S.previewIds.add(id); if (S.isPreview) recordInterceptedMessage(id); }
-      return res;
+      for (let i = 0; i < items.length; i++) {
+        const id = start + i;
+        S.previewIds.add(id);
+        if (S.isPreview) recordInterceptedMessage(id);
+      }
     }
-    return origPush.apply(this, items);
+    return res;
   };
-  const ap = Element.prototype.appendChild, ib = Element.prototype.insertBefore;
-  Element.prototype.appendChild = function (child) { return (S.isPreview || S.isLong) && child?.classList?.contains("mes") ? child : ap.call(this, child); };
-  Element.prototype.insertBefore = function (child, ref) { return (S.isPreview || S.isLong) && child?.classList?.contains("mes") ? child : ib.call(this, child, ref); };
   return function restore() {
-    ctx.chat.push = origPush; Element.prototype.appendChild = ap; Element.prototype.insertBefore = ib;
+    ctx.chat.push = origPush;
+    stopMessageRenderBypass();
+
     if (S.previewIds.size) {
       const ids = [...S.previewIds].sort((a, b) => b - a);
-      ids.forEach((id) => { if (id < ctx.chat.length) ctx.chat.splice(id, 1); $(`#chat .mes[mesid="${id}"]`).remove(); });
+      ids.forEach((id) => {
+        if (id < ctx.chat.length) ctx.chat.splice(id, 1);
+        $(`#chat .mes[mesid="${id}"]`).remove();
+      });
       while (ctx.chat.length > beforeLen) ctx.chat.pop();
       S.previewIds.clear();
     }
@@ -529,6 +531,22 @@ function cleanupMemory() {
   if (!S.isLong) S.interceptedIds = [];
 }
 
+function onLast(ev, handler) {
+  if (typeof eventSource.makeLast === "function") {
+    eventSource.makeLast(ev, handler);
+    return;
+  }
+  eventSource.on(ev, handler);
+  queueMicrotask(() => {
+    try { eventSource.removeListener(ev, handler); } catch {}
+    try { eventSource.on(ev, handler); } catch {}
+  });
+  setTimeout(() => {
+    try { eventSource.removeListener(ev, handler); } catch {}
+    try { eventSource.on(ev, handler); } catch {}
+  }, 0);
+}
+
 function addEvents() {
   removeEvents();
   const L = [
@@ -543,7 +561,7 @@ function addEvents() {
       }, 100),
     },
   ];
-  L.forEach(({ e, h }) => { ON(e, h); S.listeners.push({ e, h }); });
+  L.forEach(({ e, h }) => { onLast(e, h); S.listeners.push({ e, h }); });
 
   const late = (payload) => {
     try {
@@ -556,7 +574,15 @@ function addEvents() {
     } catch {}
     queueMicrotask(() => setTimeout(() => updateFetchState(), 0));
   };
-  eventSource.makeLast(event_types.CHAT_COMPLETION_SETTINGS_READY, late);
+  if (typeof eventSource.makeLast === "function") {
+    eventSource.makeLast(event_types.CHAT_COMPLETION_SETTINGS_READY, late);
+  } else {
+    ON(event_types.CHAT_COMPLETION_SETTINGS_READY, late);
+    queueMicrotask(() => {
+      try { OFF(event_types.CHAT_COMPLETION_SETTINGS_READY, late); } catch {}
+      try { ON(event_types.CHAT_COMPLETION_SETTINGS_READY, late); } catch {}
+    });
+  }
   S.listeners.push({ e: event_types.CHAT_COMPLETION_SETTINGS_READY, h: late });
 }
 function removeEvents() { S.listeners.forEach(({ e, h }) => OFF(e, h)); S.listeners = []; }
@@ -568,7 +594,9 @@ function toggleLong() {
     const ctx = getContext(); S.chatLenBefore = ctx.chat?.length || 0; S.restoreLong = hijackMessageCreation();
     $b.css("color", "red"); toastr.info("持续拦截已开启", "", { timeOut: 2000 });
   } else {
-    $b.css("color", ""); try { S.restoreLong?.(); } catch {} S.restoreLong = null; S.interceptedIds = []; S.chatLenBefore = 0;
+    $b.css("color", "");
+    try { S.restoreLong?.(); } catch {}
+    S.restoreLong = null; S.interceptedIds = []; S.chatLenBefore = 0;
     toastr.info("持续拦截已关闭", "", { timeOut: 2000 });
   }
 }
@@ -581,12 +609,12 @@ function bindPreviewButton() {
     if (!S.isLong) showPreview();
   });
 }
-function recordInterceptedMessage(id) { if (S.isPreview && !S.interceptedIds.includes(id)) S.interceptedIds.push(id); }
+function recordInterceptedMessage(id) { if ((S.isPreview || S.isLong) && !S.interceptedIds.includes(id)) S.interceptedIds.push(id); }
 
 async function deleteMessageById(id) {
   try {
     const ctx = getContext();
-    if (id === ctx.chat?.length - 1) { await deleteLastMessage(); return true; } 
+    if (id === ctx.chat?.length - 1) { if (typeof deleteLastMessage === "function") { await deleteLastMessage(); return true; } } 
     if (ctx.chat && ctx.chat[id]) {
       ctx.chat.splice(id, 1); $(`#chat .mes[mesid="${id}"]`).remove(); if (ctx.chat_metadata) ctx.chat_metadata.tainted = true; return true;
     }
@@ -599,18 +627,18 @@ async function deleteInterceptedMessages() {
     if (!S.interceptedIds.length) return;
     const ids = [...S.interceptedIds].sort((a, b) => b - a); let n = 0;
     for (const id of ids) if (await deleteMessageById(id)) n++;
-    S.interceptedIds = []; try { await saveChatConditional(); } catch {}
+    S.interceptedIds = []; try { if (typeof saveChatConditional === "function") await saveChatConditional(); } catch {}
     if (n) toastr.success(`拦截模式下的 ${n} 条消息已自动删除`, "", { timeOut: 2000 });
   } catch { toastr.error("删除拦截消息失败"); }
 }
 
 function cleanup() {
-  if (S.cleanTimer) { clearInterval(S.cleanTimer); S.cleanTimer = null; }
   removeEvents(); restoreFetch(); manageSendButton(false);
   $(".mes_history_preview").remove(); $("#message_preview_btn").remove(); cleanupMemory();
   Object.assign(S, { resolve: null, reject: null, isPreview: false, isLong: false, interceptedIds: [], chatLenBefore: 0, sendBtnWasDisabled: false });
   if (S.longPressTimer) { clearTimeout(S.longPressTimer); S.longPressTimer = null; }
   if (S.restoreLong) { try { S.restoreLong(); } catch {} S.restoreLong = null; }
+  stopMessageRenderBypass();
 }
 function initMessagePreview() {
   try {
@@ -622,7 +650,11 @@ function initMessagePreview() {
     $("#xiaobaix_preview_enabled").prop("checked", set.preview.enabled).on("change", function () {
       if (!geEnabled()) return; set.preview.enabled = $(this).prop("checked"); saveSettingsDebounced();
       $("#message_preview_btn").toggle(set.preview.enabled);
-      if (set.preview.enabled) S.cleanTimer = setInterval(cleanupMemory, C.CLEAN); else if (S.cleanTimer) { clearInterval(S.cleanTimer); S.cleanTimer = null; }
+      if (set.preview.enabled) {
+        if (!S.cleanTimer) S.cleanTimer = setInterval(cleanupMemory, C.CLEAN);
+      } else {
+        if (S.cleanTimer) { clearInterval(S.cleanTimer); S.cleanTimer = null; }
+      }
       updateFetchState();
       if (!set.preview.enabled && set.recorded.enabled) { addEvents(); addHistoryButtonsDebounced(); }
     });
