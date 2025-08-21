@@ -915,77 +915,129 @@ async function initCharacterUpdater(){
 
 export { initCharacterUpdater };
 
-// 监听 预设保存/另存为/重命名/删除，复制并延迟注入扩展字段到新预设，避免 AFTER 循环
 function wirePresetCopyHooks(){
-  const pm=PresetStore.getPM();
+  const pm = PresetStore.getPM();
   if(!pm){ console.debug('[小白X] 未找到 OpenAI 预设管理器，跳过扩展字段钩子'); return; }
 
-  const HookState={ pending:null, injecting:false, ignoreUntil:0, lastTarget:null, lastAt:0, handler:null, rebindTimer:null };
-  try{ if(typeof window!=='undefined'){ window.__LWB_PresetHookGuard=HookState; } }catch{}
+  const HookState = {
+    pending:null, injecting:false, ignoreUntil:0, lastTarget:null, lastAt:0, handler:null, rebindTimer:null,
+    beforeSet:null,
+    snapshot:null, // 重命名前快照
+  };
+  try{ if(typeof window!=='undefined'){ window.__LWB_PresetHookGuard = HookState; } }catch{}
 
-  const setPending=(op)=>{
-    // 短时间内保留首次操作（避免 rename 内部触发 save 覆盖）
-    if(HookState.pending && Date.now()-HookState.pending.at<2000) return;
-    const before=PresetStore.currentName();
-    HookState.pending={ op, before, at:Date.now() };
+  const getAllNames = ()=> {
+    try{ return new Set(pm?.getAllPresets?.() || []); }catch{ return new Set(); }
+  };
+  const diffNames = (aSet, bSet)=>{
+    const add=[], del=[];
+    for(const n of bSet) if(!aSet.has(n)) add.push(n);
+    for(const n of aSet) if(!bSet.has(n)) del.push(n);
+    return { add, del };
+  };
+  const deep = (x)=>{ try{ return structuredClone(x); }catch{ try{ return JSON.parse(JSON.stringify(x)); }catch{ return x; } } };
+
+  // 强化的 setPending：rename 优先，期间屏蔽 save/saveAs 覆盖
+  const setPending = (op)=>{
+    const now = Date.now();
+
+    // 若 rename 已在 pending，除 delete 以外全部忽略
+    if (HookState.pending?.op === 'rename' && op !== 'delete') {
+      console.debug('[小白X][PresetHook] 忽略：rename pending 中，丢弃', op);
+      return;
+    }
+
+    // 时间窗口去重：保留 rename 优先级
+    if (HookState.pending && now - HookState.pending.at < 2500) {
+      if (HookState.pending.op === 'rename' && op !== 'delete') {
+        console.debug('[小白X][PresetHook] 忽略：窗口内 rename 优先，丢弃', op);
+        return;
+      }
+    }
+
+    const before = PresetStore.currentName();
+    HookState.pending = { op, before, at: now };
+
+    if (op === 'rename') {
+      HookState.beforeSet = getAllNames();
+      // 抓扩展字段快照（源=before）
+      const d = PresetStore.readMerged(before) || {};
+      HookState.snapshot = {
+        nameFrom: before,
+        regexBindings: deep(PRB.read(before)),
+        presetDetail: {
+          uniqueValue: String(d.uniqueValue || ''),
+          timestamp: String(d.timestamp || ''),
+          nameGroup: String(d.nameGroup || ''),
+          linkAddress: String(d.linkAddress || ''),
+          updateNote: String(d.updateNote || ''),
+        },
+      };
+    }
+
     console.debug('[小白X][PresetHook] 捕获操作', op, 'before=', before);
   };
 
-  // BEFORE：捕获点击
+  // 绑定 UI 按钮事件：rename 期间屏蔽 save/saveAs 的 setPending 覆盖
   $(document)
     .off('click.lwbPreset','#update_oai_preset')
-    .on('click.lwbPreset','#update_oai_preset',()=>setPending('save'))
+    .on('click.lwbPreset','#update_oai_preset', () => {
+      if (HookState.pending?.op === 'rename') {
+        console.debug('[小白X][PresetHook] 忽略 save：rename pending 中');
+        return;
+      }
+      setPending('save');
+    })
     .off('click.lwbPreset','#new_oai_preset')
-    .on('click.lwbPreset','#new_oai_preset',()=>setPending('saveAs'))
+    .on('click.lwbPreset','#new_oai_preset', () => {
+      if (HookState.pending?.op === 'rename') {
+        console.debug('[小白X][PresetHook] 忽略 saveAs：rename pending 中');
+        return;
+      }
+      setPending('saveAs');
+    })
     .off('click.lwbPreset','[data-preset-manager-rename="openai"]')
-    .on('click.lwbPreset','[data-preset-manager-rename="openai"]',()=>setPending('rename'))
+    .on('click.lwbPreset','[data-preset-manager-rename="openai"]', () => setPending('rename'))
     .off('click.lwbPreset','#delete_oai_preset')
-    .on('click.lwbPreset','#delete_oai_preset',()=>setPending('delete'));
+    .on('click.lwbPreset','#delete_oai_preset', () => setPending('delete'));
 
-  async function injectTo(nameFrom, nameTo){
+  // 支持快照注入的注入器
+  async function injectTo(nameFrom, nameTo, snapshot){
     try{
       if(!nameTo) return;
 
-      // 复制 regexBindings（仅写插件本地，避免循环）
-      const binding=PRB.read(nameFrom);
-      if(binding && (Array.isArray(binding.scripts)?binding.scripts.length:0)){
-        try{
-          PRB.write(nameTo, binding);
-          console.debug('[小白X][PresetHook] 已保存 regexBindings 到插件本地', nameTo, (Array.isArray(binding.scripts)?binding.scripts.length:0));
-        }catch(err){ console.warn('[小白X][PresetHook] 注入 regexBindings 失败', err); }
-      } else {
-        console.debug('[小白X][PresetHook] 源预设无 regexBindings 可复制:', nameFrom);
+      // regexBindings
+      let binding = snapshot?.regexBindings ?? PRB.read(nameFrom);
+      if(binding && (Array.isArray(binding.scripts) ? binding.scripts.length : 0)){
+        try{ PRB.write(nameTo, binding); }catch(err){ console.warn('[小白X][PresetHook] 注入 regexBindings 失败', err); }
+      }else{
+        console.debug('[小白X][PresetHook] 源无 regexBindings 可复制:', nameFrom);
       }
 
-      // 复制 presetdetailnfo（写插件本地 + 写回预设文件，保障跨酒馆）
-      const d=PresetStore.readMerged(nameFrom);
-      if(d && (d.uniqueValue||d.timestamp)){
-        const detail={
-          uniqueValue:String(d.uniqueValue||''),
-          timestamp:String(d.timestamp||''),
-          nameGroup:String(d.nameGroup||''),
-          linkAddress:String(d.linkAddress||''),
-          updateNote:String(d.updateNote||'')
-        };
+      // presetdetailnfo
+      let detail = snapshot?.presetDetail;
+      if(!detail){
+        const d=PresetStore.readMerged(nameFrom);
+        if(d && (d.uniqueValue || d.timestamp)){
+          detail = {
+            uniqueValue:String(d.uniqueValue||''),
+            timestamp:String(d.timestamp||''),
+            nameGroup:String(d.nameGroup||''),
+            linkAddress:String(d.linkAddress||''),
+            updateNote:String(d.updateNote||''),
+          };
+        }
+      }
+      if(detail){
         try{ await PresetStore.write(nameTo, detail); }catch{}
-        console.debug('[小白X][PresetHook] 已保存 presetdetailnfo 到插件本地', nameTo, detail);
-
-        // 写回到预设文件（关键）
         const pmInst = PresetStore.getPM?.();
         if(pmInst?.writePresetExtensionField){
           try{
-            await pmInst.writePresetExtensionField({
-              path: 'extensions.presetdetailnfo',
-              value: detail,
-              name: nameTo
-            });
-            console.debug('[小白X][PresetHook] 已写回 presetdetailnfo 到预设文件:', nameTo);
-          }catch(e){
-            console.warn('[小白X][PresetHook] 写回 presetdetailnfo 到文件失败', e);
-          }
+            await pmInst.writePresetExtensionField({ path:'extensions.presetdetailnfo', value:detail, name:nameTo });
+          }catch(e){ console.warn('[小白X][PresetHook] 写回 presetdetailnfo 到文件失败', e); }
         }
-      } else {
-        console.debug('[小白X][PresetHook] 源预设无 presetdetailnfo 可复制:', nameFrom);
+      }else{
+        console.debug('[小白X][PresetHook] 源无 presetdetailnfo 可复制:', nameFrom);
       }
     }catch(e){ console.error('[小白X][PresetHook] 注入异常', e); }
   }
@@ -997,64 +1049,82 @@ function wirePresetCopyHooks(){
     console.debug('[小白X][PresetHook] 已清理旧预设扩展存储:', name);
   }
 
-  // AFTER：在预设切换完成后执行，延迟注入，避免循环
   const afterHandler = async ()=>{
     try{
       const now=Date.now();
-      if(HookState.injecting) { console.debug('[小白X][PresetHook] 忽略：注入阶段'); return; }
-      if(now < HookState.ignoreUntil) { console.debug('[小白X][PresetHook] 忽略：冷却期'); return; }
-      if(!HookState.pending){
-        const t=PresetStore.currentName();
-        if(HookState.lastTarget===t && (now-HookState.lastAt)<2000){ console.debug('[小白X][PresetHook] 忽略：重复目标去重', t); }
-        return;
-      }
+      if(HookState.injecting) return;
+      if(now < HookState.ignoreUntil) return;
+      if(!HookState.pending) return;
 
       const op=HookState.pending.op;
       const before=HookState.pending.before;
       const after=PresetStore.currentName();
 
-      // saveAs/rename 但名称未变化，跳过
+      // rename：集合差异识别（1 add + 1 del）
+      if(op==='rename'){
+        const beforeSet = HookState.beforeSet || getAllNames();
+        const afterSet  = getAllNames();
+        const { add, del } = diffNames(beforeSet, afterSet);
+
+        if(add.length===1 && del.length===1){
+          console.debug('[小白X][PresetHook] 识别为重命名:', del[0], '=>', add[0]);
+          HookState.injecting=true;
+          try{ eventSource.off?.(event_types.SETTINGS_UPDATED, HookState.handler); }catch{}
+          setTimeout(async ()=>{
+            try{
+              await injectTo(del[0], add[0], HookState.snapshot); // 用快照
+              cleanupOld(del[0]);
+              try{ PRB.refreshUI(); }catch{}
+              try{ PresetAdapter.onHeaderBoundState(); }catch{}
+              try{ PresetUI.checkCurrent(); }catch{}
+              HookState.lastTarget=add[0]; HookState.lastAt=Date.now();
+              try{ if(add[0]) setTimeout(()=>{ try{ savePresetDetailInfo(add[0]); }catch{} }, 200); }catch{}
+            } finally {
+              HookState.pending=null;
+              HookState.beforeSet=null;
+              HookState.snapshot=null;
+              HookState.injecting=false;
+              HookState.ignoreUntil=Date.now()+1500;
+              if(HookState.rebindTimer) clearTimeout(HookState.rebindTimer);
+              HookState.rebindTimer=setTimeout(()=>{ try{ eventSource.on(event_types.SETTINGS_UPDATED, HookState.handler); }catch{} }, 800);
+            }
+          }, 300);
+          return;
+        }
+
+        // 未锁定 1+1 差异，回退到 before/after 名但继续用快照
+        console.debug('[小白X][PresetHook] rename 差异未锁定，回退到 before/after 名:', before,'=>',after);
+      }
+
+      // 其他 save/saveAs/delete 或 rename 回退路径
       if((op==='saveAs' || op==='rename') && before === after){
-        console.debug('[小白X][PresetHook] 跳过：saveAs/rename 但名称未变化', before);
-        HookState.pending=null; return;
+        HookState.pending=null; HookState.beforeSet=null; HookState.snapshot=null; return;
       }
       if(HookState.lastTarget===after && (now-HookState.lastAt)<2000){
-        console.debug('[小白X][PresetHook] 忽略：短时重复 after', after);
-        HookState.pending=null; return;
+        HookState.pending=null; HookState.beforeSet=null; HookState.snapshot=null; return;
       }
 
-      console.debug('[小白X][PresetHook] SETTINGS_UPDATED 捕获: op=', op, 'before=', before, 'after=', after);
       HookState.injecting=true;
-
-      // 临时解绑 AFTER，避免注入写入再次触发
       try{ eventSource.off?.(event_types.SETTINGS_UPDATED, HookState.handler); }catch{}
-
       setTimeout(async ()=>{
         try{
           if(op==='delete'){
             if(before) cleanupOld(before);
           } else {
-            await injectTo(before, after);
+            await injectTo(before, after, op==='rename' ? HookState.snapshot : null);
             if(op==='rename' && before && after && before!==after){ cleanupOld(before); }
           }
-
-          // UI 刷新
           try{ PRB.refreshUI(); }catch{}
           try{ PresetAdapter.onHeaderBoundState(); }catch{}
           try{ PresetUI.checkCurrent(); }catch{}
-
           HookState.lastTarget=after; HookState.lastAt=Date.now();
-
-          // 双保险：注入完成后再写回一次扩展字段到文件
-          try{
-            if(after){ setTimeout(()=>{ try{ savePresetDetailInfo(after); }catch{} }, 200); }
-          }catch{}
+          try{ if(after){ setTimeout(()=>{ try{ savePresetDetailInfo(after); }catch{} }, 200); } }catch{}
         } finally {
           HookState.pending=null;
+          HookState.beforeSet=null;
+          HookState.snapshot=null;
           HookState.injecting=false;
           HookState.ignoreUntil=Date.now()+1500;
-
-          // 延迟重新绑定 AFTER 监听
           if(HookState.rebindTimer) clearTimeout(HookState.rebindTimer);
           HookState.rebindTimer=setTimeout(()=>{ try{ eventSource.on(event_types.SETTINGS_UPDATED, HookState.handler); }catch{} }, 800);
         }
@@ -1062,6 +1132,6 @@ function wirePresetCopyHooks(){
     }catch(e){ console.warn('[小白X][PresetHook] AFTER 处理失败', e); }
   };
 
-  HookState.handler=afterHandler;
+  HookState.handler = afterHandler;
   try{ eventSource.on(event_types.SETTINGS_UPDATED, HookState.handler); }catch{}
 }
