@@ -13,28 +13,61 @@ pre:has(+ .xiaobaix-iframe) {
 
 /* ==================== 动画效果 ==================== */
 @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 @keyframes slideInLeft {
-    from { transform: translateX(-100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
+    from {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }
 
 @keyframes slideInTop {
-    from { transform: translateY(-100%); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
+    from {
+        transform: translateY(-100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 @keyframes slideIn {
-    from { transform: translateY(-20px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
+    from {
+        transform: translateY(-20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 @keyframes popIn {
-    from { transform: scale(0.95); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
+    from {
+        transform: scale(0.95);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
 }
 
 /* ==================== 循环任务样式 ==================== */
@@ -140,88 +173,96 @@ input.disable_task {
     cursor: pointer;
 }
 
-.disable_task:checked ~ .task-toggle-off {
+.disable_task:checked~.task-toggle-off {
     display: block;
 }
 
-.disable_task:checked ~ .task-toggle-on {
+.disable_task:checked~.task-toggle-on {
     display: none;
 }
 
-.disable_task:not(:checked) ~ .task-toggle-off {
+.disable_task:not(:checked)~.task-toggle-off {
     display: none;
 }
 
-.disable_task:not(:checked) ~ .task-toggle-on {
+.disable_task:not(:checked)~.task-toggle-on {
     display: block;
 }
 
 /* ==================== 沉浸式显示模式样式 ==================== */
 body.immersive-mode #chat {
-   padding: 0 !important;
-   border: 0px !important;
-   overflow-y: auto;
-   margin: 0 0px 0px 4px !important;
+    padding: 0 !important;
+    border: 0px !important;
+    overflow-y: auto;
+    margin: 0 0px 0px 4px !important;
     scrollbar-width: thin;
     scrollbar-gutter: auto;
+}
+
+.xiaobaix-top-group {
+    margin-top: 1em !important;
 }
 
 /* 宽屏时隐藏滚动条 */
 @media screen and (min-width: 1001px) {
     body.immersive-mode #chat {
-        scrollbar-width: none; /* Firefox */
-        -ms-overflow-style: none; /* IE and Edge */
+        scrollbar-width: none;
+        /* Firefox */
+        -ms-overflow-style: none;
+        /* IE and Edge */
     }
 
     body.immersive-mode #chat::-webkit-scrollbar {
-        display: none; /* Chrome, Safari and Opera */
+        display: none;
+        /* Chrome, Safari and Opera */
     }
 }
 
 body.immersive-mode .mesAvatarWrapper {
-    margin-top: 3px;
+    margin-top: 1em;
     padding-bottom: 0px;
 }
+
 body.immersive-mode .swipe_left,
 body.immersive-mode .swipeRightBlock {
-    display: none;
+    display: none !important;
 }
 
 body.immersive-mode .mes {
-   margin: 2% 0 0% 0 !important;
- }
+    margin: 2% 0 0% 0 !important;
+}
 
- body.immersive-mode .ch_name {
+body.immersive-mode .ch_name {
     padding-bottom: 5px;
     border-bottom: 0.5px dashed color-mix(in srgb, var(--SmartThemeEmColor) 30%, transparent);
-  }
+}
 
 body.immersive-mode .mes_block {
-   padding-left: 0 !important;
-   margin: 0 0 5px 0 !important;
+    padding-left: 0 !important;
+    margin: 0 0 5px 0 !important;
 }
 
 body.immersive-mode .mes_text {
-   padding: 0px !important;
-   max-width: 100%;
-   width: 100%;
-   margin-top: 5px;
+    padding: 0px !important;
+    max-width: 100%;
+    width: 100%;
+    margin-top: 5px;
 }
 
 body.immersive-mode .mes {
-   width: 99%;
-   margin: 0 0.5%;
-   padding: 0px !important;
+    width: 99%;
+    margin: 0 0.5%;
+    padding: 0px !important;
 }
 
 body.immersive-mode .mes_buttons,
-body.immersive-mode .mes_edit_buttons{
+body.immersive-mode .mes_edit_buttons {
     position: absolute !important;
     top: 0 !important;
     right: 0 !important;
 }
 
-body.immersive-mode .swipes-counter  {
+body.immersive-mode .swipes-counter {
     padding-left: 0px;
     margin-bottom: 0 !important;
 }
@@ -248,13 +289,13 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
 }
 
 .immersive-nav-btn:hover:not(:disabled) {
-   background-color: rgba(var(--SmartThemeBodyColor), 0.2);
-   transform: scale(1.1);
+    background-color: rgba(var(--SmartThemeBodyColor), 0.2);
+    transform: scale(1.1);
 }
 
 .immersive-nav-btn:disabled {
-   opacity: 0.3;
-   cursor: not-allowed;
+    opacity: 0.3;
+    cursor: not-allowed;
 }
 
 /* ==================== 模板编辑器样式 ==================== */
@@ -369,6 +410,7 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
     margin-bottom: 10px;
     border-bottom: 1px solid #444;
 }
+
 .menu-tab {
     flex: 1;
     padding: 2px 8px;
@@ -379,26 +421,32 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
     transition: color 0.2s ease;
     font-weight: 500;
 }
+
 .menu-tab:hover {
     color: #fff;
 }
+
 .menu-tab.active {
     color: #007acc;
     border-bottom: 2px solid #007acc;
 }
+
 .settings-section {
     padding: 10px 0;
 }
+
 .template-replacer-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 8px;
 }
+
 .template-replacer-title {
     font-weight: bold;
     color: #007acc;
 }
+
 .template-replacer-status {
     padding: 5px 10px;
     background: #2a2a2a;
@@ -406,17 +454,21 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
     margin-bottom: 10px;
     font-size: 0.9em;
 }
+
 .template-replacer-status.has-settings {
     background: #1a4a1a;
     color: #90ee90;
 }
+
 .template-replacer-status.no-character {
     background: #4a1a1a;
     color: #ffb3b3;
 }
+
 .custom-tags-container {
     margin-top: 10px;
 }
+
 .custom-tags-list {
     display: flex;
     flex-wrap: wrap;
@@ -428,6 +480,7 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
     border-radius: 4px;
     border: 1px solid #444;
 }
+
 .custom-tag-item {
     display: flex;
     align-items: center;
@@ -438,18 +491,22 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
     font-size: 12px;
     gap: 6px;
 }
+
 .custom-tag-text {
     font-weight: 500;
 }
+
 .custom-tag-remove {
     cursor: pointer;
     color: rgba(255, 255, 255, 0.8);
     font-weight: bold;
     transition: color 0.2s ease;
 }
+
 .custom-tag-remove:hover {
     color: #ff6b6b;
 }
+
 .custom-tags-empty {
     color: #888;
     font-style: italic;
@@ -459,6 +516,59 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
 }
 
 /* ==================== 角色卡自动更新样式 (Character Updater) ==================== */
+/* === PRB styles (Preset ↔ Regex Binding) === */
+/* 放到任意可生效的样式里 */
+.character-menu-overlay.shadow_popup {
+  z-index: 9999;              /* 确保在设置抽屉之上 */
+}
+.character-menu-overlay .character-menu-content {
+  pointer-events: auto;       /* 接受事件 */
+}
+.shadow_popup_open #some-settings-drawer-selector {
+  /* 如果你的设置抽屉脚本会根据类名判断，也可以在此禁止自动收起 */
+}
+
+.prb-popup-container .menu_button,
+.prb-actions .menu_button,
+.task_editor .menu_button{
+  white-space: nowrap;  /* 防止换行 */
+}
+
+.prb-list {
+    padding: 4px;
+}
+
+.prb-chip .remove {
+    cursor: pointer;
+    color: #f43f5e
+}
+
+.prb-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px
+}
+
+.prb-popup-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 5px;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.xiaobaix-confirm-content {
+    width:80%;
+}
+
+.message-preview-content-box::-webkit-scrollbar-thumb:hover,
+.xiaobai_template_editor::-webkit-scrollbar-thumb:hover {
+    background: var(--SmartThemeAccent);
+}
+
+
 .littlewhitebox .current-character-info {
     background: var(--SmartThemeBlurTintColor);
     border: 1px solid var(--SmartThemeBorderColor);
@@ -986,9 +1096,4 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
 .xiaobai_template_editor::-webkit-scrollbar-thumb {
     background: var(--SmartThemeBorderColor);
     border-radius: 3px;
-}
-
-.message-preview-content-box::-webkit-scrollbar-thumb:hover,
-.xiaobai_template_editor::-webkit-scrollbar-thumb:hover {
-    background: var(--SmartThemeAccent);
 }

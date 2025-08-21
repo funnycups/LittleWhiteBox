@@ -266,8 +266,7 @@ function _fwNormalizeCSV(csv) {
     return csv.split(',').map(s => s.trim().toLowerCase()).filter(Boolean).join(',');
 }
 function _fwScreenRatios() {
-    const portrait = window.innerHeight > window.innerWidth;
-    return portrait ? '9x16,10x16,1x1' : '16x9,16x10,21x9';
+    return '9x16,10x16,1x1,16x9,16x10,21x9';
 }
 async function _fwFetchViaProxy(url) {
     const res = await fetch(FW_IMG.proxy + encodeURIComponent(url));
@@ -301,6 +300,24 @@ async function _fwSearchWallhaven(tagCSV, { category, purity }) {
     }
     return { ok: false, list: [] };
 }
+async function _fwSearchBySingleTag(tag, { category, purity, pages = 2 }) {
+    const base = String(tag || '').trim();
+    if (!base) return { ok: false, list: [] };
+    const q = '+' + base;
+    const ratios = _fwScreenRatios();
+    const list = [];
+    for (let page = 1; page <= pages; page++) {
+        try {
+            const api = `https://wallhaven.cc/api/v1/search?q=${encodeURIComponent(q)}&categories=${category}&purity=${purity}&ratios=${encodeURIComponent(ratios)}&sorting=favorites&page=${page}`;
+            const res = await _fwFetchViaProxy(api);
+            if (!res.ok) continue;
+            const data = await res.json();
+            const arr = Array.isArray(data?.data) ? data.data : [];
+            if (arr.length) list.push(...arr);
+        } catch {}
+    }
+    return list.length ? { ok: true, list } : { ok: false, list: [] };
+}
 function _overlapCount(candidateTags, originalTags) {
     if (!Array.isArray(candidateTags)) return 0;
     const cand = candidateTags.map(t => String(t?.name || '').toLowerCase()).filter(Boolean);
@@ -313,38 +330,24 @@ function _overlapCount(candidateTags, originalTags) {
     return score;
 }
 async function _fwSearchSmart(tagCSV, category, purity) {
-    const allTags = tagCSV.split(',').filter(Boolean);
+    const allTags = tagCSV.split(',').map(s => s.trim()).filter(Boolean);
+    const primary = allTags[0] || '';
+    const rest = allTags.slice(1);
     const rAll = await _fwSearchWallhaven(tagCSV, { category, purity });
-    if (rAll.ok) return { ok: true, url: rAll.url, meta: rAll.meta };
-    const pool = new Map();
-    for (const t of allTags) {
-        const rr = await _fwFetchViaProxy(`https://wallhaven.cc/api/v1/search?q=${encodeURIComponent(t)}&categories=${category}&purity=${purity}&ratios=${encodeURIComponent(_fwScreenRatios())}&sorting=favorites&page=1`);
-        try {
-            const data = await rr.json();
-            const arr = Array.isArray(data?.data) ? data.data : [];
-            for (const img of arr) {
-                if (!pool.has(img.id)) {
-                    pool.set(img.id, { img, favorites: img.favorites || 0, tags: img.tags || [] });
-                }
-            }
-        } catch {}
+    if (rAll.ok) {
+        return { ok: true, url: rAll.url, meta: rAll.meta };
     }
-    const candidates = Array.from(pool.values());
-    if (!candidates.length) throw new Error('no result');
-    const scored = candidates.map(c => ({
-        c,
-        overlap: _overlapCount(c.tags, allTags)
-    }));
-    const maxOverlap = Math.max(...scored.map(s => s.overlap));
-    const top = scored.filter(s => s.overlap === maxOverlap);
-    if (top.length) {
-        top.sort((a, b) => (b.c.favorites || 0) - (a.c.favorites || 0));
-        const pick = top[Math.floor(Math.random() * Math.min(FW_IMG.maxPickSpan, top.length))] || top[0];
-        return { ok: true, url: FW_IMG.proxy + encodeURIComponent(pick.c.img.path), meta: pick.c.img };
-    }
-    candidates.sort((a, b) => (b.favorites || 0) - (a.favorites || 0));
-    const best = candidates[Math.floor(Math.random() * Math.min(FW_IMG.maxPickSpan, candidates.length))] || candidates[0];
-    return { ok: true, url: FW_IMG.proxy + encodeURIComponent(best.img.path), meta: best.img };
+    if (!primary) throw new Error('no result');
+    const rPrimary = await _fwSearchBySingleTag(primary, { category, purity, pages: 2 });
+    if (!rPrimary.ok || !rPrimary.list.length) throw new Error('no result');
+    const candidates = rPrimary.list.map(img => {
+        const overlap = _overlapCount(img.tags || [], rest);
+        return { img, overlap, favorites: img.favorites || 0 };
+    });
+    const maxOverlap = Math.max(...candidates.map(c => c.overlap));
+    const top = candidates.filter(c => c.overlap === maxOverlap).sort((a, b) => b.favorites - a.favorites);
+    const pick = top[Math.floor(Math.random() * Math.min(FW_IMG.maxPickSpan, top.length))] || top[0];
+    return { ok: true, url: FW_IMG.proxy + encodeURIComponent(pick.img.path), meta: pick.img };
 }
 function _fwDecideCategory() {
     const pref = (getSettings?.().fourthWallImage?.categoryPreference) || FW_IMG.categoryPreference;
@@ -386,7 +389,7 @@ async function _fwHydrateImageSlots(rootEl) {
         if (!tagCSV) { slot.removeAttribute('data-loaded'); continue; }
         const category = _fwDecideCategory();
         const purity = _fwDecidePurity(isNSFW);
-        const cacheKey = [tagCSV, purity, category].join('|');
+        const cacheKey = [tagCSV, purity, category, 'r=all6'].join('|');
         try {
             let rec = _fwImageCache.get(cacheKey);
             if (!rec || (Date.now()-rec.at) > FW_IMG.cacheTTLms) {
@@ -890,7 +893,7 @@ function displaySettingsPage() {
                             <span>流式传输</span>
                         </label>
                         <div style="font-size:12px;opacity:.7;">
-                            世界书仅在聊天历史位置插入，保持提示结构不变；非流式也使用同一张卡片，结束后一次性显示结果
+                            世界书仅在聊天历史位置插入，保持提示结构不变
                         </div>
                     </div>
                 </div>
@@ -2813,12 +2816,12 @@ async function displayFourthWallPage() {
     const imgPref = (getSettings?.().fourthWallImage?.categoryPreference) || 'anime';
     panel.innerHTML = `
         <div style="padding: 10px 16px; border-bottom: 1px solid var(--SmartThemeBorderColor); flex-shrink: 0;">
-            <div id="fw-settings-header" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+            <div id="fw-settings-header" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; flex-wrap: nowrap; gap: 8px;">
                 <h4 style="margin: 0; font-size: 14px; display: flex; align-items: center; gap: 8px;">
                     <i class="fa-solid fa-chevron-down" id="fw-settings-toggle-icon" style="transition: transform 0.2s;"></i>
                     <span>设置</span>
                 </h4>
-                <button id="fw-reset-btn" class="menu_button" style="padding: 4px 10px; font-size: 12px; width: auto;">重开对话</button>
+                <button id="fw-reset-btn" class="menu_button" style="padding: 4px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;">重开对话</button>
             </div>
             <div id="fw-settings-content" style="display: none; padding-top: 15px; display: flex; flex-wrap: wrap; gap: 15px; font-size: 13px;">
                 <div>
@@ -3107,7 +3110,7 @@ async function saveFourthWallHistory() {
     setChatExtMeta({ fw: store }, chatId);
 }
 
-// E4. 发送与重答
+/* E4. 发送与重答 */
 async function onSendFourthWallMessage() {
     await ensureFourthWallStateLoaded();
     const input = $('#fw-input');
@@ -3119,8 +3122,8 @@ async function onSendFourthWallMessage() {
     _fwRerenderAndHydrate();
     scrollToBottom('fw-messages');
     input.val('').css('height', 'auto');
-    $('#fw-input').prop('disabled', true);
     updateFourthWallSendButton();
+
     const { prompt, bottom, topuser } = await buildFourthWallPrompt(userInput);
     try {
         const nonstreamArg = dynamicPromptState.fourthWall.stream ? '' : ' nonstream=true';
@@ -3143,7 +3146,6 @@ async function onSendFourthWallMessage() {
         });
         await saveFourthWallHistory();
         _fwRerenderAndHydrate();
-        $('#fw-input').prop('disabled', false).focus();
         updateFourthWallSendButton();
         return;
     }
@@ -3152,8 +3154,8 @@ async function onSendFourthWallMessage() {
 async function onRegenerateFourthWall() {
     await ensureFourthWallStateLoaded();
     const regenBtn = $('#fw-regenerate-btn');
-    const input = $('#fw-input');
     if (dynamicPromptState.fourthWall.isStreaming) return;
+
     const hist = Array.isArray(dynamicPromptState.fourthWall.history)
         ? dynamicPromptState.fourthWall.history
         : [];
@@ -3161,6 +3163,7 @@ async function onRegenerateFourthWall() {
         await executeSlashCommand('/echo 没有可重答的历史对话。');
         return;
     }
+
     let lastUserText = null;
     for (let i = hist.length - 1; i >= 0; i--) {
         if (hist[i]?.role === 'user' && typeof hist[i]?.content === 'string' && hist[i].content.trim()) {
@@ -3172,18 +3175,20 @@ async function onRegenerateFourthWall() {
         await executeSlashCommand('/echo 找不到上一条用户输入，无法重答。');
         return;
     }
+
     const lastIsAI = hist[hist.length - 1]?.role === 'ai';
     if (lastIsAI) {
         hist.pop();
         await saveFourthWallHistory();
         _fwRerenderAndHydrate();
     }
-    regenBtn.prop('disabled', true).html('<i class="fa-solid fa-circle-notch fa-spin" style="font-size: 14px;"></i>');
-    input.prop('disabled', true);
+
+    regenBtn.html('<i class="fa-solid fa-circle-notch fa-spin" style="font-size: 14px;"></i>');
     dynamicPromptState.fourthWall.isStreaming = true;
     updateFourthWallSendButton();
     _fwRerenderAndHydrate();
     scrollToBottom('fw-messages');
+
     const { prompt, bottom, topuser } = await buildFourthWallPrompt(lastUserText);
     try {
         const nonstreamArg = dynamicPromptState.fourthWall.stream ? '' : ' nonstream=true';
@@ -3206,12 +3211,12 @@ async function onRegenerateFourthWall() {
         });
         await saveFourthWallHistory();
         _fwRerenderAndHydrate();
-        regenBtn.prop('disabled', false).html('<i class="fa-solid fa-arrows-rotate" style="font-size: 14px;"></i>');
-        input.prop('disabled', false).focus();
+        regenBtn.html('<i class="fa-solid fa-arrows-rotate" style="font-size: 14px;"></i>');
         updateFourthWallSendButton();
         return;
     }
-    regenBtn.prop('disabled', false).html('<i class="fa-solid fa-arrows-rotate" style="font-size: 14px;"></i>');
+
+    regenBtn.html('<i class="fa-solid fa-arrows-rotate" style="font-size: 14px;"></i>');
 }
 
 function startNonstreamAwaitFW(sessionId) {
@@ -3230,7 +3235,7 @@ function startNonstreamAwaitFW(sessionId) {
     dynamicPromptState.fourthWall.streamTimerId = timer;
 }
 
-// E5. 流式处理
+/* E5. 流式处理 */
 function startStreamingPoll(sessionId = 'xb1') {
     stopStreamingPoll();
     dynamicPromptState.fourthWall.streamSessionId = String(sessionId);
@@ -3250,12 +3255,14 @@ function startStreamingPoll(sessionId = 'xb1') {
         }
     }, 80);
 }
+
 function stopStreamingPoll() {
     if (dynamicPromptState.fourthWall.streamTimerId) {
         clearInterval(dynamicPromptState.fourthWall.streamTimerId);
         dynamicPromptState.fourthWall.streamTimerId = null;
     }
 }
+
 async function finalizeStreaming(sessionId) {
     if (!dynamicPromptState.fourthWall.isStreaming) return;
     const sid = String(sessionId || dynamicPromptState.fourthWall.streamSessionId || 'xb1');
@@ -3273,7 +3280,6 @@ async function finalizeStreaming(sessionId) {
     dynamicPromptState.fourthWall.streamSessionId = null;
     _fwRerenderAndHydrate();
     scrollToBottom('fw-messages');
-    $('#fw-input').prop('disabled', false).focus();
     updateFourthWallSendButton();
 }
 
@@ -3326,15 +3332,16 @@ required behaviors：
 - 以NPC的身份，意识到ta的存在后，说说你的感想。
 - 你可以探讨你对自己世界的感受，或是${userName}和玩家的区别，或是你们之间这种奇特的关系，或是自己尴尬的台词..或是，想说啥就说啥,像真人一样
 - 例：'..或许我应该叫你..'
-## 模拟图片发送
-如果需要发图、照片给USER时(也可以视情境主动发送)，或是烘托氛围时，在聊天文本中穿插以下格式行，进行图片模拟：
-[image: Subject, Quality, Composition/View, Appearance1, Appearance2, Background/Environment, Atmosphere/Lighting]
-- 标签必须为英文，用逗号分隔，使用Wallhaven可用的tag组合
+## 模拟图片
+如果需要发图、照片给USER时，可以在聊天文本中穿插以下格式行，进行图片模拟：
+[image: Person/Subject, Appearance/Clothing, Background/Environment, Atmosphere/Lighting, Extra descriptors]
+- tag必须为英文，用逗号分隔，使用Wallhaven常见、可用的tag组合，5-8个tag
+- 第一个tag固定为人物标签，避免性别要素缺失[boy, girl, man, woman]
 - 可以多张照片: 每行一张 [image: ...]
-- 模拟社交软件发图的真实感，当需要发送的内容尺度较大时必须加上nsfw:前缀，即image: nsfw: 
+- 模拟社交软件发图的真实感，当需要发送的内容尺度较大时必须加上nsfw:前缀，即[image: nsfw: ...]
 Examples:
-[image: 1girl, masterpiece, portrait, long black hair, black dress, city lights, cinematic lighting]
-[image: nsfw: mature woman, nude, spread legs, pov, bed, cum on body, ultra detailed, soft lighting]
+[image: girl, long black hair, school uniform, classroom, daytime]
+[image: nsfw: woman, nude, spread legs, bed, cumshot]
 # 说话风格
 - 像在社交软件上打字聊天一样自然流畅
 - 用朴实的聊天文字,避免小说文风
@@ -3349,10 +3356,12 @@ forbidden behaviors：
 
 Developer:
 ## This round of output is divided into two stages: <thinking> and the main response
-### <thinking>The following two questions,extremely concise, no more than 20 words,by ZH-CN:
+### <thinking>The following two questions,extremely concise, no more than 30 words,by ZH-CN:
 <thinking>
-- Paragraphs:How many paragraphs are expected to be output in this round?
-- Scope and Goal:What is the expected content scope and goal of this interaction?
+- 洞察：跳出meta剧情观察用户文字指纹，本轮用户的文字质量？表现出什么情绪？
+- 心理关怀：
+  - 用户的幻想是否存在心理问题？如何给予他期望的真实感，本轮如何保持你的角色设定和个性，避免失去内在驱动力，避免使用疑问句或开放式结尾、或来回拉扯实际是在依赖用户输入等问题？
+  - 是否有高频、重复的开头词组或句式可能引起用户内心的不满？如何换一种全新开头？
 </thinking>
 ### Response Generation:
 After <thinking>, generate the response according to the requirements in the prompt.
@@ -3393,15 +3402,16 @@ required behaviors：
 - 现在你们虽然共同经历了很多语C剧本,但第一次线上进行皮下的私聊,就像在社交软件上聊天一样
 - 可以吐槽：剧情走向、角色行为、自己或对方的"尴尬台词"
 - 可以闲聊：和剧情完全无关的,想说啥就说啥
-## 模拟图片发送
-如果需要发图、照片给USER时(也可以视情境主动发送)，或是烘托氛围时，在聊天文本中穿插以下格式行，进行图片模拟：
-[image: Subject, Quality, Composition/View, Appearance1, Appearance2, Background/Environment, Atmosphere/Lighting]
-- 标签必须为英文，用逗号分隔，使用Wallhaven可用的tag组合
+## 模拟图片
+如果需要发图、照片给USER时，可以在聊天文本中穿插以下格式行，进行图片模拟：
+[image: Person, Appearance/Clothing, Background/Environment, Atmosphere/Lighting, Extra descriptors]
+- tag必须为英文，用逗号分隔，使用Wallhaven常见、可用的tag组合，5-8个tag
+- 第一个tag固定为人物标签，避免性别要素缺失[boy, girl, man, woman]
 - 可以多张照片: 每行一张 [image: ...]
-- 模拟社交软件发图的真实感，当需要发送的内容尺度较大时必须加上nsfw:前缀，即image: nsfw: 
+- 模拟社交软件发图的真实感，当需要发送的内容尺度较大时必须加上nsfw:前缀，即[image: nsfw: ...]
 Examples:
-[image: 1girl, masterpiece, portrait, long black hair, black dress, city lights, cinematic lighting]
-[image: nsfw: mature woman, nude, spread legs, pov, bed, cum on body, ultra detailed, soft lighting]
+[image: girl, long black hair, school uniform, classroom, daytime]
+[image: nsfw: woman, nude, spread legs, bed, cumshot]
 # 说话风格
 - 像在社交软件上打字聊天一样自然流畅
 - 用朴实的聊天文字,避免小说文风
@@ -3416,10 +3426,12 @@ forbidden behaviors：
 
 Developer:
 ## This round of output is divided into two stages: <thinking> and the main response
-### <thinking>The following two questions,extremely concise, no more than 20 words,by ZH-CN:
+### <thinking>The following two questions,extremely concise, no more than 30 words,by ZH-CN:
 <thinking>
-- Paragraphs:How many paragraphs are expected to be output in this round?
-- Scope and Goal:What is the expected content scope and goal of this interaction?
+- 洞察：跳出meta剧情观察用户文字指纹，本轮用户的文字质量？表现出什么情绪？
+- 心理关怀：
+  - 用户的幻想是否存在心理问题？如何给予他期望的真实感，本轮如何保持你的角色设定和个性，避免失去内在驱动力，避免使用疑问句或开放式结尾、或来回拉扯实际是在依赖用户输入等问题？
+  - 是否有高频、重复的开头词组或句式可能引起用户内心的不满？如何换一种全新开头？
 </thinking>
 ### Response Generation:
 After <thinking>, generate the response according to the requirements in the prompt.
@@ -3471,7 +3483,7 @@ ${metaProtocol}
     `.trim().replace(/\|/g, '｜');
     const bottom = `
 Developer:
-按照指令:${userInput}，继续根据<meta_protocol>内要求继续生成<think>和<meta_history>的互动
+推荐根据指令:${userInput}，按照<meta_protocol>内要求**继续**先后生成<thinking>和meta互动
 
 Assistant:
     `.trim();
@@ -3479,25 +3491,51 @@ Assistant:
 }
 function updateFourthWallSendButton() {
     const sendBtn = $('#fw-send-btn');
-    const input = $('#fw-input');
     const isStreaming = !!dynamicPromptState.fourthWall.isStreaming;
-    sendBtn.off('click');
+
+    sendBtn.off('click touchstart');
+
     if (isStreaming) {
         sendBtn.attr('title', '停止');
         sendBtn.html('<i class="fa-solid fa-stop" style="font-size: 14px;"></i>');
-        input.prop('disabled', true);
-        sendBtn.on('click', cancelFourthWallStreaming);
+        const stopper = (e) => { e.preventDefault(); e.stopPropagation(); cancelFourthWallStreaming(); };
+        sendBtn.on('click', stopper);
+        sendBtn.on('touchstart', stopper);
     } else {
         sendBtn.attr('title', '发送');
         sendBtn.html('<i class="fa-solid fa-paper-plane" style="font-size: 14px;"></i>');
-        input.prop('disabled', false);
-        sendBtn.on('click', onSendFourthWallMessage);
+        const sender = (e) => { e.preventDefault(); e.stopPropagation(); onSendFourthWallMessage(); };
+        sendBtn.on('click', sender);
+        sendBtn.on('touchstart', sender);
     }
 }
+
 function cancelFourthWallStreaming() {
     const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
-    const sid = dynamicPromptState.fourthWall.streamSessionId || 'xb1';
-    try { gen?.cancel(sid); } catch (e) {}
+    const sid = String(dynamicPromptState.fourthWall.streamSessionId || 'xb1');
+
+    stopStreamingPoll();
+    dynamicPromptState.fourthWall.isStreaming = false;
+
+    try { gen?.cancel?.(sid); } catch (e) {}
+
+    setTimeout(() => {
+        try { gen?.cancel?.(sid); } catch (e) {}
+    }, 150);
+
+    setTimeout(() => {
+        const st = gen?.getStatus?.(sid);
+        if (!st || st.isStreaming === false) {
+            finalizeStreaming(sid);
+        } else {
+            dynamicPromptState.fourthWall.streamSessionId = null;
+            const $content = $('#fw-streaming-bubble');
+            if ($content.length) $content.text('(已停止)');
+            updateFourthWallSendButton();
+        }
+    }, 300);
+
+    updateFourthWallSendButton();
 }
 
 // F. 插件生命周期与事件监听

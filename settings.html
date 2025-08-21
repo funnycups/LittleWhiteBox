@@ -70,7 +70,7 @@
                     </div>
                     <div class="flex-container">
                         <p>小白X说明文档⮕<a
-                                href="https://nine-yellowhorn-b13.notion.site/X-22eb5c27428180bfacbed6e9006a1908?pvs=74"
+                                href="https://docs.littlewhitebox.qzz.io/"
                                 class="download-link" target="_blank">说明文档</a></p>
                     </div>
 
@@ -83,11 +83,30 @@
                     <div class="flex-container">
                         <input type="checkbox" id="character_updater_enabled" />
                         <label for="character_updater_enabled" class="has-tooltip"
-                            data-tooltip="启用角色卡推送通知及更新提示功能">启用角色卡更新提示</label>
+                            data-tooltip="启用预设/角色卡推送通知及更新提示功能">启用预设/角色卡更新提示</label>
                     </div>
                     <div class="current-character-info" id="current-character-info-trigger" title="单击更新角色，长按3秒绑定/重绑定">
-                        <span id="current-character-name" class="current-character-name">未选择角色</span>
+                        <span>角色：</span><span id="current-character-name" class="current-character-name">未选择角色</span>
                         <span id="current-character-status" class="character-status"></span>
+                    </div>
+                    <div class="current-character-info" id="current-preset-info-trigger" title="单击更新预设，长按3秒绑定/重绑定">
+                        <span>预设：</span><span id="prb-current-preset" class="current-character-name" style="font-size: 0.8em;">未选择预设</span>
+                        <span id="current-preset-status" class="preset-status"></span>
+                    </div>
+                    <div class="marginTop" style="border: 5px inset var(--SmartThemeBorderColor); padding-bottom: 3px; cursor: pointer; justify-content: center;">
+                        <div id="prb-header-row" class="flex-container alignItemsCenter" style="justify-content: center; margin-bottom: 3px;">
+                            <label style="cursor: pointer; ">展开预设绑定正则设置</label>
+                        </div>
+                        <div id="prb-bound-container"
+                            style="display:none; align-items: center; border: 1px solid var(--SmartThemeBorderColor); padding-bottom: 3px;">
+                            <div class="marginTopSmall" style="padding: 5px;">已绑定正则：</div>
+                            <div id="prb-bound-list" class="prb-list" style="line-height: 1.5;"></div>
+                        </div>
+
+                        <div id="prb-actions" class="prb-actions" style="display:none;">
+                            <button id="prb-add" class="menu_button">绑定<br></button>
+                            <button id="prb-clear" class="menu_button danger">删除REGEX插件正则</button>
+                        </div>
                     </div>
                     <br>
                     <div class="section-divider">消息日志与拦截
@@ -115,12 +134,12 @@
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_immersive_enabled" />
                         <label for="xiaobaix_immersive_enabled" class="has-tooltip"
-                            data-tooltip="重构界面布局与细节优化">沉浸型布局显示（宽屏 UI 优化）</label>
+                            data-tooltip="重构界面布局与细节优化">沉浸布局显示(边框窄化)</label>
                     </div>
                     <div class="flex-container">
                         <input type="checkbox" id="wallhaven_enabled" />
                         <label for="wallhaven_enabled" class="has-tooltip"
-                            data-tooltip="AI回复时自动提取消息内容，转换为标签并获取Wallhaven图片作为聊天背景">Wallhaven自动消息配背景图</label>
+                            data-tooltip="AI回复时自动提取消息内容，转换为标签并获取Wallhaven图片作为聊天背景">自动消息配背景图</label>
                     </div>
                     <div id="wallhaven_settings_container" style="display: none;">
                         <div class="flex-container">
@@ -712,6 +731,20 @@
         }
     })();
 </script>
+<script>
+(function () {
+  function go() {
+    if (window.PRB_bindUI) window.PRB_bindUI();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', go, { once: true });
+  } else {
+    // 元素已在本文件前面，直接绑定；若担心函数未就绪，加一帧极轻延迟
+    if (!window.PRB_bindUI) requestAnimationFrame(go); else go();
+  }
+})();
+</script>
+
 
 <div id="xiaobaix_info_modal" class="xiaobaix-modal" style="display:none;">
     <div class="xiaobaix-modal-content">
@@ -832,8 +865,6 @@
                 border-radius: 12px;
             }
         }
-    </style>
-    <style>
         .collapsible .toggle {
             display: none;
         }

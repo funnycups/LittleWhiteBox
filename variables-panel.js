@@ -71,7 +71,7 @@ const EMBEDDED_CSS = `
 .vm-move-variables-container{text-align:left}
 .vm-move-variables-container p{margin-bottom:15px;font-size:14px}
 .vm-variables-list{max-height:300px;overflow-y:auto;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;padding:10px;background:var(--SmartThemeChatTintColor);display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:flex-start;gap:0;margin-top:10px}
-.vm-variable-checkbox{display:inline-flex!important;align-items:center!important;width:calc(50% - 10px)!important;margin:4px 5px!important;padding:5px 8px;border-radius:3px;cursor:pointer;transition:background-color .2s;vertical-align:top;box-sizing:border-box}
+.vm-variable-checkbox{display:inline-flex!important;align-items:center!important;margin:4px 5px!important;padding:5px 8px;border-radius:3px;cursor:pointer;transition:background-color .2s;vertical-align:top;box-sizing:border-box}
 .vm-variable-checkbox input[type="checkbox"]{margin-right:8px!important;flex-shrink:0}
 .vm-variable-checkbox span{font-size:13px}
 .vm-empty-message{padding:20px;text-align:center;color:#888}
