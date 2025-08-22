@@ -33,7 +33,8 @@ extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     immersive: { enabled: false },
     characterUpdater: { enabled: true, showNotifications: true, serverUrl: "https://db.littlewhitebox.qzz.io" },
     dynamicPrompt: { enabled: true },
-    variablesPanel: { enabled: false }
+    variablesPanel: { enabled: false },
+    useBlob: false
 };
 
 const settings = extension_settings[EXT_ID];
@@ -44,6 +45,11 @@ let globalTimers = [];
 let moduleCleanupFunctions = new Map();
 let updateCheckPerformed = false;
 let isGenerating = false;
+
+const winMap = new Map();
+const lastHeights = new WeakMap();
+let resizeRafPending = false;
+let blobUrls = new WeakMap();
 
 window.isXiaobaixEnabled = isXiaobaixEnabled;
 window.testLittleWhiteBoxUpdate = async () => {
@@ -228,7 +234,12 @@ function cleanupAllResources() {
         } catch (e) {}
     });
     moduleCleanupFunctions.clear();
+    document.querySelectorAll('iframe.xiaobaix-iframe').forEach(ifr => {
+        try { ifr.src = 'about:blank'; } catch(e) {}
+        releaseIframeBlob(ifr);
+    });
     document.querySelectorAll('iframe.xiaobaix-iframe, .xiaobaix-iframe-wrapper').forEach(el => el.remove());
+    winMap.clear();
     document.querySelectorAll('.memory-button, .mes_history_preview').forEach(btn => btn.remove());
     document.querySelectorAll('#message_preview_btn').forEach(btn => {
         if (btn instanceof HTMLElement) {
@@ -272,11 +283,12 @@ function createIframeApi() {
     return `
     const originalGetElementById=document.getElementById;document.getElementById=function(id){try{return originalGetElementById.call(document,id)}catch(e){return null}};
     window.STBridge={sendMessageToST:function(type,data={}){try{window.parent.postMessage({source:'xiaobaix-iframe',type,...data},'*')}catch(e){}},updateHeight:function(){try{const h1=document.documentElement.scrollHeight||0;const h2=document.body.scrollHeight||0;const height=Math.max(h1,h2);if(height>0){this.sendMessageToST('resize',{height})}}catch(e){}}};
+    const updateHeightDebounced=(()=>{let t=0,raf=0;const delay=80;return()=>{if(t)return;t=setTimeout(()=>{t=0;if(raf)cancelAnimationFrame(raf);raf=requestAnimationFrame(()=>window.STBridge.updateHeight())},delay)}})();
     window.STscript=async function(command){return new Promise((resolve,reject)=>{try{if(!command){reject(new Error('empty'));return}const id=Date.now().toString()+Math.random().toString(36).substring(2);window.STBridge.sendMessageToST('runCommand',{command,id});const listener=function(event){if(!event.data||event.data.source!=='xiaobaix-host')return;const data=event.data;if((data.type==='commandResult'||data.type==='commandError')&&data.id===id){window.removeEventListener('message',listener);if(data.type==='commandResult')resolve(data.result);else reject(new Error(data.error))}};window.addEventListener('message',listener);setTimeout(()=>{window.removeEventListener('message',listener);reject(new Error('Command timeout'))},180000)}catch(e){reject(e)}})};
-    function setupAutoResize(){try{const ro=new ResizeObserver(()=>window.STBridge.updateHeight());ro.observe(document.documentElement);ro.observe(document.body)}catch(e){}window.addEventListener('load',()=>window.STBridge.updateHeight());requestAnimationFrame(()=>{try{window.STBridge.updateHeight()}catch(e){}});try{Array.from(document.images).forEach(img=>{if(!img.complete){img.loading='lazy';img.decoding='async';img.fetchPriority='low';img.addEventListener('load',()=>window.STBridge.updateHeight());img.addEventListener('error',()=>window.STBridge.updateHeight())}})}catch(e){}}
-    function setupSecurity(){document.addEventListener('click',function(e){const link=e.target&&e.target.closest?e.target.closest('a'):null;if(link&&link.href&&link.href.startsWith('http')){if(link.target!=='_blank'){e.preventDefault();try{window.open(link.href,'_blank')}catch(e){}}}})}
+    function setupAutoResize(){try{const ro=new ResizeObserver(()=>updateHeightDebounced());ro.observe(document.body)}catch(e){}window.addEventListener('load',()=>updateHeightDebounced());requestAnimationFrame(()=>{try{updateHeightDebounced()}catch(e){}});try{Array.from(document.images).forEach(img=>{if(!img.complete){img.loading='lazy';img.decoding='async';img.fetchPriority='low';img.addEventListener('load',updateHeightDebounced,{passive:true});img.addEventListener('error',updateHeightDebounced,{passive:true})}})}catch(e){}}
+    function setupSecurity(){document.addEventListener('click',function(e){const link=e.target&&e.target.closest?e.target.closest('a'):null;if(link&&link.href&&link.href.startsWith('http')){if(link.target!=='_blank'){e.preventDefault();try{window.open(link.href,'_blank')}catch(e){}}}},{passive:false})}
     window.addEventListener('error',function(e){return true});
-    function markReady(){try{window.STBridge.updateHeight()}catch(e){}}
+    function markReady(){try{updateHeightDebounced()}catch(e){}}
     if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',function(){setupAutoResize();setupSecurity();markReady()})}else{setupAutoResize();setupSecurity();markReady()}
     `;
 }
@@ -310,7 +322,7 @@ function getOrCreateWrapper(preEl){
     if(!wrapper||!wrapper.classList.contains('xiaobaix-iframe-wrapper')){
         wrapper=document.createElement('div');
         wrapper.className='xiaobaix-iframe-wrapper';
-        wrapper.style.cssText='margin: 10px 0;';
+        wrapper.style.cssText='margin:0;';
         preEl.parentNode.insertBefore(wrapper, preEl);
     }
     return wrapper;
@@ -357,20 +369,67 @@ const Skeleton = {
 function estimateHeightFromContent(text){
     const lines=(text.match(/\n/g)||[]).length;
     const imgs=(text.match(/<img\b/gi)||[]).length;
-    return Math.min(1200, 200 + lines*6 + imgs*100);
+    const len=text.length;
+    return Math.min(1600, 240 + lines*6 + imgs*120 + Math.sqrt(len)*2);
+}
+
+function registerIframeMapping(iframe, wrapper) {
+    const tryMap = () => {
+        try {
+            if (iframe && iframe.contentWindow) {
+                winMap.set(iframe.contentWindow, { iframe, wrapper });
+                return true;
+            }
+        } catch (e) {}
+        return false;
+    };
+    if (tryMap()) return;
+    let tries = 0;
+    const t = setInterval(() => {
+        tries++;
+        if (tryMap() || tries > 20) clearInterval(t);
+    }, 25);
+    addGlobalTimer(t);
 }
 
 function handleIframeMessage(event) {
     if (!event.data || event.data.source !== 'xiaobaix-iframe') return;
     const { type, height, command, id } = event.data;
     if (type === 'resize') {
+        const rec = winMap.get(event.source);
+        if (rec && rec.iframe && rec.wrapper) {
+            const prev = lastHeights.get(rec.iframe) || 0;
+            if (Math.abs((height || 0) - prev) < 2) return;
+            lastHeights.set(rec.iframe, height);
+            if (!resizeRafPending) {
+                resizeRafPending = true;
+                requestAnimationFrame(() => {
+                    resizeRafPending = false;
+                    const r = winMap.get(event.source);
+                    if (!r) return;
+                    r.iframe.style.height = `${lastHeights.get(r.iframe) || 0}px`;
+                    const hNow = lastHeights.get(r.iframe) || 0;
+                    if (hNow > 24) Skeleton.removeByWrapper(r.wrapper);
+                });
+            }
+            return;
+        }
         const iframes = document.querySelectorAll('iframe.xiaobaix-iframe');
         for (const iframe of iframes) {
             if (iframe.contentWindow === event.source) {
-                iframe.style.height = `${height}px`;
-                if (height > 24) {
-                    const wrapper = iframe.parentElement;
-                    Skeleton.removeByWrapper(wrapper);
+                const prev = lastHeights.get(iframe) || 0;
+                if (Math.abs((height || 0) - prev) < 2) return;
+                lastHeights.set(iframe, height);
+                if (!resizeRafPending) {
+                    resizeRafPending = true;
+                    requestAnimationFrame(() => {
+                        resizeRafPending = false;
+                        iframe.style.height = `${lastHeights.get(iframe) || 0}px`;
+                        if ((lastHeights.get(iframe) || 0) > 24) {
+                            const wrapper = iframe.parentElement;
+                            Skeleton.removeByWrapper(wrapper);
+                        }
+                    });
                 }
                 break;
             }
@@ -401,6 +460,25 @@ ${apiScript}
     return baseTemplate + `<body>${htmlContent}</body></html>`;
 }
 
+function setIframeBlobHTML(iframe, fullHTML){
+    try {
+        const blob = new Blob([fullHTML], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        iframe.src = url;
+        const prev = blobUrls.get(iframe);
+        if (prev) URL.revokeObjectURL(prev);
+        blobUrls.set(iframe, url);
+    } catch (e) {}
+}
+
+function releaseIframeBlob(iframe){
+    try {
+        const url = blobUrls.get(iframe);
+        if (url) URL.revokeObjectURL(url);
+        blobUrls.delete(iframe);
+    } catch (e) {}
+}
+
 function renderHtmlInIframe(htmlContent, container, preElement) {
     try {
         const iframe = document.createElement('iframe');
@@ -409,13 +487,26 @@ function renderHtmlInIframe(htmlContent, container, preElement) {
         iframe.style.cssText = 'width:100%;border:none;background:transparent;overflow:hidden;height:0;margin:0;padding:0;display:block';
         iframe.setAttribute('frameborder', '0');
         iframe.setAttribute('scrolling', 'no');
+        iframe.loading = 'lazy';
         if (settings.sandboxMode) {
-            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
+            iframe.setAttribute('sandbox', 'allow-scripts allow-popups allow-forms allow-same-origin');
         }
         const wrapper = getOrCreateWrapper(preElement);
+        try {
+            wrapper.style.contentVisibility = 'auto';
+            wrapper.style.contain = 'content';
+        } catch (e) {}
+        const est = Math.max(140, estimateHeightFromContent(htmlContent));
+        Skeleton.create(preElement, est);
         wrapper.appendChild(iframe);
         preElement.classList.remove('xb-show');
-        iframe.srcdoc = prepareHtmlContent(htmlContent);
+        registerIframeMapping(iframe, wrapper);
+        if (settings.useBlob) {
+            const full = prepareHtmlContent(htmlContent);
+            setIframeBlobHTML(iframe, full);
+        } else {
+            iframe.srcdoc = prepareHtmlContent(htmlContent);
+        }
         return iframe;
     } catch (err) {
         return null;
@@ -429,7 +520,8 @@ function toggleSettingsControls(enabled) {
         'xiaobaix_script_assistant', 'scheduled_tasks_enabled', 'xiaobaix_template_enabled',
         'wallhaven_enabled', 'wallhaven_bg_mode', 'wallhaven_category',
         'wallhaven_purity', 'wallhaven_opacity',
-        'xiaobaix_immersive_enabled', 'character_updater_enabled', 'xiaobaix_dynamic_prompt_enabled'
+        'xiaobaix_immersive_enabled', 'character_updater_enabled', 'xiaobaix_dynamic_prompt_enabled',
+        'xiaobaix_use_blob'
     ];
     controls.forEach(id => {
         $(`#${id}`).prop('disabled', !enabled).closest('.flex-container').toggleClass('disabled-control', !enabled);
@@ -544,7 +636,8 @@ function toggleAllFeatures(enabled) {
         ["xiaobaix_sandbox", "xiaobaix_memory_enabled", "xiaobaix_memory_inject",
             "xiaobaix_recorded_enabled", "xiaobaix_preview_enabled", "xiaobaix_script_assistant",
             "scheduled_tasks_enabled", "xiaobaix_template_enabled", "wallhaven_enabled",
-            "xiaobaix_immersive_enabled", "character_updater_enabled", "xiaobaix_dynamic_prompt_enabled"].forEach(id => $(`#${id}`).prop("checked", false));
+            "xiaobaix_immersive_enabled", "character_updater_enabled", "xiaobaix_dynamic_prompt_enabled",
+            "xiaobaix_use_blob"].forEach(id => $(`#${id}`).prop("checked", false));
         toggleSettingsControls(false);
         document.getElementById('xiaobaix-hide-code')?.remove();
         setActiveClass(false);
@@ -570,7 +663,11 @@ function processMessageById(messageId, forceFinal = true) {
         const shouldRender = shouldRenderContentByBlock(codeBlock);
         const prev = preElement.previousElementSibling;
         const wrapper = prev && prev.classList && prev.classList.contains('xiaobaix-iframe-wrapper') ? prev : null;
-        if (wrapper) wrapper.remove();
+        if (wrapper) {
+            const ifr = wrapper.querySelector('iframe.xiaobaix-iframe');
+            if (ifr) { try { ifr.src='about:blank'; } catch(e) {} releaseIframeBlob(ifr); }
+            wrapper.remove();
+        }
         preElement.classList.remove('xb-show');
         preElement.removeAttribute('data-xbfinal');
         delete preElement.dataset.xbFinal;
@@ -723,6 +820,11 @@ async function setupSettings() {
                 }
                 if (enabled && init) init();
             });
+        });
+        $("#xiaobaix_use_blob").prop("checked", !!settings.useBlob).on("change", function () {
+            if (!isXiaobaixEnabled) return;
+            settings.useBlob = $(this).prop("checked");
+            saveSettingsDebounced();
         });
     } catch (err) {}
 }
@@ -952,7 +1054,7 @@ jQuery(async () => {
         addGlobalTimer(timer3);
         const intervalId = setInterval(() => {
             if (isXiaobaixEnabled) processExistingMessages();
-        }, 5000);
+        }, 30000);
         addGlobalTimer(intervalId);
     } catch (err) {}
 });
