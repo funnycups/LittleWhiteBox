@@ -15,7 +15,11 @@ let state = {
   isActive: false,
   eventsBound: false,
   eventHandlers: {},
-  messageEventsBound: false
+  messageEventsBound: false,
+  autoScrollPaused: false,
+  pauseUntilGenEnd: false,
+  isGenerating: false,
+  lastScrollTop: null
 };
 
 let observer = null;
@@ -205,15 +209,27 @@ function bindMessageEvents() {
     refresh();
     scroll();
   };
-  state.eventHandlers.onGenEnd = () => {
+  state.eventHandlers.onGenStart = () => {
+    state.isGenerating = true;
+    state.autoScrollPaused = false;
+    state.pauseUntilGenEnd = false;
     refresh();
     setTimeout(scroll, 30);
+  };
+  state.eventHandlers.onGenEnd = () => {
+    state.isGenerating = false;
+    state.autoScrollPaused = false;
+    state.pauseUntilGenEnd = false;
+    refresh();
   };
   eventSource.on(event_types.MESSAGE_SENT, state.eventHandlers.onSent);
   eventSource.on(event_types.MESSAGE_RECEIVED, state.eventHandlers.onReceived);
   eventSource.on(event_types.MESSAGE_DELETED, state.eventHandlers.onDeleted);
   eventSource.on(event_types.MESSAGE_UPDATED, state.eventHandlers.onUpdated);
   eventSource.on(event_types.MESSAGE_SWIPED, state.eventHandlers.onSwiped);
+  if (event_types.GENERATION_STARTED) {
+    eventSource.on(event_types.GENERATION_STARTED, state.eventHandlers.onGenStart);
+  }
   eventSource.on(event_types.GENERATION_ENDED, state.eventHandlers.onGenEnd);
   state.messageEventsBound = true;
 }
@@ -225,6 +241,9 @@ function unbindMessageEvents() {
   eventSource.off(event_types.MESSAGE_DELETED, state.eventHandlers.onDeleted);
   eventSource.off(event_types.MESSAGE_UPDATED, state.eventHandlers.onUpdated);
   eventSource.off(event_types.MESSAGE_SWIPED, state.eventHandlers.onSwiped);
+  if (event_types.GENERATION_STARTED) {
+    eventSource.off(event_types.GENERATION_STARTED, state.eventHandlers.onGenStart);
+  }
   eventSource.off(event_types.GENERATION_ENDED, state.eventHandlers.onGenEnd);
   state.messageEventsBound = false;
 }
@@ -245,6 +264,7 @@ function enableImmersiveMode() {
   $('body').addClass('immersive-mode');
   moveAvatarWrappers();
   bindMessageEvents();
+  bindScrollGuard();
   updateMessageDisplay();
   setupDOMObserver();
   scheduleScrollToBottom(true);
@@ -257,8 +277,13 @@ function disableImmersiveMode() {
   hideNavigationButtons();
   $('.swipe_left, .swipeRightBlock').show();
   unbindMessageEvents();
+  unbindScrollGuard();
   detachResizeObserver();
   destroyDOMObserver();
+  state.autoScrollPaused = false;
+  state.pauseUntilGenEnd = false;
+  state.isGenerating = false;
+  state.lastScrollTop = null;
 }
 
 function moveAvatarWrappers() {
@@ -501,8 +526,18 @@ function cleanup() {
     document.removeEventListener('xiaobaixEnabledChanged', state.eventHandlers.globalStateChange);
   }
   unbindMessageEvents();
+  unbindScrollGuard();
   detachResizeObserver();
-  state = { isActive: false, eventsBound: false, eventHandlers: {}, messageEventsBound: false };
+  state = {
+    isActive: false,
+    eventsBound: false,
+    eventHandlers: {},
+    messageEventsBound: false,
+    autoScrollPaused: false,
+    pauseUntilGenEnd: false,
+    isGenerating: false,
+    lastScrollTop: null
+  };
 }
 
 function getChatContainer() {
@@ -519,12 +554,14 @@ function isNearBottom() {
 function scrollToBottom(force = false) {
   const el = getChatContainer();
   if (!el) return;
+  if (state.autoScrollPaused && !force) return;
   if (force || isNearBottom() || getSettings().autoJumpOnAI) {
     el.scrollTop = el.scrollHeight;
   }
 }
 
 function scheduleScrollToBottom(force = false) {
+  if (state.autoScrollPaused && !force) return;
   if (scrollT) clearTimeout(scrollT);
   scrollT = setTimeout(() => {
     requestAnimationFrame(() => scrollToBottom(force));
@@ -550,6 +587,31 @@ function detachResizeObserver() {
     resizeObs.unobserve(resizeObservedEl);
   }
   resizeObservedEl = null;
+}
+
+function bindScrollGuard() {
+  const el = getChatContainer();
+  if (!el) return;
+  if (state.eventHandlers.onScroll) return;
+  state.lastScrollTop = el.scrollTop;
+  state.eventHandlers.onScroll = () => {
+    const cur = el.scrollTop;
+    const delta = cur - (state.lastScrollTop ?? cur);
+    state.lastScrollTop = cur;
+    if (delta < 0) {
+      state.autoScrollPaused = true;
+      if (state.isGenerating) state.pauseUntilGenEnd = true;
+    }
+  };
+  el.addEventListener('scroll', state.eventHandlers.onScroll, { passive: true });
+}
+
+function unbindScrollGuard() {
+  const el = getChatContainer();
+  if (el && state.eventHandlers.onScroll) {
+    el.removeEventListener('scroll', state.eventHandlers.onScroll);
+  }
+  state.eventHandlers.onScroll = null;
 }
 
 export { initImmersiveMode, toggleImmersiveMode };
