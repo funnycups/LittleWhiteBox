@@ -47,9 +47,12 @@ let updateCheckPerformed = false;
 let isGenerating = false;
 
 const winMap = new Map();
-const lastHeights = new WeakMap();
+let lastHeights = new WeakMap();
 let resizeRafPending = false;
-let blobUrls = new WeakMap();
+const blobUrls = new WeakMap();
+const hashToBlobUrl = new Map();
+const blobLRU = [];
+const BLOB_CACHE_LIMIT = 32;
 
 window.isXiaobaixEnabled = isXiaobaixEnabled;
 window.testLittleWhiteBoxUpdate = async () => {
@@ -279,111 +282,105 @@ function shouldRenderContentByBlock(codeBlock) {
     return content.includes('<!doctype') || content.includes('<html') || content.includes('<script');
 }
 
-function createIframeApi() {
-    return `
-    (function(){
-        function measureVisibleHeight(){
-            try{
-                const de=document.documentElement;
-                const body=document.body;
-                const deH=de.getBoundingClientRect?de.getBoundingClientRect().height:(de.offsetHeight||0);
-                const bodyH=body.getBoundingClientRect?body.getBoundingClientRect().height:(body.offsetHeight||0);
-                const h=Math.max(deH, bodyH);
-                return Math.ceil(h+1);
-            }catch(e){return (document.body&&document.body.offsetHeight)||0}
+function djb2(str){let h=5381;for(let i=0;i<str.length;i++){h=((h<<5)+h)^str.charCodeAt(i)}return (h>>>0).toString(16)}
+
+function buildResourceHints(html){
+    const urls = Array.from(new Set((html.match(/https?:\/\/[^"'()\s]+/gi)||[]).map(u=>{try{return new URL(u).origin}catch{return null}}).filter(Boolean)));
+    let hints = ""; const maxHosts = 6;
+    for(let i=0;i<Math.min(urls.length,maxHosts);i++){const origin=urls[i];hints+=`<link rel="dns-prefetch" href="${origin}">`;hints+=`<link rel="preconnect" href="${origin}" crossorigin>`}
+    let preload = "";
+    const font = (html.match(/https?:\/\/[^"'()\s]+\.(?:woff2|woff|ttf|otf)/i)||[])[0];
+    if(font){const type=font.endsWith(".woff2")?"font/woff2":font.endsWith(".woff")?"font/woff":font.endsWith(".ttf")?"font/ttf":"font/otf";preload+=`<link rel="preload" as="font" href="${font}" type="${type}" crossorigin fetchpriority="high">`}
+    const css = (html.match(/https?:\/\/[^"'()\s]+\.css/i)||[])[0];
+    if(css){preload+=`<link rel="preload" as="style" href="${css}" crossorigin fetchpriority="high">`}
+    const img = (html.match(/https?:\/\/[^"'()\s]+\.(?:png|jpg|jpeg|webp|gif|svg)/i)||[])[0];
+    if(img){preload+=`<link rel="preload" as="image" href="${img}" crossorigin fetchpriority="high">`}
+    return hints+preload;
+}
+
+function iframeClientScript(){return `
+(function(){
+  function measureVisibleHeight(){
+    try{
+      var de=document.documentElement, body=document.body;
+      var deH=de.getBoundingClientRect?de.getBoundingClientRect().height:(de.offsetHeight||0);
+      var bodyH=body.getBoundingClientRect?body.getBoundingClientRect().height:(body.offsetHeight||0);
+      var h=Math.max(deH, bodyH);
+      return Math.max(0, Math.ceil(h+1));
+    }catch(e){return (document.body&&document.body.offsetHeight)||0}
+  }
+  function post(m){try{parent.postMessage(m,'*')}catch(e){}}
+  var rafPending=false, lastH=0;
+  function send(force){
+    if(rafPending && !force) return;
+    rafPending=true;
+    requestAnimationFrame(function(){
+      rafPending=false;
+      var h=measureVisibleHeight();
+      if(force || Math.abs(h-lastH)>=1){
+        lastH=h;
+        post({height:h,force:!!force});
+      }
+    });
+  }
+  try{send(true)}catch(e){}
+  document.addEventListener('DOMContentLoaded',function(){send(true)},{once:true});
+  window.addEventListener('load',function(){send(true)},{once:true});
+  ['transitionend','animationend'].forEach(function(evt){
+    document.addEventListener(evt,function(){send(true)},{passive:true,capture:true});
+  });
+  try{
+    var ro=new ResizeObserver(function(){send(false)});
+    ro.observe(document.documentElement);
+    ro.observe(document.body);
+  }catch(e){
+    try{
+      new MutationObserver(function(){send(false)}).observe(document.body,{childList:true,subtree:true,attributes:true});
+    }catch(e){}
+    window.addEventListener('resize',function(){send(false)},{passive:true});
+  }
+  window.addEventListener('message',function(e){var d=e&&e.data||{};if(d&&d.type==='probe')setTimeout(function(){send(true)},10)});
+  window.STscript=function(command){
+    return new Promise(function(resolve,reject){
+      try{
+        if(!command){reject(new Error('empty'));return}
+        if(command[0]!=='/')command='/'+command;
+        var id=Date.now().toString(36)+Math.random().toString(36).slice(2);
+        function onMessage(e){
+          var d=e&&e.data||{};
+          if(d.source!=='xiaobaix-host')return;
+          if((d.type==='commandResult'||d.type==='commandError')&&d.id===id){
+            window.removeEventListener('message',onMessage);
+            if(d.type==='commandResult')resolve(d.result);else reject(new Error(d.error||'error'))
+          }
         }
-        
-        const STBridge={
-            sendMessageToST:function(type,data={}){
-                try{window.parent.postMessage({source:'xiaobaix-iframe',type,...data},'*')}catch(e){}
-            },
-            updateHeight:function(force){
-                try{
-                    const height=measureVisibleHeight();
-                    if(height>0){
-                        this.sendMessageToST('resize',{height,force:!!force})
-                    }
-                }catch(e){}
-            }
-        };
-        
-        window.STBridge=STBridge;
-        
-        window.STscript=async function(command){
-            return new Promise((resolve,reject)=>{
-                try{
-                    if(!command){reject(new Error('empty'));return}
-                    const id=Date.now().toString()+Math.random().toString(36).substring(2);
-                    window.STBridge.sendMessageToST('runCommand',{command,id});
-                    const listener=function(event){
-                        if(!event.data||event.data.source!=='xiaobaix-host')return;
-                        const data=event.data;
-                        if((data.type==='commandResult'||data.type==='commandError')&&data.id===id){
-                            window.removeEventListener('message',listener);
-                            if(data.type==='commandResult')resolve(data.result);
-                            else reject(new Error(data.error))
-                        }
-                    };
-                    window.addEventListener('message',listener);
-                    setTimeout(()=>{
-                        window.removeEventListener('message',listener);
-                        reject(new Error('Command timeout'))
-                    },180000)
-                }catch(e){reject(e)}
-            })
-        };
-        
-        let updateTimer = null;
-        function scheduleUpdate() {
-            if (updateTimer) clearTimeout(updateTimer);
-            updateTimer = setTimeout(() => {
-                STBridge.updateHeight(true);
-            }, 100);
-        }
-        
-        function setupAutoResize(){
-            ['load', 'resize'].forEach(evt => {
-                window.addEventListener(evt, scheduleUpdate, {passive: true});
-            });
-            
-            ['transitionend', 'animationend'].forEach(evt => {
-                document.addEventListener(evt, scheduleUpdate, {passive: true, capture: true});
-            });
-            
-            setTimeout(() => {
-                try {
-                    let mutationTimer = null;
-                    const mo = new MutationObserver(() => {
-                        if (mutationTimer) clearTimeout(mutationTimer);
-                        mutationTimer = setTimeout(() => {
-                            scheduleUpdate();
-                        }, 100);
-                    });
-                    mo.observe(document.body, {
-                        childList: true,
-                        subtree: false,
-                        attributes: false,
-                    });
-                } catch(e) {}
-                
-                STBridge.updateHeight(true);
-            }, 500);
-            
-            window.addEventListener('message', (e) => {
-                const d = e.data || {};
-                if(d && d.type === 'probe'){
-                    STBridge.updateHeight(true);
-                }
-            });
-        }
-        
-        if(document.readyState === 'complete'){
-            setupAutoResize();
-        } else {
-            window.addEventListener('load', setupAutoResize, {once: true});
-        }
-    })();
-    `;
+        window.addEventListener('message',onMessage);
+        post({type:'runCommand',id,command});
+        setTimeout(function(){try{window.removeEventListener('message',onMessage)}catch(e){};reject(new Error('Command timeout'))},180000)
+      }catch(e){reject(e)}
+    })
+  }
+})();`}
+
+function buildWrappedHtml(html){
+    const api = `<script>${iframeClientScript()}</script>`;
+    const headHints = buildResourceHints(html);
+    if (html.includes('<html') && html.includes('</html>')) {
+        if (html.includes('<head>')) return html.replace('<head>', `<head>${api}${headHints}`);
+        if (html.includes('</head>')) return html.replace('</head>', `${api}${headHints}</head>`);
+        return html.replace('<body', `<head>${api}${headHints}</head><body`);
+    }
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="color-scheme" content="dark light">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+${api}
+${headHints}
+<style>html,body{margin:0;padding:0;background:transparent;font-family:inherit;color:inherit}</style>
+</head>
+<body>${html}</body></html>`;
 }
 
 async function executeSlashCommand(command) {
@@ -421,51 +418,6 @@ function getOrCreateWrapper(preEl){
     return wrapper;
 }
 
-const Skeleton = {
-    minShowMs: 120,
-    fadeMs: 180,
-    create(preEl, estH=200){
-        const wrapper=getOrCreateWrapper(preEl);
-        const old=wrapper.querySelector('.xiaobaix-skel');
-        if(old) return old;
-        const el=document.createElement('div');
-        el.className='xiaobaix-skel appear';
-        el.style.height=Math.max(140, estH)+'px';
-        el.dataset.ts=Date.now();
-        wrapper.appendChild(el);
-        return el;
-    },
-    removeByWrapper(wrapper){
-        const el=wrapper?.querySelector?.('.xiaobaix-skel');
-        if(!el) return;
-        const elapsed=Date.now()-(+el.dataset.ts||0);
-        const wait=Math.max(0, this.minShowMs - elapsed);
-        setTimeout(()=>{
-            el.classList.remove('appear');
-            el.classList.add('hide');
-            setTimeout(()=>{ try{el.remove()}catch(e){} }, this.fadeMs+10);
-        }, wait);
-    },
-    removeByPre(preEl){
-        const wrapper=preEl?.previousElementSibling;
-        if(!wrapper) return;
-        this.removeByWrapper(wrapper);
-    },
-    error(preEl){
-        const wrapper=preEl?.previousElementSibling;
-        const el=wrapper?.querySelector?.('.xiaobaix-skel');
-        if(!el) return;
-        el.style.boxShadow='0 6px 20px rgba(255,0,0,.12), inset 0 0 0 1px rgba(255,255,255,.15)';
-    }
-};
-
-function estimateHeightFromContent(text){
-    const lines=(text.match(/\n/g)||[]).length;
-    const imgs=(text.match(/<img\b/gi)||[]).length;
-    const len=text.length;
-    return Math.min(1600, 240 + lines*6 + imgs*120 + Math.sqrt(len)*2);
-}
-
 function registerIframeMapping(iframe, wrapper) {
     const tryMap = () => {
         try {
@@ -485,78 +437,81 @@ function registerIframeMapping(iframe, wrapper) {
     addGlobalTimer(t);
 }
 
+let lastApplyTs = 0;
+let pendingHeight = null;
+let pendingRec = null;
+
 function handleIframeMessage(event) {
     const data = event.data || {};
-    const isResizeLike = (typeof data.height === 'number') || (typeof data.type === 'string' && data.type.toLowerCase().includes('resize'));
-    if (!isResizeLike && data.type !== 'runCommand' && data.type !== 'commandResult' && data.type !== 'commandError') return;
-    const { type, height, command, id } = data;
-    if (isResizeLike) {
-        let rec = winMap.get(event.source);
-        if (!rec) {
-            const iframes = document.querySelectorAll('iframe.xiaobaix-iframe');
-            for (const iframe of iframes) {
-                if (iframe.contentWindow === event.source) {
-                    rec = { iframe, wrapper: iframe.parentElement };
-                    winMap.set(event.source, rec);
-                    break;
-                }
+    let rec = winMap.get(event.source);
+    if (!rec || !rec.iframe) {
+        const iframes = document.querySelectorAll('iframe.xiaobaix-iframe');
+        for (const iframe of iframes) {
+            if (iframe.contentWindow === event.source) {
+                rec = { iframe, wrapper: iframe.parentElement };
+                winMap.set(event.source, rec);
+                break;
             }
         }
-        if (!rec || !rec.iframe) return;
+    }
+    if (rec && rec.iframe && typeof data.height === 'number') {
+        const next = Math.max(0, Number(data.height) || 0);
         const prev = lastHeights.get(rec.iframe) || 0;
-        const next = Math.max(0, Number(height) || 0);
-        if (!(data && data.force) && Math.abs(next - prev) < 1) return;
-        lastHeights.set(rec.iframe, next);
-        if (!resizeRafPending) {
-            resizeRafPending = true;
-            requestAnimationFrame(() => {
-                resizeRafPending = false;
-                rec.iframe.style.height = `${lastHeights.get(rec.iframe) || 0}px`;
-                if ((lastHeights.get(rec.iframe) || 0) > 24) {
-                    Skeleton.removeByWrapper(rec.wrapper);
+        if (!data.force && Math.abs(next - prev) < 1) return;
+        if (data.force) {
+            lastHeights.set(rec.iframe, next);
+            requestAnimationFrame(() => { rec.iframe.style.height = `${next}px` });
+            return;
+        }
+        pendingHeight = next;
+        pendingRec = rec;
+        const now = performance.now();
+        const dt = now - lastApplyTs;
+        if (dt >= 50) {
+            lastApplyTs = now;
+            const h = pendingHeight, r = pendingRec;
+            pendingHeight = null; pendingRec = null;
+            lastHeights.set(r.iframe, h);
+            requestAnimationFrame(() => { r.iframe.style.height = `${h}px` });
+        } else {
+            setTimeout(() => {
+                if (pendingRec && pendingHeight != null) {
+                    lastApplyTs = performance.now();
+                    const h = pendingHeight, r = pendingRec;
+                    pendingHeight = null; pendingRec = null;
+                    lastHeights.set(r.iframe, h);
+                    requestAnimationFrame(() => { r.iframe.style.height = `${h}px` });
                 }
-            });
+            }, Math.max(0, 50 - dt));
         }
         return;
-    } else if (type === 'runCommand') {
-        executeSlashCommand(command)
-            .then(result => event.source.postMessage({ source: 'xiaobaix-host', type: 'commandResult', id, result }, '*'))
-            .catch(err => event.source.postMessage({ source: 'xiaobaix-host', type: 'commandError', id, error: err.message || String(err) }, '*'));
+    }
+    if (data && data.type === 'runCommand') {
+        executeSlashCommand(data.command)
+            .then(result => event.source.postMessage({ source: 'xiaobaix-host', type: 'commandResult', id: data.id, result }, '*'))
+            .catch(err => event.source.postMessage({ source: 'xiaobaix-host', type: 'commandError', id: data.id, error: err.message || String(err) }, '*'));
     }
 }
 
-function requestIframeHeight(iframe) {
-    try { iframe.contentWindow?.postMessage({ type: 'probe' }, '*'); } catch (e) {}
-}
-
-function prepareHtmlContent(htmlContent) {
-    const apiScript = `<script>${createIframeApi()}</script>`;
-    if (htmlContent.includes('<html') && htmlContent.includes('</html>')) {
-        return htmlContent.replace('</head>', `${apiScript}</head>`);
+function setIframeBlobHTML(iframe, fullHTML, codeHash){
+    const existing = hashToBlobUrl.get(codeHash);
+    if (existing) {
+        iframe.src = existing;
+        blobUrls.set(iframe, existing);
+        return;
     }
-    const baseTemplate = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>html,body{margin:0;padding:0;background:transparent;font-family:inherit;color:inherit}</style>
-${apiScript}
-</head>`;
-    if (htmlContent.includes('<body') && htmlContent.includes('</body>')) {
-        return baseTemplate + htmlContent + '</html>';
+    const blob = new Blob([fullHTML], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    iframe.src = url;
+    blobUrls.set(iframe, url);
+    hashToBlobUrl.set(codeHash, url);
+    blobLRU.push(codeHash);
+    while (blobLRU.length > BLOB_CACHE_LIMIT) {
+        const old = blobLRU.shift();
+        const u = hashToBlobUrl.get(old);
+        hashToBlobUrl.delete(old);
+        try { URL.revokeObjectURL(u) } catch(e){}
     }
-    return baseTemplate + `<body>${htmlContent}</body></html>`;
-}
-
-function setIframeBlobHTML(iframe, fullHTML){
-    try {
-        const blob = new Blob([fullHTML], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        iframe.src = url;
-        const prev = blobUrls.get(iframe);
-        if (prev) URL.revokeObjectURL(prev);
-        blobUrls.set(iframe, url);
-    } catch (e) {}
 }
 
 function releaseIframeBlob(iframe){
@@ -572,27 +527,35 @@ function renderHtmlInIframe(htmlContent, container, preElement) {
         const iframe = document.createElement('iframe');
         iframe.id = generateUniqueId();
         iframe.className = 'xiaobaix-iframe';
-        iframe.style.cssText = 'width:100%;border:none;background:transparent;overflow:hidden;height:0;margin:0;padding:0;display:block';
+        iframe.style.cssText = 'width:100%;border:none;background:transparent;overflow:hidden;height:0;margin:0;padding:0;display:block;contain:layout paint style;will-change:height';
         iframe.setAttribute('frameborder', '0');
         iframe.setAttribute('scrolling', 'no');
-        iframe.loading = 'lazy';
+        iframe.loading = 'eager';
         if (settings.sandboxMode) {
-            iframe.setAttribute('sandbox', 'allow-scripts allow-popups allow-forms allow-same-origin');
+            iframe.setAttribute('sandbox', 'allow-scripts');
+        } else {
+            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
         }
         const wrapper = getOrCreateWrapper(preElement);
-        const est = Math.max(140, estimateHeightFromContent(htmlContent));
-        Skeleton.create(preElement, est);
+        wrapper.querySelectorAll('.xiaobaix-iframe').forEach(old => {
+            try { old.src='about:blank'; } catch(e) {}
+            releaseIframeBlob(old);
+            old.remove();
+        });
+        const codeHash = djb2(htmlContent);
+        const full = buildWrappedHtml(htmlContent);
+        if (settings.useBlob) {
+            setIframeBlobHTML(iframe, full, codeHash);
+        } else {
+            iframe.srcdoc = full;
+        }
         wrapper.appendChild(iframe);
         preElement.classList.remove('xb-show');
+        preElement.style.display = 'none';
         registerIframeMapping(iframe, wrapper);
-        if (settings.useBlob) {
-            const full = prepareHtmlContent(htmlContent);
-            setIframeBlobHTML(iframe, full);
-        } else {
-            iframe.srcdoc = prepareHtmlContent(htmlContent);
-        }
-        setTimeout(() => requestIframeHeight(iframe), 10);
-        setTimeout(() => requestIframeHeight(iframe), 500);
+        try { iframe.contentWindow?.postMessage({ type: 'probe' }, '*'); } catch (e) {}
+        preElement.dataset.xbFinal = 'true';
+        preElement.dataset.xbHash = codeHash;
         return iframe;
     } catch (err) {
         return null;
@@ -740,39 +703,56 @@ function toggleAllFeatures(enabled) {
     }
 }
 
-function processMessageById(messageId, forceFinal = true) {
-    const messageElement = document.querySelector(`div.mes[mesid="${messageId}"] .mes_text`);
-    if (!messageElement) return;
-    const codeBlocks = messageElement.querySelectorAll('pre > code');
-    codeBlocks.forEach(codeBlock => {
-        const preElement = codeBlock.parentElement;
-        const shouldRender = shouldRenderContentByBlock(codeBlock);
-        const prev = preElement.previousElementSibling;
-        const wrapper = prev && prev.classList && prev.classList.contains('xiaobaix-iframe-wrapper') ? prev : null;
-        if (wrapper) {
-            const ifr = wrapper.querySelector('iframe.xiaobaix-iframe');
-            if (ifr) { try { ifr.src='about:blank'; } catch(e) {} releaseIframeBlob(ifr); }
-            wrapper.remove();
-        }
-        preElement.classList.remove('xb-show');
-        preElement.removeAttribute('data-xbfinal');
-        delete preElement.dataset.xbFinal;
-        preElement.removeAttribute('data-xiaobaix-bound');
-        delete preElement.dataset.xiaobaixBound;
-        if (shouldRender) {
-            const codeContent = codeBlock.textContent || '';
-            const est = estimateHeightFromContent(codeContent);
-            Skeleton.create(preElement, est);
-            renderHtmlInIframe(codeContent, preElement.parentNode, preElement);
-            if (forceFinal) preElement.dataset.xbFinal = 'true';
-        } else {
-            preElement.classList.add('xb-show');
-        }
-        preElement.dataset.xiaobaixBound = 'true';
+function invalidateMessage(messageId){
+    const el=document.querySelector(`div.mes[mesid="${messageId}"] .mes_text`);
+    if(!el)return;
+    el.querySelectorAll('.xiaobaix-iframe-wrapper').forEach(w=>{
+        w.querySelectorAll('.xiaobaix-iframe').forEach(ifr=>{try{ifr.src='about:blank'}catch(e){};releaseIframeBlob(ifr)});
+        w.remove();
+    });
+    el.querySelectorAll('pre').forEach(pre=>{
+        pre.classList.remove('xb-show');
+        pre.removeAttribute('data-xbfinal');
+        pre.removeAttribute('data-xbhash');
+        delete pre.dataset.xbFinal;
+        delete pre.dataset.xbHash;
+        pre.style.display='';
+        delete pre.dataset.xiaobaixBound;
     });
 }
 
-function processCodeBlocks(messageElement) {
+function clearBlobCaches(){
+    try{hashToBlobUrl.forEach(u=>{try{URL.revokeObjectURL(u)}catch{}})}catch{}
+    hashToBlobUrl.clear();
+    blobLRU.length=0;
+}
+
+function invalidateAll(){
+    document.querySelectorAll('.xiaobaix-iframe-wrapper').forEach(w=>{
+        w.querySelectorAll('.xiaobaix-iframe').forEach(ifr=>{try{ifr.src='about:blank'}catch(e){};releaseIframeBlob(ifr)});
+        w.remove();
+    });
+    document.querySelectorAll('.mes_text pre').forEach(pre=>{
+        pre.classList.remove('xb-show');
+        pre.removeAttribute('data-xbfinal');
+        pre.removeAttribute('data-xbhash');
+        delete pre.dataset.xbFinal;
+        delete pre.dataset.xbHash;
+        delete pre.dataset.xiaobaixBound;
+        pre.style.display='';
+    });
+    clearBlobCaches();
+    winMap.clear();
+    lastHeights = new WeakMap();
+}
+
+function processMessageById(messageId, forceFinal = true) {
+    const messageElement = document.querySelector(`div.mes[mesid="${messageId}"] .mes_text`);
+    if (!messageElement) return;
+    processCodeBlocks(messageElement, forceFinal);
+}
+
+function processCodeBlocks(messageElement, forceFinal=true) {
     if (!settings.enabled || !isXiaobaixEnabled) return;
     try {
         const codeBlocks = messageElement.querySelectorAll('pre > code');
@@ -780,43 +760,31 @@ function processCodeBlocks(messageElement) {
         const lastId = ctx.chat?.length - 1;
         const mesEl = messageElement.closest('.mes');
         const mesId = mesEl ? Number(mesEl.getAttribute('mesid')) : null;
-        
-        if (isGenerating && mesId === lastId) {
-            const alreadyFinal = messageElement.querySelector('pre[data-xbfinal="true"]');
-            if (alreadyFinal) return;
-        }
-        
+        if (isGenerating && mesId === lastId && !forceFinal) return;
         codeBlocks.forEach(codeBlock => {
             const preElement = codeBlock.parentElement;
-            const shouldRender = shouldRenderContentByBlock(codeBlock);
+            const should = shouldRenderContentByBlock(codeBlock);
+            const html = codeBlock.textContent || '';
+            const hash = djb2(html);
             const isFinal = preElement.dataset.xbFinal === 'true';
-            if (isFinal) return;
-            
-            const alreadyBound = preElement.dataset.xiaobaixBound === 'true';
-            if (!alreadyBound) {
-                preElement.dataset.xiaobaixBound = 'true';
-            }
-            
-            if (shouldRender) {
-                const codeContent = codeBlock.textContent || '';
-                preElement.classList.remove('xb-show');
-                const prev = preElement.previousElementSibling;
-                const wrapper = prev && prev.classList && prev.classList.contains('xiaobaix-iframe-wrapper') ? prev : null;
-                if (wrapper) wrapper.querySelector('.xiaobaix-skel')?.remove();
-                const est = estimateHeightFromContent(codeContent);
-                Skeleton.create(preElement, est);
-                renderHtmlInIframe(codeContent, preElement.parentNode, preElement);
-                preElement.dataset.xbFinal = 'true';
+            const same = preElement.dataset.xbHash === hash;
+            if (isFinal && same) return;
+            if (should) {
+                renderHtmlInIframe(html, preElement.parentNode, preElement);
             } else {
                 preElement.classList.add('xb-show');
+                preElement.removeAttribute('data-xbfinal');
+                preElement.removeAttribute('data-xbhash');
+                preElement.style.display='';
             }
+            preElement.dataset.xiaobaixBound = 'true';
         });
     } catch (err) {}
 }
 
 function processExistingMessages() {
     if (!settings.enabled || !isXiaobaixEnabled) return;
-    document.querySelectorAll('.mes_text').forEach(processCodeBlocks);
+    document.querySelectorAll('.mes_text').forEach(el=>processCodeBlocks(el,true));
     if (settings.memoryEnabled) {
         $('#chat .mes').each(function () {
             const messageId = $(this).attr('mesid');
@@ -958,7 +926,7 @@ function setupEventListeners() {
             if (!messageId && messageId !== 0) return;
             const messageElement = document.querySelector(`div.mes[mesid="${messageId}"] .mes_text`);
             if (!messageElement) return;
-            processCodeBlocks(messageElement);
+            processCodeBlocks(messageElement, true);
             if (settings.memoryEnabled) {
                 statsTracker.addMemoryButtonToMessage(messageId);
                 if (isReceived) {
@@ -966,18 +934,21 @@ function setupEventListeners() {
                     $(`.mes[mesid="${messageId}"] .memory-button`).addClass('has-memory');
                 }
             }
-        }, isReceived ? 300 : 100);
+        }, isReceived ? 300 : 10);
     };
     const onMessageReceived = (data) => handleMessage(data, true);
     const onMessageUpdated = (data) => {
         if (!isXiaobaixEnabled) return;
         const messageId = typeof data === 'object' ? data.messageId : data;
         if (messageId == null) return;
-        const ctx = getContext();
-        const lastId = ctx.chat?.length - 1;
-        const forceFinal = !(isGenerating && messageId === lastId);
-        if (!forceFinal) return;
+        invalidateMessage(messageId);
         processMessageById(messageId, true);
+    };
+    const onMessageEdited = onMessageUpdated;
+    const onMessageDeleted = (data) => {
+        const messageId = typeof data === 'object' ? data.messageId : data;
+        if (messageId == null) return;
+        invalidateMessage(messageId);
     };
     const onMessageSwiped = handleMessage;
     if (event_types.MESSAGE_RECEIVED) {
@@ -987,6 +958,14 @@ function setupEventListeners() {
     if (event_types.MESSAGE_UPDATED) {
         eventSource.on(event_types.MESSAGE_UPDATED, onMessageUpdated);
         globalEventListeners.push({ target: eventSource, event: event_types.MESSAGE_UPDATED, handler: onMessageUpdated, isEventSource: true });
+    }
+    if (event_types.MESSAGE_EDITED) {
+        eventSource.on(event_types.MESSAGE_EDITED, onMessageEdited);
+        globalEventListeners.push({ target: eventSource, event: event_types.MESSAGE_EDITED, handler: onMessageEdited, isEventSource: true });
+    }
+    if (event_types.MESSAGE_DELETED) {
+        eventSource.on(event_types.MESSAGE_DELETED, onMessageDeleted);
+        globalEventListeners.push({ target: eventSource, event: event_types.MESSAGE_DELETED, handler: onMessageDeleted, isEventSource: true });
     }
     if (event_types.MESSAGE_SWIPED) {
         eventSource.on(event_types.MESSAGE_SWIPED, onMessageSwiped);
@@ -1000,13 +979,12 @@ function setupEventListeners() {
         eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, handleMessage);
         globalEventListeners.push({ target: eventSource, event: event_types.CHARACTER_MESSAGE_RENDERED, handler: handleMessage, isEventSource: true });
     }
-    const CHAT_LOADED_EVENT = event_types.CHAT_CHANGED;
-    const chatLoadedHandler = async () => {
-        if (!isXiaobaixEnabled) return;
-        const timer1 = setTimeout(() => processExistingMessages(), 200);
-        addGlobalTimer(timer1);
+    const chatChanged = () => {
+        isGenerating = false;
+        invalidateAll();
+        setTimeout(() => processExistingMessages(), 100);
         if (!settings.memoryEnabled) return;
-        const timer2 = setTimeout(async () => {
+        setTimeout(async () => {
             try {
                 let stats = await executeSlashCommand('/getvar xiaobaix_stats');
                 if (!stats || stats === "undefined") {
@@ -1031,12 +1009,12 @@ function setupEventListeners() {
                     statsTracker.updateMemoryPrompt();
                 }
             } catch (error) {}
-        }, 500);
-        addGlobalTimer(timer2);
+        }, 300);
     };
+    const CHAT_LOADED_EVENT = event_types.CHAT_CHANGED;
     if (CHAT_LOADED_EVENT) {
-        eventSource.on(CHAT_LOADED_EVENT, chatLoadedHandler);
-        globalEventListeners.push({ target: eventSource, event: CHAT_LOADED_EVENT, handler: chatLoadedHandler, isEventSource: true });
+        eventSource.on(CHAT_LOADED_EVENT, chatChanged);
+        globalEventListeners.push({ target: eventSource, event: CHAT_LOADED_EVENT, handler: chatChanged, isEventSource: true });
     }
     if (event_types.GENERATION_STARTED) {
         const onGenStart = () => { if (isXiaobaixEnabled) isGenerating = true; };
@@ -1049,6 +1027,7 @@ function setupEventListeners() {
             const ctx = getContext();
             const lastId = ctx.chat?.length - 1;
             if (lastId != null && lastId >= 0) {
+                invalidateMessage(lastId);
                 setTimeout(() => processMessageById(lastId, true), 60);
             }
             stopStreamingScan();
@@ -1080,15 +1059,6 @@ jQuery(async () => {
             skelStyle.id = 'xiaobaix-skeleton-style';
             skelStyle.textContent = `
               .xiaobaix-iframe-wrapper{position:relative}
-              .xiaobaix-skel{position:relative;height:180px;border-radius:14px;overflow:hidden;background:radial-gradient(1200px 300px at -10% -10%, rgba(255,255,255,.08), transparent 60%),radial-gradient(800px 200px at 110% 110%, rgba(255,255,255,.06), transparent 60%),linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);box-shadow:0 6px 20px rgba(0,0,0,.12), inset 0 0 0 1px rgba(255,255,255,.04);isolation:isolate}
-              .xiaobaix-skel::before{content:"";position:absolute;inset:0;background:linear-gradient(110deg, transparent 0%, rgba(255,255,255,.08) 40%, rgba(255,255,255,.18) 50%, rgba(255,255,255,.08) 60%, transparent 100%);background-size:200% 100%;animation:xb-shine 1.4s ease-in-out infinite;mix-blend-mode:overlay}
-              .xiaobaix-skel::after{content:"";position:absolute;inset:-2px;border-radius:16px;box-shadow:0 0 0 1px color-mix(in oklab, var(--SmartThemeAccentColor, #66aaff) 45%, transparent);pointer-events:none}
-              .xiaobaix-skel.appear{opacity:0;transform:translateY(6px);animation:xb-in .18s ease-out forwards}
-              .xiaobaix-skel.hide{opacity:1;transform:translateY(0);animation:xb-out .18s ease-in forwards}
-              @keyframes xb-shine{0%{background-position:200% 0}100%{background-position:-200% 0}}
-              @keyframes xb-in{to{opacity:1;transform:translateY(0)}}
-              @keyframes xb-out{to{opacity:0;transform:translateY(6px)}}
-              @media (prefers-reduced-motion: reduce){.xiaobaix-skel::before{animation:none}.xiaobaix-skel.appear,.xiaobaix-skel.hide{animation:none}}
             `;
             document.head.appendChild(skelStyle);
         }

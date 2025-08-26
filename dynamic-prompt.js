@@ -3759,3 +3759,15 @@ window.renameCurrentPreset = renameCurrentPreset;
 window.switchPreset = switchPreset;
 
 export { initDynamicPrompt, dynamicPromptCleanup };
+
+if (typeof window !== 'undefined') {
+  window.dynamicPromptCleanup = dynamicPromptCleanup;
+  if (window.registerModuleCleanup) {
+    try { window.registerModuleCleanup('dynamicPrompt', dynamicPromptCleanup); } catch (e) {}
+  }
+  document.addEventListener('xiaobaixEnabledChanged', (e) => {
+    if (e && e.detail && e.detail.enabled === false) {
+      try { dynamicPromptCleanup(); } catch (err) {}
+    }
+  });
+}
