@@ -365,10 +365,12 @@ function iframeClientScript(){return `
 function buildWrappedHtml(html){
     const api = `<script>${iframeClientScript()}</script>`;
     const headHints = buildResourceHints(html);
+    const vhGuard = `<style id="xb-vh-guard">html,body{min-height:0!important;height:auto!important}</style>`;
+
     if (html.includes('<html') && html.includes('</html>')) {
-        if (html.includes('<head>')) return html.replace('<head>', `<head>${api}${headHints}`);
-        if (html.includes('</head>')) return html.replace('</head>', `${api}${headHints}</head>`);
-        return html.replace('<body', `<head>${api}${headHints}</head><body`);
+        if (html.includes('<head>')) return html.replace('<head>', `<head>${api}${headHints}${vhGuard}`);
+        if (html.includes('</head>')) return html.replace('</head>', `${api}${headHints}${vhGuard}</head>`);
+        return html.replace('<body', `<head>${api}${headHints}${vhGuard}</head><body`);
     }
     return `<!DOCTYPE html>
 <html>
@@ -378,6 +380,7 @@ function buildWrappedHtml(html){
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 ${api}
 ${headHints}
+${vhGuard}
 <style>html,body{margin:0;padding:0;background:transparent;font-family:inherit;color:inherit}</style>
 </head>
 <body>${html}</body></html>`;
