@@ -36,8 +36,7 @@ const injectStyles = () => {
   transition:background-color .15s ease,box-shadow .15s ease,border-color .15s ease,opacity .15s ease;
 }
 .xiaobaix-collapse-btn.open .xiaobaix-sub-container{
-  display:flex;background:#141414;border-color:rgba(255,255,255,.12);backdrop-filter:none;-webkit-backdrop-filter:none;
-  box-shadow:0 10px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);opacity:1;
+  display:flex;background:var(--SmartThemeBlurTintColor);
 }
 .xiaobaix-sub-container, .xiaobaix-sub-container *{pointer-events:auto !important;}
 .xiaobaix-sub-container .memory-button,
