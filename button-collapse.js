@@ -29,11 +29,8 @@ const injectStyles = () => {
 .xiaobaix-xstack span:nth-child(2){color:rgba(255,255,255,.2);transform:scaleX(.8) translateX(-4px);text-shadow:none}
 .xiaobaix-xstack span:nth-child(3){color:rgba(255,255,255,.4);transform:scaleX(.8) translateX(-2px);text-shadow:none}
 .xiaobaix-sub-container{
-  display:none;position:absolute;left:38px;top:50%;transform:translateY(-50%);
-  background:var(--SmartThemeBlurTintColor);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  border:1px solid var(--SmartThemeBorderColor);border-radius:8px;padding:4px;gap:8px;pointer-events:auto;
-  box-shadow:0 4px 16px rgba(0,100,255,.2), inset 0 1px 0 rgba(255,255,255,.05);z-index:999;
-  transition:background-color .15s ease,box-shadow .15s ease,border-color .15s ease,opacity .15s ease;
+  display:none;position:absolute;left:38px;
+  border-radius:8px;padding:4px;gap:8px;pointer-events:auto;
 }
 .xiaobaix-collapse-btn.open .xiaobaix-sub-container{
   display:flex;background:var(--SmartThemeBlurTintColor);
