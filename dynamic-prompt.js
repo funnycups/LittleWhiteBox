@@ -2128,6 +2128,7 @@ async function generateUserAnalysisReport(isAutoAnalysis = false) {
         if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
     }
 }
+
 async function performUserAnalysis(chatHistory) {
     const settings = getSettings();
     const provider = (settings.apiConfig?.provider || 'sillytavern');
@@ -2142,6 +2143,7 @@ async function performUserAnalysis(chatHistory) {
         return await callAIForAnalysis(fullPrompt);
     }
 }
+
 async function getChatHistory() {
     const lastMessageIdStr = await executeSlashCommand('/pass {{lastMessageId}}');
     const lastMessageId = parseInt(lastMessageIdStr) || 0;
@@ -2153,6 +2155,7 @@ async function getChatHistory() {
     if (!rawHistory || rawHistory.trim() === '') throw new Error('聊天记录为空');
     return await formatChatHistory(rawHistory);
 }
+
 function createUserAnalysisPrompt(chatHistory) {
     const sections = loadPromptSections();
     let prompt = '';
@@ -2171,6 +2174,7 @@ function createUserAnalysisPrompt(chatHistory) {
     });
     return prompt.trim();
 }
+
 async function callAIForAnalysis(prompt) {
     const settings = getSettings();
     const apiConfig = settings.apiConfig;
@@ -2189,11 +2193,13 @@ async function callAIForAnalysis(prompt) {
             return await callSillyTavernAPI(prompt);
     }
 }
+
 async function callSillyTavernAPI(prompt) {
     const result = await executeSlashCommand(`/genraw lock=off instruct=off ${prompt}`);
     if (!result || result.trim() === '') throw new Error('AI返回空内容');
     return result.trim();
 }
+
 async function callOpenAIAPI(prompt, config) {
     const response = await fetch(`${config.url}/chat/completions`, {
         method: 'POST',
@@ -2214,6 +2220,7 @@ async function callOpenAIAPI(prompt, config) {
     const data = await response.json();
     return data.choices[0].message.content;
 }
+
 async function callGoogleAPI(prompt, config) {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.key}`, {
         method: 'POST',
@@ -2232,6 +2239,7 @@ async function callGoogleAPI(prompt, config) {
     const data = await response.json();
     return data.candidates[0].content.parts[0].text;
 }
+
 async function callCohereAPI(prompt, config) {
     const response = await fetch('https://api.cohere.ai/v1/generate', {
         method: 'POST',
@@ -2252,6 +2260,7 @@ async function callCohereAPI(prompt, config) {
     const data = await response.json();
     return data.generations[0].text;
 }
+
 async function callDeepSeekAPI(prompt, config) {
     const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
@@ -2272,6 +2281,7 @@ async function callDeepSeekAPI(prompt, config) {
     const data = await response.json();
     return data.choices[0].message.content;
 }
+
 async function formatChatHistory(rawHistory) {
     let cleaned = cleanChatHistory(rawHistory);
     const settings = getSettings();
@@ -2295,6 +2305,7 @@ async function formatChatHistory(rawHistory) {
     cleaned = cleaned.replace(userPattern, `${finalUserName}:\n`).replace(charPattern, `${finalAssistantName}:\n`);
     return cleaned;
 }
+
 function cleanChatHistory(rawHistory) {
     if (!rawHistory) return '';
     rawHistory = rawHistory.replace(/\|/g, '｜');
@@ -2310,6 +2321,7 @@ function cleanChatHistory(rawHistory) {
         .replace(/^\s*$\n/gm, '')
         .trim();
 }
+
 async function getUserAndCharNames() {
     try {
         const context = getContext();
@@ -2336,41 +2348,92 @@ async function getUserAndCharNames() {
         return { userName: 'User', charName: 'Assistant' };
     }
 }
+
+function getAnalysisStore(chatId = getCurrentChatIdSafe()) {
+    if (!chatId) return null;
+    const meta = chat_metadata[chatId] || (chat_metadata[chatId] = {});
+    meta.extensions = meta.extensions || {};
+    meta.extensions[EXT_ID] = meta.extensions[EXT_ID] || {};
+    const ext = meta.extensions[EXT_ID];
+    ext.analysis = ext.analysis || {};
+    ext.analysis.reports = Array.isArray(ext.analysis.reports) ? ext.analysis.reports : [];
+    return ext.analysis;
+}
+
+async function saveAnalysisReports() {
+    const chatId = getCurrentChatIdSafe();
+    if (!chatId) return;
+    const store = getAnalysisStore(chatId);
+    if (!store) return;
+    store.reports = Array.isArray(dynamicPromptState.userReports) ? dynamicPromptState.userReports.slice() : [];
+    if (typeof saveMetadataDebounced === 'function') saveMetadataDebounced();
+}
+
+async function loadAnalysisState() {
+    const chatId = getCurrentChatIdSafe();
+    if (!chatId) {
+        dynamicPromptState.userReports = [];
+        return;
+    }
+    const store = getAnalysisStore(chatId);
+    if (!store) {
+        dynamicPromptState.userReports = [];
+        return;
+    }
+    dynamicPromptState.userReports = Array.isArray(store.reports) ? store.reports.slice() : [];
+}
+
 async function saveUserAnalysisToVariable(analysisResult) {
     try {
-        function cleanTextForPrompt(text) {
-            if (!text) return '';
-            return text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*([^*\n]+?)\*/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
+        const cleanForPrompt = (s) => String(s ?? '')
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '$1')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        const text = String(analysisResult || '');
+        const headerPattern = (label) =>
+            new RegExp(`^\\s*(?:#{1,6}\\s*)?${label}\\s*[:：]?\\s*$`, 'm');
+        const anchors = [
+            { key: '1',  label: '【第一部分】' },
+            { key: '2',  label: '【第二部分】' },
+            { key: '3',  label: '【第三部分】' },
+            { key: '4',  label: '【第四部分】' },
+        ].map(({ key, label }) => {
+            const re = headerPattern(label);
+            const m = re.exec(text);
+            return m ? { key, label, index: m.index, length: m[0].length } : null;
+        }).filter(Boolean);
+        const endRe = /^\s*(?:#{1,6}\s*)?===\s*END\s*===\s*$/mi;
+        const endMatch = endRe.exec(text);
+        const endIndex = endMatch ? endMatch.index : text.length;
+        const ranges = { '1': '', '2': '', '3': '', '4': '' };
+        if (anchors.length > 0) {
+            const sorted = anchors.sort((a, b) => a.index - b.index);
+            for (let i = 0; i < sorted.length; i++) {
+                const cur = sorted[i];
+                const next = sorted[i + 1];
+                const start = cur.index + cur.length;
+                const end = next ? next.index : endIndex;
+                ranges[cur.key] = end > start ? text.slice(start, end).trim() : '';
+            }
         }
-        const part1Match = analysisResult.match(/【第一部分】\s*\n([\s\S]*?)(?=\n【第二部分】|\n===END===|$)/);
-        if (part1Match && part1Match[1]) {
-            const content = cleanTextForPrompt(part1Match[1]);
-            await executeSlashCommand(`/setvar key=prompt1 "${content}"`);
-        }
-        const part2Match = analysisResult.match(/【第二部分】\s*\n([\s\S]*?)(?=\n【第三部分】|\n===END===|$)/);
-        if (part2Match && part2Match[1]) {
-            const content = cleanTextForPrompt(part2Match[1]);
-            await executeSlashCommand(`/setvar key=prompt2 "${content}"`);
-        }
-        const part3Match = analysisResult.match(/【第三部分】\s*\n([\s\S]*?)(?=\n【第四部分】|\n===END===|$)/);
-        if (part3Match && part3Match[1]) {
-            const content = cleanTextForPrompt(part3Match[1]);
-            await executeSlashCommand(`/setvar key=prompt3 "${content}"`);
-        }
-        const part4Match = analysisResult.match(/【第四部分】\s*\n([\s\S]*?)(?=\n===END===|$)/);
-        if (part4Match && part4Match[1]) {
-            const content = cleanTextForPrompt(part4Match[1]);
-            await executeSlashCommand(`/setvar key=prompt4 "${content}"`);
-        }
-        const usageHint = `用户分析完成！\n\n可用变量：\n\n• 第一部分内容\n{{getvar::prompt1}}\n\n• 第二部分内容\n{{getvar::prompt2}}\n\n• 第三部分内容\n{{getvar::prompt3}}\n\n• 第四部分内容\n{{getvar::prompt4}}`;
+        const part1 = cleanForPrompt(ranges['1']);
+        const part2 = cleanForPrompt(ranges['2']);
+        const part3 = cleanForPrompt(ranges['3']);
+        const part4 = cleanForPrompt(ranges['4']);
+        if (part1) await executeSlashCommand(`/setvar key=prompt1 "${stEscArg(part1)}"`);
+        if (part2) await executeSlashCommand(`/setvar key=prompt2 "${stEscArg(part2)}"`);
+        if (part3) await executeSlashCommand(`/setvar key=prompt3 "${stEscArg(part3)}"`);
+        if (part4) await executeSlashCommand(`/setvar key=prompt4 "${stEscArg(part4)}"`);
+        const hint = `用户分析完成！\n\n可用变量：\n\n• 第一部分内容\n{{getvar::prompt1}}\n\n• 第二部分内容\n{{getvar::prompt2}}\n\n• 第三部分内容\n{{getvar::prompt3}}\n\n• 第四部分内容\n{{getvar::prompt4}}`;
         setTimeout(() => {
-            callGenericPopup(usageHint, POPUP_TYPE.TEXT, '', {
-                okButton: '我知道了',
-                wide: true
-            });
-        }, 1000);
-    } catch (error) {}
+            callGenericPopup(hint, POPUP_TYPE.TEXT, '', { okButton: '我知道了', wide: true });
+        }, 600);
+    } catch (err) {
+        await executeSlashCommand(`/echo severity=warning 解析报告分段失败：${stEscArg(err.message || '未知错误')}`);
+    }
 }
+
 function clearAnalysisUI() {
     dynamicPromptState.userReports = [];
     const results = document.querySelector('#dynamic-prompt-content-wrapper #analysis-results');
@@ -2379,6 +2442,7 @@ function clearAnalysisUI() {
     if (placeholder) placeholder.style.display = 'none';
     updateTabButtons();
 }
+
 function mountAnalysisStreamingCard() {
     const placeholder = document.querySelector('#dynamic-prompt-content-wrapper #analysis-placeholder');
     const results = document.querySelector('#dynamic-prompt-content-wrapper #analysis-results');
@@ -2414,6 +2478,7 @@ function mountAnalysisStreamingCard() {
     const cancelBtn = document.getElementById('analysis-cancel-btn');
     if (cancelBtn) cancelBtn.onclick = cancelAnalysisStreaming;
 }
+
 function mapProviderToApi(provider) {
     const p = String(provider || '').toLowerCase();
     if (p === 'sillytavern') return null;
@@ -2423,6 +2488,7 @@ function mapProviderToApi(provider) {
     if (p === 'deepseek') return 'deepseek';
     return null;
 }
+
 function buildAnalysisStreamingArgs() {
     const s = getSettings();
     const provider = s.apiConfig?.provider || 'sillytavern';
@@ -2445,6 +2511,7 @@ function buildAnalysisStreamingArgs() {
     }
     return args;
 }
+
 function buildXbgenrawCmd(sessionId, asRole, prompt, args) {
     const parts = [`/xbgenraw id=${sessionId} as=${asRole}`];
     if (args?.api) parts.push(`api=${args.api}`);
@@ -2454,6 +2521,7 @@ function buildXbgenrawCmd(sessionId, asRole, prompt, args) {
     parts.push(prompt);
     return parts.join(' ');
 }
+
 function splitAnalysisPromptByHistory(chatHistory) {
     const savedSections = loadPromptSections();
     let inBottom = false;
@@ -2476,6 +2544,7 @@ function splitAnalysisPromptByHistory(chatHistory) {
     }
     return { top: top.trim(), bottom: bottom.trim(), body: String(chatHistory || '').trim() };
 }
+
 function buildXbgenrawCmdStructured(sessionId, apiArgs, { topuser, body, bottomuser, includeWorldInfo, stream }) {
     const parts = [`/xbgenraw id=${sessionId} as=assistant position=history`];
     if (apiArgs?.api) parts.push(`api=${apiArgs.api}`);
@@ -2489,6 +2558,7 @@ function buildXbgenrawCmdStructured(sessionId, apiArgs, { topuser, body, bottomu
     parts.push(body);
     return parts.join(' ');
 }
+
 async function startAnalysisByStructure(chatHistory, isAuto = false) {
     clearAnalysisUI();
     try {
@@ -2532,9 +2602,11 @@ async function startAnalysisByStructure(chatHistory, isAuto = false) {
         if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
     }
 }
+
 function startAnalysisStreaming(prompt, isAuto = false) {
     return startAnalysisByStructure(prompt, isAuto);
 }
+
 function startAnalysisPolling(sessionId = 'xb2') {
     stopAnalysisPolling();
     const sid = String(sessionId);
@@ -2555,12 +2627,14 @@ function startAnalysisPolling(sessionId = 'xb2') {
         }
     }, 80);
 }
+
 function stopAnalysisPolling() {
     if (dynamicPromptState.analysis.streamTimerId) {
         clearInterval(dynamicPromptState.analysis.streamTimerId);
         dynamicPromptState.analysis.streamTimerId = null;
     }
 }
+
 async function finalizeAnalysisStreaming(sessionId) {
     if (!dynamicPromptState.analysis.isStreaming) return;
     stopAnalysisPolling();
@@ -2579,6 +2653,7 @@ async function finalizeAnalysisStreaming(sessionId) {
         updatePopupUI();
     }
 }
+
 async function onAnalysisFinalText(analysisResult, isAuto) {
     const reportData = {
         timestamp: Date.now(),
@@ -2587,11 +2662,13 @@ async function onAnalysisFinalText(analysisResult, isAuto) {
         isAutoGenerated: !!isAuto,
     };
     dynamicPromptState.userReports = [reportData];
+    await saveAnalysisReports();
     await saveUserAnalysisToVariable(analysisResult || '');
     if (!dynamicPromptState.isAnalysisOpen) {
         await executeSlashCommand('/echo ✅ 用户文字指纹分析完成！结果已保存到变量中');
     }
 }
+
 function cancelAnalysisStreaming() {
     const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
     const sid = dynamicPromptState.analysis.streamSessionId || 'xb2';
@@ -2608,6 +2685,7 @@ function cancelAnalysisStreaming() {
     }
     if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
 }
+
 function waitForAnalysisCompletion(sessionId = 'xb2', timeoutMs = 600000) {
     return new Promise((resolve, reject) => {
         function onMsg(e) {
@@ -2628,6 +2706,7 @@ function waitForAnalysisCompletion(sessionId = 'xb2', timeoutMs = 600000) {
         }, timeoutMs);
     });
 }
+
 // D.3. 自动分析与队列
 // -----------------------------------------------------------------------------
 function checkAutoAnalysis() {
@@ -2686,19 +2765,16 @@ async function performBackgroundAnalysis() {
         if (!chatHistory || chatHistory.trim() === '') {
             throw new Error('没有找到聊天记录');
         }
-
         const analysisResult = await performUserAnalysis(chatHistory);
-
         const reportData = {
             timestamp: Date.now(),
             content: analysisResult,
             chatLength: chatHistory.length,
             isAutoGenerated: true
         };
-
-        dynamicPromptState.userReports.push(reportData);
+        dynamicPromptState.userReports = [reportData];
+        await saveAnalysisReports();
         await saveUserAnalysisToVariable(analysisResult);
-
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
@@ -2708,6 +2784,7 @@ async function performBackgroundAnalysis() {
 // D.4. 分析结果展示
 // =============================================================================
 async function displayUserReportsPage() {
+    await loadAnalysisState();
     if (dynamicPromptState.analysis?.isStreaming) {
         mountAnalysisStreamingCard();
         updatePopupUI();
@@ -2717,34 +2794,28 @@ async function displayUserReportsPage() {
     const results = document.querySelector('#dynamic-prompt-content-wrapper #analysis-results');
     const settings = document.querySelector('#dynamic-prompt-content-wrapper #settings-panel');
     const fourthWall = document.querySelector('#dynamic-prompt-content-wrapper #fourth-wall-panel');
-
     if (!results) return;
-
     if (placeholder) placeholder.style.display = 'none';
     if (settings) settings.style.display = 'none';
     if (fourthWall) fourthWall.style.display = 'none';
     results.style.display = 'block';
-
     const { userName, charName } = await getUserAndCharNames();
     const isMobile = isMobileDevice();
-
     let reportsHtml = '';
     const reports = dynamicPromptState.userReports.slice(-1);
-    reports.forEach((reportData) => {
+    reports.forEach((reportData, idx) => {
         const formattedContent = formatAnalysisContent(reportData.content);
         const isAutoGenerated = reportData.isAutoGenerated || false;
-        const analysisTypeIcon = isAutoGenerated ?
-            '<i class="fa-solid fa-magic-wand-sparkles" style="color: #3b82f6;"></i>' :
-            '<i class="fa-solid fa-user" style="color: #059669;"></i>';
+        const analysisTypeIcon = isAutoGenerated ? '<i class="fa-solid fa-magic-wand-sparkles" style="color: #3b82f6;"></i>' : '<i class="fa-solid fa-user" style="color: #059669;"></i>';
         const analysisTypeText = isAutoGenerated ? '自动分析' : '手动分析';
-
+        const serial = dynamicPromptState.userReports.length;
         reportsHtml += `
             <div style="background: var(--SmartThemeBlurTintColor); border: 1px solid rgba(5, 150, 105, 0.2); border-radius: 8px; padding: ${isMobile ? '12px' : '16px'}; margin-bottom: 12px;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 10px;">
                     <div style="flex: 1; min-width: 0;">
                         <h4 style="color: #059669; margin: 0; font-size: ${isMobile ? '13px' : '14px'}; font-weight: 600; display: flex; align-items: center; gap: 6px;">
                             ${analysisTypeIcon}
-                            用户指纹图谱 #${dynamicPromptState.userReports.length > 0 ? dynamicPromptState.userReports.length : 1}
+                            用户指纹图谱 #${serial}
                             <span style="font-size: 11px; color: var(--SmartThemeBodyColor); opacity: 0.6; font-weight: normal;">(${analysisTypeText})</span>
                         </h4>
                         <div style="font-size: 11px; color: var(--SmartThemeBodyColor); opacity: 0.5; margin-top: 4px;">
@@ -2756,8 +2827,7 @@ async function displayUserReportsPage() {
             </div>
         `;
     });
-
-    results.innerHTML = reportsHtml;
+    results.innerHTML = reportsHtml || '';
     results.scrollTop = 0;
 }
 
@@ -3575,7 +3645,9 @@ function debounce(func, wait) {
         timeout = setTimeout(later, wait);
     };
 }
+
 const handleUserMessageSentDebounced = debounce(handleUserMessageSent, 500);
+
 function handleUserMessageSent() {
     const context = getContext();
     const currentChatId = context.chatId || 'default';
@@ -3587,6 +3659,7 @@ function handleUserMessageSent() {
     dynamicPromptState.userMessageCount++;
     checkAutoAnalysis();
 }
+
 function addAnalysisButtonToMessage(messageId) {
     if ($(`#chat .mes[mesid="${messageId}"] .dynamic-prompt-analysis-btn`).length > 0) return;
     const messageBlock = $(`#chat .mes[mesid="${messageId}"]`);
@@ -3601,15 +3674,18 @@ function addAnalysisButtonToMessage(messageId) {
         }
     }
 }
+
 function addAnalysisButtonsToAllMessages() {
     $('#chat .mes').each(function() {
         const messageId = $(this).attr('mesid');
         if (messageId) addAnalysisButtonToMessage(messageId);
     });
 }
+
 function removeAllAnalysisButtons() {
     $('.dynamic-prompt-analysis-btn').remove();
 }
+
 function cleanupEventListeners() {
     dynamicPromptState.eventListeners.forEach(({ target, event, handler, isEventSource }) => {
         try {
@@ -3619,6 +3695,7 @@ function cleanupEventListeners() {
     });
     dynamicPromptState.eventListeners.length = 0;
 }
+
 function initDynamicPrompt() {
     const settings = getSettings();
     currentPresetName = settings.currentPreset || 'default';
@@ -3676,6 +3753,7 @@ function initDynamicPrompt() {
             dynamicPromptState.lastChatId = newChatId;
             dynamicPromptState.userMessageCount = 0;
             analysisQueue = [];
+            await loadAnalysisState();
             dynamicPromptState.fourthWall.isStreaming = false;
             dynamicPromptState.fourthWall.streamSessionId = null;
             dynamicPromptState.fourthWall.history = [];
@@ -3691,6 +3769,7 @@ function initDynamicPrompt() {
     window.addEventListener('message', handleStreamingComplete);
     dynamicPromptState.eventListeners.push({ target: window, event: 'message', handler: handleStreamingComplete, isEventSource: false });
 }
+
 function dynamicPromptCleanup() {
     removeAllAnalysisButtons();
     cleanupEventListeners();
@@ -3734,6 +3813,7 @@ function dynamicPromptCleanup() {
         analysis: { isStreaming:false, streamTimerId:null, streamSessionId:null, lastText:'' },
     };
 }
+
 function handleStreamingComplete(event) {
     if (event.data?.type !== 'xiaobaix_streaming_completed') return;
     const sid = String(event.data?.payload?.sessionId || '');
