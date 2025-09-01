@@ -1462,7 +1462,7 @@ function generateAPIConfigPanel(provider, config) {
                 </div>
                 <div style="margin-bottom: 12px;">
                     <label>模型：</label>
-                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap;">
                         <select id="openai-model" style="padding: 6px 8px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; background: var(--SmartThemeBlurTintColor);">
                             <option value="${config.openai.model}">${config.openai.model}</option>
                         </select>
@@ -1483,7 +1483,7 @@ function generateAPIConfigPanel(provider, config) {
                 </div>
                 <div style="margin-bottom: 12px;">
                     <label>模型：</label>
-                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap;">
                         <select id="google-model" style="padding: 6px 8px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; background: var(--SmartThemeBlurTintColor);">
                             <option value="${config.google.model}">${config.google.model}</option>
                         </select>
@@ -1504,7 +1504,7 @@ function generateAPIConfigPanel(provider, config) {
                 </div>
                 <div style="margin-bottom: 12px;">
                     <label>模型：</label>
-                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap;">
                         <select id="cohere-model" style="padding: 6px 8px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; background: var(--SmartThemeBlurTintColor);">
                             <option value="${config.cohere.model}">${config.cohere.model}</option>
                         </select>
@@ -1525,7 +1525,7 @@ function generateAPIConfigPanel(provider, config) {
                 </div>
                 <div style="margin-bottom: 12px;">
                     <label>模型：</label>
-                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap;">
                         <select id="deepseek-model" style="padding: 6px 8px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; background: var(--SmartThemeBlurTintColor);">
                             <option value="${config.deepseek.model}">${config.deepseek.model}</option>
                         </select>
