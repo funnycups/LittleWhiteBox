@@ -1,9 +1,8 @@
 import {
     eventSource, event_types, main_api, chat, name1, getRequestHeaders,
-    getCharacterCardFields, setExtensionPrompt, extension_prompt_types,
-    extension_prompt_roles, extractMessageFromData,
+    extractMessageFromData,
 } from "../../../../script.js";
-import { getStreamingReply, chat_completion_sources, oai_settings, promptManager } from "../../../openai.js";
+import { getStreamingReply, chat_completion_sources, oai_settings, promptManager, getChatCompletionModel } from "../../../openai.js";
 import { ChatCompletionService } from "../../../custom-request.js";
 import { getEventSourceStream } from "../../../sse-stream.js";
 import { getContext } from "../../../st-context.js";
@@ -12,54 +11,12 @@ import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from "../../../slash-commands/SlashCommandArgument.js";
 
 const EVT_DONE = 'xiaobaix_streaming_completed';
-const SOURCE_MAP = {
-    openai: chat_completion_sources.OPENAI, claude: chat_completion_sources.CLAUDE,
-    gemini: chat_completion_sources.MAKERSUITE, google: chat_completion_sources.MAKERSUITE,
-    googlegemini: chat_completion_sources.MAKERSUITE, cohere: chat_completion_sources.COHERE,
-    deepseek: chat_completion_sources.DEEPSEEK,
-};
-
-const getUiDefaultModel = (source) => {
-    const models = {
-        [chat_completion_sources.OPENAI]: oai_settings?.openai_model,
-        [chat_completion_sources.CLAUDE]: oai_settings?.claude_model,
-        [chat_completion_sources.MAKERSUITE]: oai_settings?.google_model,
-        [chat_completion_sources.COHERE]: oai_settings?.cohere_model,
-        [chat_completion_sources.DEEPSEEK]: oai_settings?.deepseek_model,
-    };
-    return String(models[source] || '').trim();
-};
 
 const PROXY_SUPPORTED = new Set([
     chat_completion_sources.OPENAI, chat_completion_sources.CLAUDE,
     chat_completion_sources.MAKERSUITE, chat_completion_sources.COHERE,
     chat_completion_sources.DEEPSEEK,
 ]);
-
-const inferFromMainApi = () => {
-    const m = String(main_api || '').toLowerCase();
-
-    if (m === 'openai') {
-        const chatCompletionSource = oai_settings?.chat_completion_source;
-        if (chatCompletionSource === 'makersuite' || chatCompletionSource === 'vertexai') {
-            return 'gemini';
-        }
-        if (chatCompletionSource === 'claude') {
-            return 'claude';
-        }
-        if (chatCompletionSource === 'cohere') {
-            return 'cohere';
-        }
-        if (chatCompletionSource === 'deepseek') {
-            return 'deepseek';
-        }
-        return 'openai';
-    }
-
-    return ['deepseek', 'claude', 'gemini', 'cohere'].find(api =>
-        m.includes(api) || (api === 'gemini' && (m.includes('maker') || m.includes('google')))
-    ) || null;
-};
 
 class StreamingGeneration {
     constructor() {
@@ -68,8 +25,8 @@ class StreamingGeneration {
         this.isStreaming = false;
         this.sessions = new Map();
         this.lastSessionId = null;
-		this.activeCount = 0;
-		this._toggleBusy = false;
+        this.activeCount = 0;
+        this._toggleBusy = false;
     }
 
     init() {
@@ -135,23 +92,37 @@ class StreamingGeneration {
         } catch {}
     }
 
+    resolveCurrentApiAndModel(apiOptions = {}) {
+        if (apiOptions.api && apiOptions.model) return apiOptions;
+        const source = oai_settings?.chat_completion_source;
+        const model = getChatCompletionModel();
+        const map = {
+            [chat_completion_sources.OPENAI]: 'openai',
+            [chat_completion_sources.CLAUDE]: 'claude',
+            [chat_completion_sources.MAKERSUITE]: 'gemini',
+            [chat_completion_sources.COHERE]: 'cohere',
+            [chat_completion_sources.DEEPSEEK]: 'deepseek',
+        };
+        const api = map[source] || 'openai';
+        return { api, model };
+    }
+
     async callAPI(generateData, abortSignal, stream = true) {
         const messages = Array.isArray(generateData) ? generateData :
             (generateData?.prompt || generateData?.messages || generateData);
-        const apiOptions = (!Array.isArray(generateData) && generateData?.apiOptions) ?
-            generateData.apiOptions : {};
-
-        if (!apiOptions.api) {
-            const inferred = inferFromMainApi();
-            if (inferred) apiOptions.api = inferred;
-            else throw new Error('未指定 api，且无法从主 API 推断 provider。');
-        }
-
-        const source = SOURCE_MAP[String(apiOptions.api || '').toLowerCase()];
-        if (!source) throw new Error(`不支持的 api: ${apiOptions.api}`);
-
-        const model = String(apiOptions.model || '').trim() || getUiDefaultModel(source);
-        if (!model) throw new Error('未指定模型，且主界面当前提供商未选择模型。');
+        const baseOptions = (!Array.isArray(generateData) && generateData?.apiOptions) ? generateData.apiOptions : {};
+        const opts = { ...baseOptions, ...this.resolveCurrentApiAndModel(baseOptions) };
+        const source = {
+            openai: chat_completion_sources.OPENAI,
+            claude: chat_completion_sources.CLAUDE,
+            gemini: chat_completion_sources.MAKERSUITE,
+            google: chat_completion_sources.MAKERSUITE,
+            cohere: chat_completion_sources.COHERE,
+            deepseek: chat_completion_sources.DEEPSEEK,
+        }[String(opts.api || '').toLowerCase()];
+        if (!source) throw new Error(`不支持的 api: ${opts.api}`);
+        const model = String(opts.model || '').trim();
+        if (!model) throw new Error('未检测到当前模型，请在聊天面板选择模型或在插件设置中为分析显式指定模型。');
 
         const body = {
             messages, model, stream,
@@ -164,8 +135,8 @@ class StreamingGeneration {
             stop: Array.isArray(generateData?.stop) ? generateData.stop : undefined,
         };
 
-        const reverseProxy = String(apiOptions.apiurl || oai_settings?.reverse_proxy || '').trim();
-        const proxyPassword = String(apiOptions.apipassword || oai_settings?.proxy_password || '').trim();
+        const reverseProxy = String(opts.apiurl || oai_settings?.reverse_proxy || '').trim();
+        const proxyPassword = String(opts.apipassword || oai_settings?.proxy_password || '').trim();
 
         if (PROXY_SUPPORTED.has(source) && reverseProxy) {
             body.reverse_proxy = reverseProxy.replace(/\/?$/, '');
@@ -178,7 +149,10 @@ class StreamingGeneration {
                 headers: getRequestHeaders(), signal: abortSignal,
             });
 
-            if (!response.ok) throw new Error(`后端响应错误: ${response.status}`);
+            if (!response.ok) {
+                const txt = await response.text().catch(() => '');
+                throw new Error(txt || `后端响应错误: ${response.status}`);
+            }
 
             const eventStream = getEventSourceStream();
             response.body.pipeThrough(eventStream);
@@ -191,10 +165,8 @@ class StreamingGeneration {
                     while (true) {
                         const { done, value } = await reader.read();
                         if (done || !value?.data || value.data === '[DONE]') return;
-
                         let parsed;
                         try { parsed = JSON.parse(value.data); } catch { continue; }
-
                         const chunk = getStreamingReply(parsed, state, { chatCompletionSource: source });
                         if (typeof chunk === 'string' && chunk) {
                             text += chunk;
@@ -268,7 +240,6 @@ class StreamingGeneration {
         return (content) => {
             const n = this._normStrip(content);
             if (!n || chatSet.has(n)) return !n ? false : true;
-
             for (const c of chatNorms) {
                 const [a, b] = [n.length, c.length];
                 const [minL, maxL] = [Math.min(a, b), Math.max(a, b)];
@@ -285,76 +256,65 @@ class StreamingGeneration {
         if (t) arr.push({ role, content: t });
     };
 
-	async _waitForToggleFree() {
-		while (this._toggleBusy) {
-			await new Promise(r => setTimeout(r, 10));
-		}
-	}
+    async _waitForToggleFree() {
+        while (this._toggleBusy) {
+            await new Promise(r => setTimeout(r, 10));
+        }
+    }
 
-	async _withTemporaryPromptToggles(addonSet, fn) {
-		await this._waitForToggleFree();
-		this._toggleBusy = true;
-		let snapshot = [];
-		try {
-			const pm = promptManager;
-			const activeChar = pm?.activeCharacter ?? null;
-			const order = pm?.getPromptOrderForCharacter(activeChar) ?? [];
-
-			snapshot = order.map(e => ({ identifier: e.identifier, enabled: !!e.enabled }));
-			this._lastToggleSnapshot = snapshot.map(s => ({ ...s }));
-
-			order.forEach(e => { e.enabled = false; });
-
-			const enableIds = new Set();
-
-			const PRESET_EXCLUDES = new Set([
-				'chatHistory',
-				'worldInfoBefore', 'worldInfoAfter',
-				'charDescription', 'charPersonality', 'scenario', 'personaDescription',
-			]);
-
-			if (addonSet.has('preset')) {
-				for (const s of snapshot) {
-					const isExcluded = PRESET_EXCLUDES.has(s.identifier);
-					if (s.enabled && !isExcluded) enableIds.add(s.identifier);
-				}
-			}
-
-			if (addonSet.has('chatHistory')) enableIds.add('chatHistory');
-			if (addonSet.has('worldInfo')) { enableIds.add('worldInfoBefore'); enableIds.add('worldInfoAfter'); }
-			if (addonSet.has('charDescription')) enableIds.add('charDescription');
-			if (addonSet.has('charPersonality')) enableIds.add('charPersonality');
-			if (addonSet.has('scenario')) enableIds.add('scenario');
-			if (addonSet.has('personaDescription')) enableIds.add('personaDescription');
-
-			if (addonSet.has('worldInfo') && !addonSet.has('chatHistory')) enableIds.add('chatHistory');
-
-			order.forEach(e => { if (enableIds.has(e.identifier)) e.enabled = true; });
-
-			return await fn();
-		} finally {
-			try {
-				const pm = promptManager;
-				const activeChar = pm?.activeCharacter ?? null;
-				const order = pm?.getPromptOrderForCharacter(activeChar) ?? [];
-				const mapSnap = new Map((this._lastToggleSnapshot || snapshot).map(s => [s.identifier, s.enabled]));
-				order.forEach(e => { if (mapSnap.has(e.identifier)) e.enabled = mapSnap.get(e.identifier); });
-			} catch {}
-			this._toggleBusy = false;
-			this._lastToggleSnapshot = null;
-		}
-	}
+    async _withTemporaryPromptToggles(addonSet, fn) {
+        await this._waitForToggleFree();
+        this._toggleBusy = true;
+        let snapshot = [];
+        try {
+            const pm = promptManager;
+            const activeChar = pm?.activeCharacter ?? null;
+            const order = pm?.getPromptOrderForCharacter(activeChar) ?? [];
+            snapshot = order.map(e => ({ identifier: e.identifier, enabled: !!e.enabled }));
+            this._lastToggleSnapshot = snapshot.map(s => ({ ...s }));
+            order.forEach(e => { e.enabled = false; });
+            const enableIds = new Set();
+            const PRESET_EXCLUDES = new Set([
+                'chatHistory',
+                'worldInfoBefore', 'worldInfoAfter',
+                'charDescription', 'charPersonality', 'scenario', 'personaDescription',
+            ]);
+            if (addonSet.has('preset')) {
+                for (const s of snapshot) {
+                    const isExcluded = PRESET_EXCLUDES.has(s.identifier);
+                    if (s.enabled && !isExcluded) enableIds.add(s.identifier);
+                }
+            }
+            if (addonSet.has('chatHistory')) enableIds.add('chatHistory');
+            if (addonSet.has('worldInfo')) { enableIds.add('worldInfoBefore'); enableIds.add('worldInfoAfter'); }
+            if (addonSet.has('charDescription')) enableIds.add('charDescription');
+            if (addonSet.has('charPersonality')) enableIds.add('charPersonality');
+            if (addonSet.has('scenario')) enableIds.add('scenario');
+            if (addonSet.has('personaDescription')) enableIds.add('personaDescription');
+            if (addonSet.has('worldInfo') && !addonSet.has('chatHistory')) enableIds.add('chatHistory');
+            order.forEach(e => { if (enableIds.has(e.identifier)) e.enabled = true; });
+            return await fn();
+        } finally {
+            try {
+                const pm = promptManager;
+                const activeChar = pm?.activeCharacter ?? null;
+                const order = pm?.getPromptOrderForCharacter(activeChar) ?? [];
+                const mapSnap = new Map((this._lastToggleSnapshot || snapshot).map(s => [s.identifier, s.enabled]));
+                order.forEach(e => { if (mapSnap.has(e.identifier)) e.enabled = mapSnap.get(e.identifier); });
+            } catch {}
+            this._toggleBusy = false;
+            this._lastToggleSnapshot = null;
+        }
+    }
 
     async xbgenrawCommand(args, prompt) {
         if (!prompt?.trim()) return '';
-
         const role = ['user', 'system', 'assistant'].includes(args?.as) ? args.as : 'user';
         const sessionId = this._getSlotId(args?.id);
         const apiOptions = {
             api: args?.api, apiurl: args?.apiurl,
             apipassword: args?.apipassword, model: args?.model
         };
-
         let parsedStop;
         try {
             if (args?.stop) {
@@ -365,10 +325,8 @@ class StreamingGeneration {
                 }
             }
         } catch {}
-
         const nonstream = String(args?.nonstream || '').toLowerCase() === 'true';
         const addonSet = new Set(String(args?.addon || '').split(',').map(s => s.trim()).filter(Boolean));
-
         const createMsgs = (prefix) => {
             const msgs = [];
             ['sys', 'user', 'assistant'].forEach(role => {
@@ -377,132 +335,114 @@ class StreamingGeneration {
             });
             return msgs;
         };
-
         const [topMsgs, bottomMsgs] = [createMsgs('top'), createMsgs('bottom')];
-
         if (addonSet.size === 0) {
             const messages = [...topMsgs, { role, content: prompt.trim() }, ...bottomMsgs];
             const common = { messages, apiOptions, stop: parsedStop };
             this.processGeneration(common, prompt, sessionId, !nonstream).catch(() => {});
             return String(sessionId);
         }
-
         (async () => {
             try {
-				const context = getContext();
-				let capturedData = null;
-
+                const context = getContext();
+                let capturedData = null;
                 const dataListener = (data) => {
                     capturedData = (data && typeof data === 'object' && !Array.isArray(data) && Array.isArray(data.prompt))
                         ? { ...data, prompt: data.prompt.slice() }
                         : (Array.isArray(data) ? data.slice() : data);
                 };
-
                 eventSource.on(event_types.GENERATE_AFTER_DATA, dataListener);
-
-				const tempKeys = [];
-				const pushTemp = () => {};
-			const skipWIAN = addonSet.has('worldInfo') ? false : true;
-
-			await this._withTemporaryPromptToggles(addonSet, async () => {
-				const sandboxed = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
-				let chatBackup = null;
-				if (sandboxed) {
-					try {
-						chatBackup = chat.slice();
-						chat.length = 0;
-						chat.push({ name: name1 || 'User', is_user: true, is_system: false, mes: '[hist]', send_date: new Date().toISOString() });
-					} catch {}
-				}
-
-				try {
-					await context.generate('normal', {
-						quiet_prompt: prompt.trim(), quietToLoud: false,
-						skipWIAN, force_name2: true
-					}, true);
-				} finally {
-					if (sandboxed && Array.isArray(chatBackup)) {
-						chat.length = 0;
-						chat.push(...chatBackup);
-					}
-				}
-			});
-
-			eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
-			tempKeys.forEach(key => {
-                setExtensionPrompt(key, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-            });
-
-				let src = [];
-				if (capturedData && typeof capturedData === 'object' && Array.isArray(capturedData?.prompt)) {
-					src = capturedData.prompt.slice();
-				} else if (Array.isArray(capturedData)) {
-					src = capturedData.slice();
-				}
-
-				const sandboxedAfter = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
-				const isFromChat = this._createIsFromChat();
-				const finalPromptMessages = src.filter(m => {
-					if (!sandboxedAfter) return true;
-					if (!m) return false;
-					if (m.role === 'system') return true;
-					if ((m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) return false;
-					return true;
-				});
-				const norm = this._normStrip;
-				const position = ['history', 'after_history', 'afterhistory', 'chathistory']
-					.includes(String(args?.position || '').toLowerCase()) ? 'history' : 'bottom';
-				const targetIdx = finalPromptMessages.findIndex(m => m && typeof m.content === 'string' && norm(m.content) === norm(prompt));
-				if (targetIdx !== -1) {
-					const [msg] = finalPromptMessages.splice(targetIdx, 1);
-					if (position === 'history') {
-						let lastHistoryIndex = -1;
-						const isFromChat = this._createIsFromChat();
-						for (let i = 0; i < finalPromptMessages.length; i++) {
-							const m = finalPromptMessages[i];
-							if (m && (m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) {
-								lastHistoryIndex = i;
-							}
-						}
-						if (lastHistoryIndex >= 0) finalPromptMessages.splice(lastHistoryIndex + 1, 0, msg);
-						else {
-							let lastSystemIndex = -1;
-							for (let i = 0; i < finalPromptMessages.length; i++) {
-								if (finalPromptMessages[i]?.role === 'system') lastSystemIndex = i;
-							}
-							if (lastSystemIndex >= 0) finalPromptMessages.splice(lastSystemIndex + 1, 0, msg);
-							else finalPromptMessages.push(msg);
-						}
-					} else {
-						finalPromptMessages.push(msg);
-					}
-				}
-
-				const mergedOnce = ([]).concat(topMsgs).concat(finalPromptMessages).concat(bottomMsgs);
-				const seenKey = new Set();
-				const finalMessages = [];
-				for (const m of mergedOnce) {
-					if (!m || !m.content) continue;
-					const key = `${m.role}:${this._normStrip(m.content)}`;
-					if (seenKey.has(key)) continue;
-					seenKey.add(key);
-					finalMessages.push(m);
-				}
-
+                const tempKeys = [];
+                const pushTemp = () => {};
+                const skipWIAN = addonSet.has('worldInfo') ? false : true;
+                await this._withTemporaryPromptToggles(addonSet, async () => {
+                    const sandboxed = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
+                    let chatBackup = null;
+                    if (sandboxed) {
+                        try {
+                            chatBackup = chat.slice();
+                            chat.length = 0;
+                            chat.push({ name: name1 || 'User', is_user: true, is_system: false, mes: '[hist]', send_date: new Date().toISOString() });
+                        } catch {}
+                    }
+                    try {
+                        await context.generate('normal', {
+                            quiet_prompt: prompt.trim(), quietToLoud: false,
+                            skipWIAN, force_name2: true
+                        }, true);
+                    } finally {
+                        if (sandboxed && Array.isArray(chatBackup)) {
+                            chat.length = 0;
+                            chat.push(...chatBackup);
+                        }
+                    }
+                });
+                eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
+                tempKeys.forEach(key => {});
+                let src = [];
+                if (capturedData && typeof capturedData === 'object' && Array.isArray(capturedData?.prompt)) {
+                    src = capturedData.prompt.slice();
+                } else if (Array.isArray(capturedData)) {
+                    src = capturedData.slice();
+                }
+                const sandboxedAfter = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
+                const isFromChat = this._createIsFromChat();
+                const finalPromptMessages = src.filter(m => {
+                    if (!sandboxedAfter) return true;
+                    if (!m) return false;
+                    if (m.role === 'system') return true;
+                    if ((m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) return false;
+                    return true;
+                });
+                const norm = this._normStrip;
+                const position = ['history', 'after_history', 'afterhistory', 'chathistory']
+                    .includes(String(args?.position || '').toLowerCase()) ? 'history' : 'bottom';
+                const targetIdx = finalPromptMessages.findIndex(m => m && typeof m.content === 'string' && norm(m.content) === norm(prompt));
+                if (targetIdx !== -1) {
+                    const [msg] = finalPromptMessages.splice(targetIdx, 1);
+                    if (position === 'history') {
+                        let lastHistoryIndex = -1;
+                        const isFromChat = this._createIsFromChat();
+                        for (let i = 0; i < finalPromptMessages.length; i++) {
+                            const m = finalPromptMessages[i];
+                            if (m && (m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) {
+                                lastHistoryIndex = i;
+                            }
+                        }
+                        if (lastHistoryIndex >= 0) finalPromptMessages.splice(lastHistoryIndex + 1, 0, msg);
+                        else {
+                            let lastSystemIndex = -1;
+                            for (let i = 0; i < finalPromptMessages.length; i++) {
+                                if (finalPromptMessages[i]?.role === 'system') lastSystemIndex = i;
+                            }
+                            if (lastSystemIndex >= 0) finalPromptMessages.splice(lastSystemIndex + 1, 0, msg);
+                            else finalPromptMessages.push(msg);
+                        }
+                    } else {
+                        finalPromptMessages.push(msg);
+                    }
+                }
+                const mergedOnce = ([]).concat(topMsgs).concat(finalPromptMessages).concat(bottomMsgs);
+                const seenKey = new Set();
+                const finalMessages = [];
+                for (const m of mergedOnce) {
+                    if (!m || !m.content) continue;
+                    const key = `${m.role}:${this._normStrip(m.content)}`;
+                    if (seenKey.has(key)) continue;
+                    seenKey.add(key);
+                    finalMessages.push(m);
+                }
                 const common = { messages: finalMessages, apiOptions, stop: parsedStop };
                 await this.processGeneration(common, prompt, sessionId, !nonstream);
             } catch {}
         })();
-
         return String(sessionId);
     }
 
     async xbgenCommand(args, prompt) {
         if (!prompt?.trim()) return '';
-
         const role = ['user', 'system', 'assistant'].includes(args?.as) ? args.as : 'system';
         const sessionId = this._getSlotId(args?.id);
-
         (async () => {
             try {
                 const context = getContext();
@@ -513,10 +453,8 @@ class StreamingGeneration {
                     mes: prompt.trim(),
                     send_date: new Date().toISOString(),
                 };
-
                 const originalLength = chat.length;
                 chat.push(tempMessage);
-
                 let capturedData = null;
                 const dataListener = (data) => {
                     if (data?.prompt && Array.isArray(data.prompt)) {
@@ -536,9 +474,7 @@ class StreamingGeneration {
                         capturedData = data;
                     }
                 };
-
                 eventSource.on(event_types.GENERATE_AFTER_DATA, dataListener);
-
                 try {
                     await context.generate('normal', {
                         quiet_prompt: prompt.trim(), quietToLoud: false,
@@ -548,20 +484,17 @@ class StreamingGeneration {
                     eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
                     chat.length = originalLength;
                 }
-
                 const apiOptions = {
                     api: args?.api, apiurl: args?.apiurl,
                     apipassword: args?.apipassword, model: args?.model
                 };
-
                 const cd = capturedData;
-				let finalPromptMessages = [];
-				if (cd && typeof cd === 'object' && Array.isArray(cd.prompt)) {
-					finalPromptMessages = cd.prompt.slice();
-				} else if (Array.isArray(cd)) {
-					finalPromptMessages = cd.slice();
-				}
-
+                let finalPromptMessages = [];
+                if (cd && typeof cd === 'object' && Array.isArray(cd.prompt)) {
+                    finalPromptMessages = cd.prompt.slice();
+                } else if (Array.isArray(cd)) {
+                    finalPromptMessages = cd.slice();
+                }
                 const norm = this._normStrip;
                 const promptNorm = norm(prompt);
                 for (let i = finalPromptMessages.length - 1; i >= 0; i--) {
@@ -569,11 +502,9 @@ class StreamingGeneration {
                         finalPromptMessages.splice(i, 1);
                     }
                 }
-
                 const messageToInsert = { role, content: prompt.trim() };
                 const position = ['history', 'after_history', 'afterhistory', 'chathistory']
                     .includes(String(args?.position || '').toLowerCase()) ? 'history' : 'bottom';
-
                 if (position === 'history') {
                     const isFromChat = this._createIsFromChat();
                     let lastHistoryIndex = -1;
@@ -591,19 +522,16 @@ class StreamingGeneration {
                 } else {
                     finalPromptMessages.push(messageToInsert);
                 }
-
-				const cd2 = capturedData;
-				let dataWithOptions;
-				if (cd2 && typeof cd2 === 'object' && !Array.isArray(cd2)) {
-					dataWithOptions = Object.assign({}, cd2, { prompt: finalPromptMessages, apiOptions });
-				} else {
-					dataWithOptions = { messages: finalPromptMessages, apiOptions };
-				}
-
+                const cd2 = capturedData;
+                let dataWithOptions;
+                if (cd2 && typeof cd2 === 'object' && !Array.isArray(cd2)) {
+                    dataWithOptions = Object.assign({}, cd2, { prompt: finalPromptMessages, apiOptions });
+                } else {
+                    dataWithOptions = { messages: finalPromptMessages, apiOptions };
+                }
                 await this.processGeneration(dataWithOptions, prompt, sessionId);
             } catch {}
         })();
-
         return String(sessionId);
     }
 
@@ -616,7 +544,6 @@ class StreamingGeneration {
             { name: 'model', description: '模型名', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'position', description: '插入位置：bottom/history', typeList: [ARGUMENT_TYPE.STRING], enumList: ['bottom', 'history'] },
         ];
-
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'xbgen',
             callback: (args, prompt) => this.xbgenCommand(args, prompt),
@@ -630,7 +557,6 @@ class StreamingGeneration {
             helpString: '使用完整上下文进行流式生成',
             returns: 'session ID'
         }));
-
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'xbgenraw',
             callback: (args, prompt) => this.xbgenrawCommand(args, prompt),
@@ -688,9 +614,9 @@ const streamingGeneration = new StreamingGeneration();
 
 export function initStreamingGeneration() {
     const w = window;
-    if (/** @type {any} */(w)?.isXiaobaixEnabled === false) return;
+    if ((w)?.isXiaobaixEnabled === false) return;
     streamingGeneration.init();
-    (/** @type {any} */(w))?.registerModuleCleanup?.('streamingGeneration', () => streamingGeneration.cleanup());
+    (w)?.registerModuleCleanup?.('streamingGeneration', () => streamingGeneration.cleanup());
 }
 
 export { streamingGeneration };
@@ -698,6 +624,6 @@ export { streamingGeneration };
 if (typeof window !== 'undefined') {
     Object.assign(window, {
         xiaobaixStreamingGeneration: streamingGeneration,
-        eventSource: (/** @type {any} */(window)).eventSource || eventSource
+        eventSource: (window).eventSource || eventSource
     });
 }
