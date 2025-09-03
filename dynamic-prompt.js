@@ -2555,7 +2555,7 @@ function buildXbgenrawCmdStructured(sessionId, apiArgs, { topuser, body, bottomu
     if (stream === false) parts.push(`nonstream=true`);
     if (topuser) parts.push(`topuser="${stEscArg(topuser)}"`);
     if (bottomuser) parts.push(`bottomuser="${stEscArg(bottomuser)}"`);
-    parts.push(body);
+    parts.push(`"${stEscArg(body)}"`);
     return parts.join(' ');
 }
 
@@ -3234,7 +3234,7 @@ async function onSendFourthWallMessage() {
     const { prompt, bottom, topuser } = await buildFourthWallPrompt(userInput);
     try {
         const nonstreamArg = dynamicPromptState.fourthWall.stream ? '' : ' nonstream=true';
-        const cmd = `/xbgenraw id=xb1 as=assistant topuser="${stEscArg(topuser)}" bottomuser="${stEscArg(bottom)}"${nonstreamArg} ${prompt}`;
+        const cmd = `/xbgenraw id=xb1 as=assistant topuser="${stEscArg(topuser)}" bottomuser="${stEscArg(bottom)}"${nonstreamArg} "${stEscArg(prompt)}"`;
         const sessionId = await executeSlashCommand(cmd);
         dynamicPromptState.fourthWall.streamSessionId = String(sessionId || 'xb1');
         if (dynamicPromptState.fourthWall.stream) {
@@ -3299,7 +3299,7 @@ async function onRegenerateFourthWall() {
     const { prompt, bottom, topuser } = await buildFourthWallPrompt(lastUserText);
     try {
         const nonstreamArg = dynamicPromptState.fourthWall.stream ? '' : ' nonstream=true';
-        const cmd = `/xbgenraw id=xb1 as=assistant topuser="${stEscArg(topuser)}" bottomuser="${stEscArg(bottom)}"${nonstreamArg} ${prompt}`;
+        const cmd = `/xbgenraw id=xb1 as=assistant topuser="${stEscArg(topuser)}" bottomuser="${stEscArg(bottom)}"${nonstreamArg} "${stEscArg(prompt)}"`;
         const sessionId = await executeSlashCommand(cmd);
         dynamicPromptState.fourthWall.streamSessionId = String(sessionId || 'xb1');
         if (dynamicPromptState.fourthWall.stream) {
