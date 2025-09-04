@@ -19,18 +19,60 @@ const $q = (sel) => $(sel), ON = (e, c) => eventSource.on(e, c), OFF = (e, c) =>
 const now = () => Date.now(), geEnabled = () => { try { return ("isXiaobaixEnabled" in window) ? !!window.isXiaobaixEnabled : true; } catch { return true; } };
 const debounce = (fn, w) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), w); }; };
 const safeJson = (t) => { try { return JSON.parse(t); } catch { return null; } };
+
+/* 读取文本：仅在可安全读取的类型上使用 */
 const readText = async (b) => {
   try {
-    if (!b) return ""; if (typeof b === "string") return b; if (b instanceof Blob) return await b.text();
-    if (b instanceof URLSearchParams) return b.toString(); if (typeof b === "object" && typeof b.text === "function") return await b.text();
-  } catch {} return "";
+    if (!b) return "";
+    if (typeof b === "string") return b;
+    if (b instanceof Blob) return await b.text();
+    if (b instanceof URLSearchParams) return b.toString();
+    if (typeof b === "object" && typeof b.text === "function") return await b.text();
+  } catch {}
+  return "";
 };
+
+/* 判定 body 是否“可重复读取”，避免误消费一次性流导致 502 */
+function isSafeBody(body) {
+  if (!body) return true;
+  return (
+    typeof body === "string" ||
+    body instanceof Blob ||
+    body instanceof URLSearchParams ||
+    body instanceof ArrayBuffer ||
+    ArrayBuffer.isView(body) ||
+    // FormData 虽然可遍历，但 readText 不会读取；保守认为安全但我们不去读取它
+    (typeof FormData !== "undefined" && body instanceof FormData)
+  );
+}
+
+/* 在不消费一次性流的前提下尝试读取请求体 */
+async function safeReadBodyFromInput(input, options) {
+  try {
+    if (input instanceof Request) {
+      // Request.clone() 可安全读取
+      return await readText(input.clone());
+    }
+    const body = options?.body;
+    if (!isSafeBody(body)) return "";
+    // 对安全类型才读取
+    return await readText(body);
+  } catch {
+    return "";
+  }
+}
+
 const isGen = (u) => String(u || "").includes(C.TARGET);
 const isTarget = async (input, opt = {}) => {
   try {
-    if (input instanceof Request) { if (!isGen(input.url)) return false; return (await readText(input.clone())).includes('"messages"'); }
-    if (!isGen(input)) return false; return (await readText(opt?.body)).includes('"messages"');
-  } catch { return input instanceof Request ? isGen(input.url) : isGen(input); }
+    const url = input instanceof Request ? input.url : input;
+    if (!isGen(url)) return false;
+    const text = await safeReadBodyFromInput(input, opt);
+    // 无法读取时，保守返回 true（仅基于 URL），但不会记录（recordReal 内部也会跳过）
+    return text ? text.includes('"messages"') : true;
+  } catch {
+    return input instanceof Request ? isGen(input.url) : isGen(input);
+  }
 };
 const getSettings = () => {
   const d = extension_settings[EXT_ID] || (extension_settings[EXT_ID] = {});
@@ -191,6 +233,15 @@ const getFetchFromDesc = (d) => {
 };
 const compose = (base, stack) => stack.reduce((acc, mw) => mw(acc), base);
 
+/* 给记录加上超时保护，防止阻塞真实请求 */
+const withTimeout = (p, ms = 200) => {
+  try {
+    return Promise.race([p, new Promise((r) => setTimeout(r, ms))]);
+  } catch {
+    return p;
+  }
+};
+
 const ensureAccessor = () => {
   try {
     const d = Object.getOwnPropertyDescriptor(window, "fetch");
@@ -212,8 +263,8 @@ const reapply = () => {
     if (idx === -1) { stack.push(makeMw()); idx = stack.length - 1; }
     if (idx !== stack.length - 1) {
       const mw = stack[idx];
-      stack.splice(idx, 1);
-      stack.push(mw);
+      window[MW_KEY].splice(idx, 1);
+      window[MW_KEY].push(mw);
     }
     const composed = compose(base, stack) || base;
     if (!window[CMP_KEY] || window[CMP_KEY]._base !== base || window[CMP_KEY]._stack !== stack) {
@@ -229,8 +280,12 @@ function makeMw() {
       if (await isTarget(input, options)) {
         if (S.isPreview || S.isLong) {
           const url = input instanceof Request ? input.url : input;
-          return interceptPreview(url, options).catch(() => new Response(JSON.stringify({ error: { message: "拦截失败，请手动中止消息生成。" } }), { status: 500, headers: { "Content-Type": "application/json" } }));
-        } else { try { await recordReal(input, options); } catch {} }
+          return interceptPreview(url, options).catch(() =>
+            new Response(JSON.stringify({ error: { message: "拦截失败，请手动中止消息生成。" } }), { status: 200, headers: { "Content-Type": "application/json" } })
+          );
+        } else {
+          try { await withTimeout(recordReal(input, options)); } catch {}
+        }
       }
     } catch {}
     return Reflect.apply(next, this, arguments);
@@ -293,10 +348,12 @@ const extractUser = (ms) => { if (!Array.isArray(ms)) return ""; for (let i = ms
 async function recordReal(input, options) {
   try {
     const url = input instanceof Request ? input.url : input;
-    const body = input instanceof Request ? await readText(input.clone()) : await readText(options?.body);
+    // 安全读取，读不到则跳过记录，避免消费一次性流
+    const body = await safeReadBodyFromInput(input, options);
+    if (!body) return;
     const data = safeJson(body) || {}, ctx = getContext();
     pushHistory({
-      url, method: options?.method || "POST", requestData: data, messages: data.messages || [],
+      url, method: options?.method || (input instanceof Request ? input.method : "POST"), requestData: data, messages: data.messages || [],
       model: data.model || "Unknown", timestamp: now(), messageId: ctx.chat?.length || 0,
       characterName: ctx.characters?.[ctx.characterId]?.name || "Unknown", userInput: extractUser(data.messages || []), isRealRequest: true
     });
@@ -313,7 +370,8 @@ const findRec = (id) => {
 
 /* preview intercept */
 async function interceptPreview(url, options) {
-  const body = typeof options?.body === "string" ? options.body : await readText(options?.body);
+  // 注意：不再强制读取一次性 body；仅在安全类型下构建预览数据
+  const body = await safeReadBodyFromInput(url, options);
   const data = safeJson(body) || {}, userInput = extractUser(data?.messages || []);
   S.previewData = { url, method: options?.method || "POST", requestData: data, messages: data?.messages || [], model: data?.model || "Unknown", timestamp: now(), userInput, isPreview: true };
   if (S.isLong) {
@@ -322,6 +380,7 @@ async function interceptPreview(url, options) {
       if (S.restoreLong) { try { S.restoreLong(); } catch {} const ctx = getContext(); S.chatLenBefore = ctx.chat?.length || 0; S.restoreLong = hijackPush(); }
     }, 100);
   } else if (S.resolve) { S.resolve({ success: true, data: S.previewData }); S.resolve = S.reject = null; }
+  // 本地拦截响应，统一返回 200，避免上层误判为网络错误
   return new Response(JSON.stringify({ choices: [{ message: { content: "" }, finish_reason: "stop" }] }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
