@@ -1029,7 +1029,6 @@ function setupEventListeners() {
             const ctx = getContext();
             const lastId = ctx.chat?.length - 1;
             if (lastId != null && lastId >= 0) {
-                invalidateMessage(lastId);
                 setTimeout(() => processMessageById(lastId, true), 60);
             }
             stopStreamingScan();
