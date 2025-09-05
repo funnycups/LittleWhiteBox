@@ -13,7 +13,7 @@ const SECURITY_CONFIG={
   PASSWORD_SALT:"kXUAjsi8wMa1AM8NJ9uA",
   TRUSTED_DOMAINS:["rentry.org","discord.com","discordapp.net","discordapp.com"]
 };
-const moduleState={ isInitialized:false, eventHandlers:{} };
+const moduleState={ isInitialized:false, eventHandlers:{}, timers:{}, observers:{} };
 const defaultSettings={ enabled:true, showNotifications:true };
 
 const Settings={
@@ -344,7 +344,7 @@ async function _presetDetailDoSync(name){
 }
 function schedulePresetDetailSync(name){
   try{
-    if(!name) return;
+    if(!name || !Settings.get().enabled) return;
     if(_presetDetailSyncTimer) clearTimeout(_presetDetailSyncTimer);
     _presetDetailSyncTimer=setTimeout(()=>{
       try{
@@ -431,6 +431,7 @@ Popup.showPresetOverview=async function(){
 
 const CharacterUI={
   addButton(){
+    if(!Settings.get().enabled) return;
     if($("#character-updater-edit-button").length) return;
     $(".form_create_bottom_buttons_block").prepend(`<div id="character-updater-edit-button" class="menu_button fa-solid fa-cloud-arrow-down interactable" title="查看角色卡云端公告与更新情况"></div>`);
     $("#character-updater-edit-button").on("click",async ()=>{
@@ -453,6 +454,7 @@ const CharacterUI={
   },
   updateButton(has){ $("#character-updater-edit-button").toggleClass("has-update",!!has); },
   async checkCurrent(){
+    if(!Settings.get().enabled) return this.updateButton(false);
     const id=CharacterAdapter.getCurrentId();
     if(id==null||!CharacterAdapter.isBound(id)) return this.updateButton(false);
     const local=CharacterAdapter.getLocalData(id);
@@ -469,10 +471,11 @@ const CharacterUI={
 const PresetUI={
   ensureGreenCSS(){ if(document.getElementById("preset-updater-green-style")) return; const style=document.createElement("style"); style.id="preset-updater-green-style"; style.textContent=`#preset-updater-edit-button.has-update{ color:#28a745 !important; }`; document.head.appendChild(style); },
   addButton(){
+    if(!Settings.get().enabled) return;
     if(document.getElementById("preset-updater-edit-button")) return;
-    const $sel=$("#settings_preset_openai"); if(!$sel.length){ setTimeout(()=>PresetUI.addButton(),600); return; }
+    const $sel=$("#settings_preset_openai"); if(!$sel.length) return;
     const $row=$sel.closest(".flex-container.flexNoGap"); let $c=$row.find(".flex-container.marginLeft5.gap3px").first();
-    if(!$c.length){ $c=$(".flex-container.marginLeft5.gap3px").first(); if(!$c.length){ setTimeout(()=>PresetUI.addButton(),600); return; } }
+    if(!$c.length){ $c=$(".flex-container.marginLeft5.gap3px").first(); if(!$c.length) return; }
     const btn=$(`<div id="preset-updater-edit-button" class="menu_button fa-solid fa-cloud-arrow-down interactable" title="查看预设云端公告与更新情况"></div>`);
     btn.on("click",async ()=>{
       const name=PresetAdapter.getCurrentId();
@@ -484,6 +487,7 @@ const PresetUI={
   },
   setButton(has){ $("#preset-updater-edit-button").toggleClass("has-update",!!has); },
   async checkCurrent(){
+    if(!Settings.get().enabled) return this.setButton(false);
     const name=PresetAdapter.getCurrentId();
     if(!name||!PresetAdapter.isBound(name)) return this.setButton(false);
     const cloud=Cache.getCloud(PresetAdapter.toCacheKey(name));
@@ -708,7 +712,7 @@ const PRB=(()=>{
 
   let _prbSyncTimer=null;
   async function _prbDoSync(name){ try{ const payload=toPayload(read(name)); write(name, fromPayload(payload)); }catch(e){ console.error("[PRB] auto-sync regexBindings failed",e); } }
-  function scheduleSync(name){ try{ if(!name) return; if(_prbSyncTimer) clearTimeout(_prbSyncTimer); _prbSyncTimer=setTimeout(()=>{ _prbDoSync(name); },800);}catch{} }
+  function scheduleSync(name){ try{ if(!name || !Settings.get().enabled) return; if(_prbSyncTimer) clearTimeout(_prbSyncTimer); _prbSyncTimer=setTimeout(()=>{ _prbDoSync(name); },800);}catch{} }
 
   function refreshUI(){
     const name=curName(); const bind=read(name);
@@ -948,11 +952,23 @@ async function addMenusAndBind(){
 }
 
 function cleanup(){
-  Object.entries(moduleState.eventHandlers).forEach(([evt,fn])=>{ try{ eventSource.off?.(evt,fn); }catch{} });
+  try{ Object.entries(moduleState.eventHandlers).forEach(([evt,fn])=>{ try{ eventSource.off?.(evt,fn); }catch{} }); }catch{}
   moduleState.eventHandlers={};
-  $(".character-menu-overlay, #character-updater-edit-button, .character-update-notification").remove();
-  try{ $("#preset-updater-edit-button").remove(); }catch{}
-  Cache.clear();
+  try{ $(document.body).off(".cu").off(".cuClose").off(".cuOverlay").off(".cuContent").off(".preset").off(".presetClose").off(".prb"); }catch{}
+  try{ $(document).off(".lwbPreset"); }catch{}
+  try{ if(moduleState.observers?.presetButton){ try{ moduleState.observers.presetButton.disconnect(); }catch{} moduleState.observers.presetButton=null; } }catch{}
+  try{ if(moduleState.timers?.presetAddButtonTimer){ clearTimeout(moduleState.timers.presetAddButtonTimer); moduleState.timers.presetAddButtonTimer=null; } }catch{}
+  try{ if(typeof Cooldown?.stop==="function") Cooldown.stop(); }catch{}
+  try{ if(_presetDetailSyncTimer){ clearTimeout(_presetDetailSyncTimer); _presetDetailSyncTimer=null; } }catch{}
+
+  try{
+    const guard=(typeof window!=="undefined" && window.__LWB_PresetHookGuard) || null;
+    if(guard){ try{ if(guard.rebindTimer) clearTimeout(guard.rebindTimer); }catch{}; try{ if(guard.handler) eventSource.off?.(event_types.SETTINGS_UPDATED, guard.handler); }catch{}; try{ delete window.__LWB_PresetHookGuard; }catch{} }
+  }catch{}
+  try{ $(".character-menu-overlay, #character-updater-edit-button, .character-update-notification, .xiaobaix-confirm-modal").remove(); }catch{}
+  try{ $("#preset-updater-edit-button, #preset-updater-green-style").remove(); }catch{}
+  try{ cleanPresetDropdown(); }catch{}
+  try{ Cache.clear(); }catch{}
   moduleState.isInitialized=false;
 }
 
