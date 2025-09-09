@@ -7,9 +7,7 @@ const CONFIG = {
   extensionName: "variables-panel",
   extensionFolderPath: "scripts/extensions/third-party/LittleWhiteBox",
   defaultSettings: { enabled: false },
-  defaultFolderName: 'LittleWhiteBox',
-  autoClassifyVars: ['prompt1','prompt2','prompt3','prompt4','xiaobaix_stats'],
-  watchInterval: 1500, touchTimeout: 4000, longPressDelay: 700, folderLongPressDelay: 1000
+  watchInterval: 1500, touchTimeout: 4000, longPressDelay: 700,
 };
 
 const EMBEDDED_CSS = `
@@ -19,7 +17,7 @@ const EMBEDDED_CSS = `
 @media (max-width: 999px){.vm-container:not([style*="display: none"]){max-height:calc(100svh - var(--topBarBlockSize));top:var(--topBarBlockSize);width:100%;height:100vh;left:0}}
 .vm-header,.vm-section,.vm-item-content{border-bottom:.5px solid var(--SmartThemeBorderColor)}
 .vm-header,.vm-section-header{display:flex;justify-content:space-between;align-items:center}
-.vm-title,.vm-item-name,.vm-folder .vm-item-name{font-weight:bold}
+.vm-title,.vm-item-name{font-weight:bold}
 .vm-header{padding:15px}.vm-title{font-size:16px}
 .vm-section-header{padding:5px 15px;border-bottom:5px solid var(--SmartThemeBorderColor);font-size:14px;color:var(--SmartThemeEmColor)}
 .vm-close,.vm-btn{background:none;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
@@ -35,10 +33,7 @@ const EMBEDDED_CSS = `
 .vm-item-name{font-size:13px}
 .vm-item-controls{background:var(--SmartThemeChatTintColor);display:flex;gap:5px;position:absolute;right:5px;opacity:0;visibility:hidden}
 .vm-item-content{border-top:1px solid var(--SmartThemeBorderColor);display:none}
-.vm-item.expanded>.vm-item-content,.vm-folder.expanded>.vm-item-content,.vm-folder[data-expanded="true"]>.vm-item-content{display:block}
-.vm-folder{border-left:3px solid #ffa500}
-.vm-folder>.vm-item-header .vm-item-controls{opacity:1!important;visibility:visible!important}
-.vm-folder-content{padding-left:5px}
+.vm-item.expanded>.vm-item-content{display:block}
 .vm-inline-form{background:var(--SmartThemeChatTintColor);border:1px solid var(--SmartThemeBorderColor);border-top:none;padding:10px;margin:0;display:none}
 .vm-inline-form.active{display:block;animation:slideDown .2s ease-out}
 @keyframes slideDown{from{opacity:0;max-height:0;padding-top:0;padding-bottom:0}to{opacity:1;max-height:200px;padding-top:10px;padding-bottom:10px}}
@@ -68,15 +63,7 @@ const EMBEDDED_CSS = `
 .vm-list::-webkit-scrollbar{width:6px}
 .vm-list::-webkit-scrollbar-track{background:var(--SmartThemeBodyColor)}
 .vm-list::-webkit-scrollbar-thumb{background:var(--SmartThemeBorderColor);border-radius:3px}
-.vm-move-variables-container{text-align:left}
-.vm-move-variables-container p{margin-bottom:15px;font-size:14px}
-.vm-variables-list{max-height:300px;overflow-y:auto;border:1px solid var(--SmartThemeBorderColor);border-radius:5px;padding:10px;background:var(--SmartThemeChatTintColor);display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:flex-start;gap:0;margin-top:10px}
-.vm-variable-checkbox{display:inline-flex!important;align-items:center!important;margin:4px 5px!important;padding:5px 8px;border-radius:3px;cursor:pointer;transition:background-color .2s;vertical-align:top;box-sizing:border-box}
-.vm-variable-checkbox input[type="checkbox"]{margin-right:8px!important;flex-shrink:0}
-.vm-variable-checkbox span{font-size:13px}
 .vm-empty-message{padding:20px;text-align:center;color:#888}
-.vm-folder-icon{margin:5px}
-.vm-folder-count,.vm-object-count,.vm-formatted-value{opacity:.7}
 .vm-item-name-visible{opacity:1}
 .vm-item-separator{opacity:.3}
 .vm-null-value{opacity:.6}
@@ -98,7 +85,7 @@ const EMBEDDED_HTML = `
           <div class="vm-section-controls">
             <button class="vm-btn" data-type="${t}" data-act="import" title="导入变量"><i class="fa-solid fa-upload"></i></button>
             <button class="vm-btn" data-type="${t}" data-act="export" title="导出变量"><i class="fa-solid fa-download"></i></button>
-            <button class="vm-btn" data-type="${t}" data-act="add" title="添加变量，长按为添加文件夹"><i class="fa-solid fa-plus"></i></button>
+            <button class="vm-btn" data-type="${t}" data-act="add" title="添加变量"><i class="fa-solid fa-plus"></i></button>
             <button class="vm-btn" data-type="${t}" data-act="collapse" title="展开/折叠所有"><i class="fa-solid fa-chevron-down"></i></button>
             <button class="vm-btn vm-clear-all-btn" data-type="${t}" data-act="clear-all" title="清除所有变量"><i class="fa-solid fa-trash"></i></button>
           </div>
@@ -122,13 +109,11 @@ const VARIABLE_TYPES = {
   character: {
     getter: getLocalVariable, setter: setLocalVariable,
     storage: () => chat_metadata?.variables || (chat_metadata.variables = {}),
-    folderStorage: () => chat_metadata?.variableFolders || (chat_metadata.variableFolders = {}),
     save: saveMetadataDebounced,
   },
   global: {
     getter: getGlobalVariable, setter: setGlobalVariable,
     storage: () => extension_settings.variables?.global || ((extension_settings.variables = { global: {} }).global),
-    folderStorage: () => extension_settings.variables?.globalFolders || (extension_settings.variables.globalFolders = {}),
     save: saveSettingsDebounced,
   }
 };
@@ -156,9 +141,8 @@ class VariablesPanel {
   getSettings(){ extension_settings.LittleWhiteBox ??= {}; return extension_settings.LittleWhiteBox.variablesPanel ??= { ...CONFIG.defaultSettings }; }
   vt(t){ return VARIABLE_TYPES[t]; }
   store(t){ return this.vt(t).storage(); }
-  fstore(t){ return this.vt(t).folderStorage(); }
 
-  enable(){ this.createContainer(); this.bindEvents(); this.autoClassifyAllVariables(); this.loadVariables(); this.addMessageButtons(); }
+  enable(){ this.createContainer(); this.bindEvents(); this.loadVariables(); this.addMessageButtons(); }
   disable(){ this.cleanup(); }
 
   cleanup(){
@@ -199,7 +183,6 @@ class VariablesPanel {
     this.unbindEvents();
     const ns = '.vm';
     $(document).on(`click${ns}`, '.vm-section [data-act]', (e)=>this.onHeaderAction(e));
-    this.bindLongPress('.vm-section [data-act="add"]', (e)=>this.showAddForm($(e.currentTarget).data('type')), (e)=>this.createFolderDialog($(e.currentTarget).data('type')), CONFIG.folderLongPressDelay);
     ['character','global'].forEach(t=> $(`#${t}-vm-search`).on('input', e=>this.searchVariables(t,e.target.value)));
     $(document)
       .on(`touchstart${ns}`, '.vm-item>.vm-item-header', (e)=>this.handleTouch(e))
@@ -223,9 +206,6 @@ class VariablesPanel {
       edit: ()=>this.editAction(item,'edit',t,path),
       'add-child': ()=>this.editAction(item,'addChild',t,path),
       delete: ()=>this.handleDelete(item,t,path),
-      'edit-folder': ()=>this.handleEditFolder(item),
-      'delete-folder': ()=>this.handleDeleteFolder(item),
-      'move-to-folder': ()=>this.handleMoveToFolder(item),
       copy: ()=>{}
     }[act]||(()=>{}))();
   }
@@ -243,55 +223,73 @@ class VariablesPanel {
     $(document).on('mouseup.vm touchend.vm mouseleave.vm', release);
   }
 
-  bindLongPress(sel, shortHandler, longHandler, dur){
-    const el=$(sel); let timer=null;
-    el.on('mousedown touchstart',(e)=>{ e.preventDefault(); timer=setTimeout(()=>{ timer=null; longHandler(e); }, dur); })
-      .on('mouseup touchend mouseleave',(e)=>{ if(timer){ clearTimeout(timer); timer=null; if(e.type!=='mouseleave') shortHandler(e); } });
+  stringifyVar(v){ return typeof v === 'string' ? v : JSON.stringify(v); }
+  makeSnapshotMap(t){
+    const s = this.store(t), m = {};
+    for (const [k,v] of Object.entries(s)) m[k] = this.stringifyVar(v);
+    return m;
   }
 
   startWatcher(){ this.stopWatcher(); this.updateSnapshot(); this.state.timers.watcher=setInterval(()=> this.state.isOpen && this.checkChanges(), CONFIG.watchInterval); }
   stopWatcher(){ if(this.state.timers.watcher){ clearInterval(this.state.timers.watcher); this.state.timers.watcher=null; } }
-  updateSnapshot(){ this.variableSnapshot={ character:JSON.stringify(this.store('character')), global:JSON.stringify(this.store('global')), characterFolders:JSON.stringify(this.fstore('character')), globalFolders:JSON.stringify(this.fstore('global')) }; }
+
+  updateSnapshot(){
+    this.variableSnapshot = {
+      character: this.makeSnapshotMap('character'),
+      global: this.makeSnapshotMap('global'),
+    };
+  }
+
+  expandChangedKeys(changed){
+    ['character','global'].forEach(t=>{
+      const set = changed[t];
+      if(!set || set.size===0) return;
+      setTimeout(()=>{
+        const list = $(`#${t}-variables-list .vm-item[data-key]`);
+        set.forEach(k=>{
+          list.filter((_,el)=> $(el).data('key')===k).addClass('expanded');
+        });
+      },10);
+    });
+  }
+
   checkChanges(){
     try{
-      const cur={ character:JSON.stringify(this.store('character')), global:JSON.stringify(this.store('global')), characterFolders:JSON.stringify(this.fstore('character')), globalFolders:JSON.stringify(this.fstore('global')) };
-      if(Object.keys(cur).some(k=>cur[k]!==this.variableSnapshot[k])){ const states=this.saveAllExpandedStates(); this.variableSnapshot=cur; this.loadVariables(); this.restoreAllExpandedStates(states); }
+      const cur = {
+        character: this.makeSnapshotMap('character'),
+        global: this.makeSnapshotMap('global'),
+      };
+
+      const changed = { character:new Set(), global:new Set() };
+      ['character','global'].forEach(t=>{
+        const prev = this.variableSnapshot?.[t] || {};
+        const now = cur[t];
+        const keys = new Set([...Object.keys(prev), ...Object.keys(now)]);
+        keys.forEach(k=>{
+          if(!(k in prev) || !(k in now) || prev[k] !== now[k]) changed[t].add(k);
+        });
+      });
+
+      const varsChanged = changed.character.size || changed.global.size;
+
+      if (varsChanged){
+        const states=this.saveAllExpandedStates();
+        this.variableSnapshot=cur;
+        this.loadVariables();
+        this.restoreAllExpandedStates(states);
+        this.expandChangedKeys(changed);
+      }
     }catch(e){ console.warn('[Variables Panel] watch error:', e); }
   }
 
-  folder = {
-    get: (t)=>this.fstore(t),
-    create: (t,n)=>{ const f=this.fstore(t); const id=`folder_${Date.now()}_${Math.random().toString(36).slice(2,9)}`; f[id]={ name:n, variables:[], created:Date.now(), expanded:false }; this.vt(t).save(); return id; },
-    delete: (t,id)=>{ const f=this.fstore(t); const moved=f[id]?.variables||[]; delete f[id]; this.vt(t).save(); return moved; },
-    rename: (t,id,n)=>{ const f=this.fstore(t); if(!f[id]) return false; f[id].name=n; this.vt(t).save(); return true; },
-    moveVariable: (t,v,id)=>{ const f=this.fstore(t); if(!f[id]) return false; Object.values(f).forEach(fo=>{ const i=fo.variables?.indexOf(v); if(i>-1) fo.variables.splice(i,1); }); f[id].variables??=[]; if(!f[id].variables.includes(v)) f[id].variables.push(v); this.vt(t).save(); return true; },
-    removeVariable: (t,v)=>{ const f=this.fstore(t); Object.values(f).forEach(fo=>{ const i=fo.variables?.indexOf(v); if(i>-1) fo.variables.splice(i,1); }); this.vt(t).save(); },
-    getVariableFolder: (t,v)=>{ const f=this.fstore(t); return Object.entries(f).find(([,fo])=>fo.variables?.includes(v))?.[0]; },
-    toggle: (t,id)=>{ const f=this.fstore(t); if(!f[id]) return false; f[id].expanded=!f[id].expanded; this.vt(t).save(); return f[id].expanded; }
-  };
-
-  loadVariables(){ ['character','global'].forEach(t=>{ this.autoClassifyVariables(t); this.renderVariables(t); $(`#${t}-variables-section [data-act="collapse"] i`).removeClass('fa-chevron-up').addClass('fa-chevron-down'); }); }
+  loadVariables(){ ['character','global'].forEach(t=>{ this.renderVariables(t); $(`#${t}-variables-section [data-act="collapse"] i`).removeClass('fa-chevron-up').addClass('fa-chevron-down'); }); }
   renderVariables(t){
-    const c=$(`#${t}-variables-list`).empty(), s=this.store(t), f=this.fstore(t), inF=new Set();
-    Object.values(f).forEach(fo=> fo.variables?.forEach(vn=>inF.add(vn)));
-    Object.entries(f).forEach(([id,fo])=> c.append(this.createFolderItem(t,id,fo)));
-    const root=Object.entries(s).filter(([k])=>!inF.has(k));
-    if(!Object.keys(f).length && !root.length) c.append('<div class="vm-empty-message">暂无变量</div>');
+    const c=$(`#${t}-variables-list`).empty(), s=this.store(t);
+    const root=Object.entries(s);
+    if(!root.length) c.append('<div class="vm-empty-message">暂无变量</div>');
     else root.forEach(([k,v])=> c.append(this.createVariableItem(t,k,v)));
   }
-  createFolderItem(t,id,fo){
-    const { variables=[], expanded=false, name }=fo, s=this.store(t);
-    return $(`<div class="vm-item vm-folder ${expanded?'expanded':''}" data-folder-id="${id}" data-type="${t}">
-      <div class="vm-item-header">
-        <div class="vm-item-name vm-item-name-visible"><i class="fa-solid ${expanded?'fa-folder-open':'fa-folder'} vm-folder-icon"></i>${this.escape(name||'未命名文件夹')}</div>
-        <div class="vm-tree-value"><span class="vm-folder-count">[${variables.length} 个变量]</span></div>
-        <div class="vm-item-controls">${this.createButtons('folder')}</div>
-      </div>
-      <div class="vm-item-content"><div class="vm-folder-content">${
-        variables.map(vn=> s[vn]!==undefined ? this.createVariableItem(t,vn,s[vn],0)[0].outerHTML : '').filter(Boolean).join('')
-      }</div></div>
-    </div>`);
-  }
+
   createVariableItem(t,k,v,l=0){
     const disp=l===0?this.formatTopLevelValue(v):this.formatValue(v), parsed=this.parseValue(v), hasChildren=typeof parsed==='object'&&parsed!==null;
     return $(`<div class="vm-item ${l>0?'vm-tree-level-var':''}" data-key="${k}" data-type="${t||''}" ${l>0?`data-level="${l}"`:''}>
@@ -303,17 +301,12 @@ class VariablesPanel {
       ${hasChildren?`<div class="vm-item-content">${this.renderChildren(parsed,l+1)}</div>`:''}
     </div>`);
   }
-  createButtons(type,level=0){
+  createButtons(type){
     const cfg={
-      folder:[
-        {act:'move-to-folder',icon:'fa-arrow-right',title:'移动变量到此文件夹'},
-        {act:'edit-folder',icon:'fa-edit',title:'编辑文件夹名称'},
-        {act:'delete-folder',icon:'fa-trash',title:'删除文件夹'},
-      ],
       item:[
         {act:'edit',icon:'fa-edit',title:'编辑'},
         {act:'add-child',icon:'fa-plus-circle',title:'添加子变量'},
-        ...(level<2?[{act:'copy',icon:'fa-code',title:level===0?'复制 (单击: {{getvar::}}格式, 长按: /getvar格式)':'复制 (长按: /getvar格式)'}]:[]),
+        {act:'copy',icon:'fa-code',title:'复制（单击: 宏，长按: 斜杠命令）'},
         {act:'delete',icon:'fa-trash',title:'删除'},
       ]
     };
@@ -348,70 +341,80 @@ class VariablesPanel {
     if($(e.target).closest('.vm-item-controls').length) return;
     e.stopPropagation();
     const it=$(e.currentTarget).closest('.vm-item');
-    if(it.hasClass('vm-folder')){
-      const fid=it.data('folder-id'), t=it.data('type'), exp=this.folder.toggle(t,fid);
-      it.find('.vm-item-name i').removeClass('fa-folder fa-folder-open').addClass(exp?'fa-folder-open':'fa-folder'); this.loadVariables();
-    } else it.toggleClass('expanded');
+    it.toggleClass('expanded');
+  }
+
+  async writeClipboard(txt){
+    try{
+      if(navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(txt);
+      else { const ta=document.createElement('textarea'); Object.assign(ta.style,{position:'fixed',top:0,left:0,width:'2em',height:'2em',padding:0,border:'none',outline:'none',boxShadow:'none',background:'transparent'}); ta.value=txt; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
+      return true;
+    }catch{ return false; }
   }
 
   handleCopy(e,longPress){
     const item=$(e.target).closest('.vm-item'), path=this.getItemPath(item), t=this.getVariableType(item), level=parseInt(item.attr('data-level'))||0;
-    let cmd;
+    let cmd='';
     if (longPress) {
-      const c=t==='character'?'getvar':'getglobalvar';
-      if (level===0) cmd=`/${c} ${path[0]}`;
-      else if (level===1) cmd=`/${c} index=${path.slice(1).join('.')} ${path[0]}`;
-      else return toastr.warning('长按复制仅适用于顶级和二级变量');
+      if (t==='character') {
+        if (level===0) cmd=`/getvar ${path[0]}`;
+        else if (level===1) cmd=`/getvar index=${path.slice(1).join('.')} ${path[0]}`;
+        else cmd=`/xbgetvar ${path.join('.')}`;
+      } else {
+        const c='getglobalvar';
+        if (level===0) cmd=`/${c} ${path[0]}`;
+        else if (level===1) cmd=`/${c} index=${path.slice(1).join('.')} ${path[0]}`;
+        else { toastr.warning('全局变量三级及以上子路径暂不支持斜杠复制'); return; }
+      }
     } else {
-      if (level===0) cmd=`{{getvar::${path[0]}}}`;
-      else return toastr.warning('单击复制仅适用于顶级变量');
+      if (t==='character') {
+        if (level===0) cmd=`{{getvar::${path[0]}}}`;
+        else cmd=`{{xbgetvar::${path.join('.')}}}`;
+      } else {
+        if (level===0) cmd=`{{getglobalvar::${path[0]}}}`;
+        else { cmd=`{{getglobalvar::${path[0]}}}`; toastr.info('全局变量宏暂不支持子路径，已复制顶级变量'); }
+      }
     }
-    (async(txt)=>{
-      try{
-        if(navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(txt);
-        else { const ta=document.createElement('textarea'); ta.value=txt; ta.style.cssText="position:fixed;top:0;left:0;width:2em;height:2em;padding:0;border:none;outline:none;box-shadow:none;background:transparent"; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
-        toastr.success(`已复制命令: ${cmd}`);
-      }catch{ toastr.error('复制失败'); }
-    })(cmd);
+    (async()=> (await this.writeClipboard(cmd)) ? toastr.success(`已复制命令: ${cmd}`) : toastr.error('复制失败'))();
   }
 
   editAction(item, action, type, path){
     const inf=this.createInlineForm(type,item,{action,path,type});
     if(action==='edit'){
       const v=this.getValueByPath(type,path);
-      setTimeout(()=>{ inf.find('.inline-name').val(path[path.length-1]); const ta=inf.find('.inline-value'); ta.val(typeof v==='object'?JSON.stringify(v,null,2):v); this.autoResizeTextarea(ta); },50);
+      setTimeout(()=>{
+        inf.find('.inline-name').val(path[path.length-1]);
+        const ta=inf.find('.inline-value');
+        const fill=(val)=>{
+          if(Array.isArray(val)) return val.length===1 ? String(val[0]??'') : JSON.stringify(val,null,2);
+          if(val && typeof val==='object') return JSON.stringify(val,null,2);
+          return String(val??'');
+        };
+        ta.val(fill(v));
+        this.autoResizeTextarea(ta);
+      },50);
     } else if(action==='addChild'){
       inf.find('.inline-name').attr('placeholder',`为 "${path.join('.')}" 添加子变量名称`);
       inf.find('.inline-value').attr('placeholder','子变量值 (支持JSON格式)');
     }
   }
 
-  async handleMoveToFolder(item){ await this.showMoveVariableDialog(item.data('type'), item.data('folder-id')); }
-  async showMoveVariableDialog(t,fid){
-    const v=this.store(t), f=this.fstore(t), fn=f[fid]?.name||'', inF=new Set(); Object.values(f).forEach(fo=>fo.variables?.forEach(va=>inF.add(va)));
-    const avail=Object.keys(v).filter(va=>!inF.has(va)); if(!avail.length) return toastr.warning('没有可移动的变量');
-    const d=document.createElement('div');
-    d.innerHTML=`<div class="vm-move-variables-container"><p>选择要移动到文件夹 "<strong>${fn}</strong>" 的变量:</p><div class="vm-variables-list">${
-      avail.map(va=>`<label class="checkbox_label vm-variable-checkbox"><input type="checkbox" value="${va}"><span title="${va}">${va}</span></label>`).join('')
-    }</div></div>`;
-    const r=await callGenericPopup(d, POPUP_TYPE.CONFIRM, '', { okButton:'移动', cancelButton:'取消', wide:false, allowVerticalScrolling:true });
-    if(r===POPUP_RESULT.AFFIRMATIVE){
-      const sel=Array.from(d.querySelectorAll('input:checked')).map(cb=>cb.value);
-      if(sel.length){ sel.forEach(va=>this.folder.moveVariable(t,va,fid)); this.loadVariables(); toastr.success(`已将 ${sel.length} 个变量移动到文件夹 "${fn}"`); }
-    }
-  }
+  handleDelete(item,t,path){ const n=path[path.length-1]; if(!confirm(`确定要删除 "${n}" 吗？`)) return; this.deleteByPath(t,path); }
 
-  handleEditFolder(item){
-    const fid=item.data('folder-id'), t=item.data('type'), cur=this.folder.get(t)[fid]?.name||'', nn=prompt('请输入新的文件夹名称:',cur);
-    if(nn?.trim() && nn.trim()!==cur){ if(this.folder.rename(t,fid,nn.trim())){ this.loadVariables(); toastr.success(`文件夹已重命名为 "${nn}"`); } }
+  refreshAndKeep(t, states){
+    this.vt(t).save();
+    this.loadVariables();
+    this.updateSnapshot();
+    states && this.restoreExpandedStates(t, states);
   }
-  handleDeleteFolder(item){
-    const fid=item.data('folder-id'), t=item.data('type'), n=this.folder.get(t)[fid]?.name||'';
-    if(!confirm(`确定要删除文件夹 "${n}" 吗？文件夹中的变量将移回根目录。`)) return;
-    const moved=this.folder.delete(t,fid); this.loadVariables(); toastr.success(`文件夹 "${n}" 已删除，${moved.length} 个变量已移回根目录`);
+  withPreservedExpansion(t, fn){
+    const states=this.saveExpandedStates(t);
+    fn(); this.refreshAndKeep(t, states);
   }
-
-  handleDelete(item,t,path){ const n=path[path.length-1]; if(!confirm(`确定要删除 "${n}" 吗？`)) return; this.folder.removeVariable(t,n); this.deleteByPath(t,path); }
+  withGlobalRefresh(fn){
+    const states=this.saveAllExpandedStates();
+    fn(); this.loadVariables(); this.updateSnapshot(); this.restoreAllExpandedStates(states);
+  }
 
   handleInlineSave(form){
     if(this.savingInProgress) return; this.savingInProgress=true;
@@ -419,18 +422,20 @@ class VariablesPanel {
       if(!form?.length) return toastr.error('表单未找到');
       const nameInput=form.find('.inline-name'), valueInput=form.find('.inline-value'), name=nameInput.val()?.trim(), value=valueInput.val()?.trim(), type=form.data('type');
       if(!name) return nameInput.focus(), toastr.error('请输入变量名称');
-      const processedValue=this.processValue(value), {action, path}=this.state.formState, states=this.saveExpandedStates(type);
-      if(action==='addChild') this.setValueByPath(type,[...path,name],processedValue);
-      else if(action==='edit'){
-        const on=path[path.length-1];
-        if(name!==on){
-          this.deleteByPathSilently(type,path); this.folder.removeVariable(type,on);
-          if(path.length===1) this.vt(type).setter(name, processedValue);
-          else this.setValueByPath(type,[...path.slice(0,-1),name],processedValue);
-          const fid=this.folder.getVariableFolder(type,on); if(fid && path.length===1) this.folder.moveVariable(type,name,fid);
-        } else this.setValueByPath(type,path,processedValue);
-      } else this.vt(type).setter(name, processedValue);
-      this.vt(type).save(); this.hideInlineForm(); this.loadVariables(); this.restoreExpandedStates(type,states); toastr.success('变量已保存');
+      const processedValue=this.processValue(value), {action, path}=this.state.formState;
+      this.withPreservedExpansion(type, ()=>{
+        if(action==='addChild') this.setValueByPath(type,[...path,name],processedValue);
+        else if(action==='edit'){
+          const on=path[path.length-1];
+          if(name!==on){
+            this.deleteByPathSilently(type,path);
+            if(path.length===1) this.vt(type).setter(name, processedValue);
+            else this.setValueByPath(type,[...path.slice(0,-1),name],processedValue);
+          } else this.setValueByPath(type,path,processedValue);
+        } else this.vt(type).setter(name, processedValue);
+      });
+      this.hideInlineForm();
+      toastr.success('变量已保存');
     }catch(e){ console.error(e); toastr.error('JSON格式错误: '+e.message); }
     finally{ this.savingInProgress=false; }
   }
@@ -444,14 +449,22 @@ class VariablesPanel {
     if(!ta.data('auto-resize-bound')){ ta.on('input',()=>this.autoResizeTextarea(ta)); ta.data('auto-resize-bound',true); }
   }
   hideAddForm(t){ $(`#${t}-vm-add-form`).removeClass('active'); $(`#${t}-vm-name, #${t}-vm-value`).val(''); this.state.formState={}; }
+
   saveAddVariable(t){
-    if(this.savingInProgress) return; this.savingInProgress=true;
+    if(this.savingInProgress) return;
+    this.savingInProgress=true;
     try{
       const n=$(`#${t}-vm-name`).val().trim(), v=$(`#${t}-vm-value`).val().trim();
       if(!n) return toastr.error('请输入变量名称');
-      const proc=this.processValue(v); this.vt(t).setter(n,proc); this.vt(t).save(); this.hideAddForm(t); this.loadVariables(); toastr.success('变量已保存');
-    }catch(e){ toastr.error('JSON格式错误: '+e.message); }
-    finally{ this.savingInProgress=false; }
+      const proc=this.processValue(v);
+      this.withPreservedExpansion(t, ()=> this.vt(t).setter(n,proc));
+      this.hideAddForm(t);
+      toastr.success('变量已保存');
+    }catch(e){
+      toastr.error('JSON格式错误: '+e.message);
+    }finally{
+      this.savingInProgress=false;
+    }
   }
 
   getValueByPath(t,p){ if(p.length===1) return this.vt(t).getter(p[0]); let v=this.parseValue(this.vt(t).getter(p[0])); p.slice(1).forEach(k=>v=v?.[k]); return v; }
@@ -467,7 +480,10 @@ class VariablesPanel {
     let tar=root; p.slice(1,-1).forEach(k=>{ if(typeof tar[k]!=='object'||tar[k]===null) tar[k]={}; tar=tar[k]; });
     delete tar[p[p.length-1]]; this.vt(t).setter(p[0], JSON.stringify(root));
   }
-  deleteByPath(t,p){ this.deleteByPathSilently(t,p); this.vt(t).save(); this.loadVariables(); toastr.success('变量已删除'); }
+  deleteByPath(t,p){
+    this.withGlobalRefresh(()=> this.deleteByPathSilently(t,p));
+    toastr.success('变量已删除');
+  }
 
   getVariableType(it){ return it.data('type') || (it.closest('.vm-section').attr('id').includes('character')?'character':'global'); }
   getItemPath(i){ const p=[]; let c=i; while(c.length && c.hasClass('vm-item')){ const k=c.data('key'); if(k!==undefined) p.unshift(String(k)); if(!c.attr('data-level')) break; c=c.parent().closest('.vm-item'); } return p; }
@@ -480,12 +496,30 @@ class VariablesPanel {
   searchVariables(t,q){ const l=q.toLowerCase().trim(); $(`#${t}-variables-list .vm-item`).each(function(){ $(this).toggle(!l || $(this).text().toLowerCase().includes(l)); }); }
   collapseAll(t){ const items=$(`#${t}-variables-list .vm-item`), icon=$(`#${t}-variables-section [data-act="collapse"] i`); const hasExpanded=items.filter('.expanded').length>0; items.toggleClass('expanded', !hasExpanded); icon.toggleClass('fa-chevron-up', !hasExpanded).toggleClass('fa-chevron-down', hasExpanded); }
 
-  clearAllVariables(t){ if(!confirm(`确定要清除所有${t==='character'?'角色':'全局'}变量吗？`)) return; const s=this.store(t); Object.keys(s).forEach(k=>delete s[k]); this.vt(t).save(); this.loadVariables(); toastr.success('变量已清除'); }
+  clearAllVariables(t){
+    if(!confirm(`确定要清除所有${t==='character'?'角色':'全局'}变量吗？`)) return;
+    this.withPreservedExpansion(t, ()=>{
+      const s=this.store(t); Object.keys(s).forEach(k=>delete s[k]);
+    });
+    toastr.success('变量已清除');
+  }
+
   async importVariables(t){
     const inp=document.createElement('input'); inp.type='file'; inp.accept='.json';
-    inp.onchange=async(e)=>{ try{ const txt=await e.target.files[0].text(); const v=JSON.parse(txt); Object.entries(v).forEach(([k,va])=> this.vt(t).setter(k, typeof va==='object'?JSON.stringify(va):va)); this.vt(t).save(); this.loadVariables(); toastr.success(`成功导入 ${Object.keys(v).length} 个变量`); }catch{ toastr.error('文件格式错误'); } };
+    inp.onchange=async(e)=>{
+      try{
+        const txt=await e.target.files[0].text(); const v=JSON.parse(txt);
+        this.withPreservedExpansion(t, ()=>{
+          Object.entries(v).forEach(([k,va])=> this.vt(t).setter(k, typeof va==='object'?JSON.stringify(va):va));
+        });
+        toastr.success(`成功导入 ${Object.keys(v).length} 个变量`);
+      }catch{
+        toastr.error('文件格式错误');
+      }
+    };
     inp.click();
   }
+
   exportVariables(t){ const v=this.store(t), b=new Blob([JSON.stringify(v,null,2)],{type:'application/json'}), a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=`${t}-variables-${new Date().toISOString().split('T')[0]}.json`; a.click(); toastr.success('变量已导出'); }
 
   saveExpandedStates(t){ const s=new Set(); $(`#${t}-variables-list .vm-item.expanded`).each(function(){ const k=$(this).data('key'); if(k!==undefined) s.add(String(k)); }); return s; }
@@ -493,19 +527,10 @@ class VariablesPanel {
   restoreExpandedStates(t,s){ if(!s?.size) return; setTimeout(()=>{ $(`#${t}-variables-list .vm-item`).each(function(){ const k=$(this).data('key'); if(k!==undefined && s.has(String(k))) $(this).addClass('expanded'); }); },50); }
   restoreAllExpandedStates(states){ Object.entries(states).forEach(([t,s])=>this.restoreExpandedStates(t,s)); }
 
-  autoClassifyAllVariables(){ ['character','global'].forEach(t=>this.autoClassifyVariables(t)); }
-  autoClassifyVariables(t){
-    const v=this.store(t), dfid=this.ensureDefaultFolder(t); let c=0;
-    CONFIG.autoClassifyVars.forEach(vn=>{ if(v.hasOwnProperty(vn) && !this.folder.getVariableFolder(t,vn)){ this.folder.moveVariable(t,vn,dfid); c++; } });
-    return c;
-  }
-  ensureDefaultFolder(t){ const f=this.fstore(t), ex=Object.entries(f).find(([,fo])=>fo.name===CONFIG.defaultFolderName); return ex?ex[0]:this.folder.create(t,CONFIG.defaultFolderName); }
-
   toggleEnabled(en){
     const s=this.getSettings(); s.enabled=this.state.isEnabled=en; saveSettingsDebounced(); this.syncCheckboxState();
     if(en){ this.enable(); if(!this.state.isOpen) this.open(); } else this.disable();
   }
-  createFolderDialog(t){ const n=prompt('请输入文件夹名称:','新文件夹'); if(n?.trim()){ this.folder.create(t,n.trim()); this.loadVariables(); toastr.success(`文件夹 "${n}" 已创建`); } }
 
   ensureSharedButton(){
     if (this.sharedBtn) return this.sharedBtn;
@@ -566,4 +591,3 @@ export async function initVariablesPanel(){
 
 export function getVariablesPanelInstance(){ return variablesPanelInstance; }
 export function cleanupVariablesPanel(){ if(variablesPanelInstance){ variablesPanelInstance.cleanup(); variablesPanelInstance=null; } }
-

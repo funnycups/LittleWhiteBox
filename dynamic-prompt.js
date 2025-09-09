@@ -2076,7 +2076,6 @@ function bindPresetAnalysisOptionsEvents() {
 }
 
 // D.2. 核心分析逻辑
-// =============================================================================
 async function generateUserAnalysisReport(isAutoAnalysis = false) {
     if (dynamicPromptState.isGeneratingUser || dynamicPromptState.analysis?.isStreaming) return;
     clearAnalysisUI();
@@ -2088,38 +2087,13 @@ async function generateUserAnalysisReport(isAutoAnalysis = false) {
         if (!chatHistory || chatHistory.trim() === '') {
             throw new Error('没有找到聊天记录');
         }
-        const provider = (getSettings().apiConfig?.provider || 'sillytavern');
-        if (provider === 'sillytavern') {
-            await startAnalysisByStructure(chatHistory, !!isAutoAnalysis);
+        if (dynamicPromptState.isAnalysisOpen) {
+            mountAnalysisStreamingCard();
+            updatePopupUI();
         } else {
-            if (dynamicPromptState.isAnalysisOpen) {
-                mountAnalysisStreamingCard();
-                updatePopupUI();
-            } else {
-                dynamicPromptState.analysis.isStreaming = true;
-            }
-            const { top, bottom, body } = splitAnalysisPromptByHistory(chatHistory);
-            const fullPrompt = [top, body, bottom].filter(Boolean).join('\n\n').trim();
-            try {
-                const text = await callAIForAnalysis(fullPrompt);
-                await onAnalysisFinalText(text, !!isAutoAnalysis);
-            } catch (error) {
-                if (dynamicPromptState.isAnalysisOpen) {
-                    showAnalysisError(error.message || '生成用户文字指纹图谱时发生未知错误');
-                }
-            } finally {
-                dynamicPromptState.analysis.isStreaming = false;
-                dynamicPromptState.analysis.streamSessionId = null;
-                dynamicPromptState.isGeneratingUser = false;
-                if (dynamicPromptState.isAnalysisOpen) {
-                    const card = document.getElementById('analysis-streaming-card');
-                    if (card) card.remove();
-                    updateTabButtons();
-                    displayUserReportsPage();
-                    updatePopupUI();
-                }
-            }
+            dynamicPromptState.analysis.isStreaming = true;
         }
+        await startAnalysisByStructure(chatHistory, !!isAutoAnalysis);
     } catch (error) {
         if (dynamicPromptState.isAnalysisOpen) {
             showAnalysisError(error.message || '生成用户文字指纹图谱时发生未知错误');
@@ -2130,18 +2104,10 @@ async function generateUserAnalysisReport(isAutoAnalysis = false) {
 }
 
 async function performUserAnalysis(chatHistory) {
-    const settings = getSettings();
-    const provider = (settings.apiConfig?.provider || 'sillytavern');
-    if (provider === 'sillytavern') {
-        clearAnalysisUI();
-        const sid = await startAnalysisByStructure(chatHistory, true) || 'xb2';
-        const finalText = await waitForAnalysisCompletion(String(sid));
-        return finalText;
-    } else {
-        const { top, bottom, body } = splitAnalysisPromptByHistory(chatHistory);
-        const fullPrompt = [top, body, bottom].filter(Boolean).join('\n\n').trim();
-        return await callAIForAnalysis(fullPrompt);
-    }
+    clearAnalysisUI();
+    const sid = await startAnalysisByStructure(chatHistory, true) || 'xb2';
+    const finalText = await waitForAnalysisCompletion(String(sid));
+    return finalText;
 }
 
 async function getChatHistory() {
@@ -2173,113 +2139,6 @@ function createUserAnalysisPrompt(chatHistory) {
         }
     });
     return prompt.trim();
-}
-
-async function callAIForAnalysis(prompt) {
-    const settings = getSettings();
-    const apiConfig = settings.apiConfig;
-    switch (apiConfig.provider) {
-        case 'sillytavern':
-            return await callSillyTavernAPI(prompt);
-        case 'openai':
-            return await callOpenAIAPI(prompt, apiConfig.openai);
-        case 'google':
-            return await callGoogleAPI(prompt, apiConfig.google);
-        case 'cohere':
-            return await callCohereAPI(prompt, apiConfig.cohere);
-        case 'deepseek':
-            return await callDeepSeekAPI(prompt, apiConfig.deepseek);
-        default:
-            return await callSillyTavernAPI(prompt);
-    }
-}
-
-async function callSillyTavernAPI(prompt) {
-    const result = await executeSlashCommand(`/genraw lock=off instruct=off ${prompt}`);
-    if (!result || result.trim() === '') throw new Error('AI返回空内容');
-    return result.trim();
-}
-
-async function callOpenAIAPI(prompt, config) {
-    const response = await fetch(`${config.url}/chat/completions`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.key}`
-        },
-        body: JSON.stringify({
-            model: config.model,
-            messages: [{ role: 'user', content: prompt }],
-            temperature: 0.7,
-            max_tokens: 4000
-        })
-    });
-    if (!response.ok) {
-        throw new Error(`OpenAI API错误: ${response.status} ${response.statusText}`);
-    }
-    const data = await response.json();
-    return data.choices[0].message.content;
-}
-
-async function callGoogleAPI(prompt, config) {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.key}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            contents: [{
-                parts: [{ text: prompt }]
-            }]
-        })
-    });
-    if (!response.ok) {
-        throw new Error(`Google API错误: ${response.status} ${response.statusText}`);
-    }
-    const data = await response.json();
-    return data.candidates[0].content.parts[0].text;
-}
-
-async function callCohereAPI(prompt, config) {
-    const response = await fetch('https://api.cohere.ai/v1/generate', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.key}`
-        },
-        body: JSON.stringify({
-            model: config.model,
-            prompt: prompt,
-            max_tokens: 4000,
-            temperature: 0.7
-        })
-    });
-    if (!response.ok) {
-        throw new Error(`Cohere API错误: ${response.status} ${response.statusText}`);
-    }
-    const data = await response.json();
-    return data.generations[0].text;
-}
-
-async function callDeepSeekAPI(prompt, config) {
-    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.key}`
-        },
-        body: JSON.stringify({
-            model: config.model,
-            messages: [{ role: 'user', content: prompt }],
-            temperature: 0.7,
-            max_tokens: 4000
-        })
-    });
-    if (!response.ok) {
-        throw new Error(`DeepSeek API错误: ${response.status} ${response.statusText}`);
-    }
-    const data = await response.json();
-    return data.choices[0].message.content;
 }
 
 async function formatChatHistory(rawHistory) {
@@ -2518,11 +2377,11 @@ function buildXbgenrawCmd(sessionId, asRole, prompt, args) {
     if (args?.apiurl) parts.push(`apiurl="${String(args.apiurl).replace(/"/g, '\\"')}"`);
     if (args?.apipassword) parts.push(`apipassword="${String(args.apipassword).replace(/"/g, '\\"')}"`);
     if (args?.model) parts.push(`model="${String(args.model).replace(/"/g, '\\"')}"`);
-    parts.push(prompt);
+    parts.push(`"${stEscArg(prompt)}"`);
     return parts.join(' ');
 }
 
-function splitAnalysisPromptByHistory(chatHistory) {
+function splitAnalysisPromptByHistory(chatHistory, useEngineHistory) {
     const savedSections = loadPromptSections();
     let inBottom = false;
     let top = '';
@@ -2542,16 +2401,21 @@ function splitAnalysisPromptByHistory(chatHistory) {
         const t = '\n' + value + '\n';
         if (!inBottom) top += t; else bottom += t;
     }
-    return { top: top.trim(), bottom: bottom.trim(), body: String(chatHistory || '').trim() };
+    if (useEngineHistory) {
+        const body = 'Begin analysis according to the meta instructions.';
+        return { top: top.trim(), bottom: bottom.trim(), body };
+    } else {
+        return { top: top.trim(), bottom: bottom.trim(), body: String(chatHistory || '').trim() };
+    }
 }
 
-function buildXbgenrawCmdStructured(sessionId, apiArgs, { topuser, body, bottomuser, includeWorldInfo, stream }) {
+function buildXbgenrawCmdStructured(sessionId, apiArgs, { topuser, body, bottomuser, addon, stream }) {
     const parts = [`/xbgenraw id=${sessionId} as=assistant position=history`];
     if (apiArgs?.api) parts.push(`api=${apiArgs.api}`);
     if (apiArgs?.apiurl) parts.push(`apiurl="${stEscArg(apiArgs.apiurl)}"`);
     if (apiArgs?.apipassword) parts.push(`apipassword="${stEscArg(apiArgs.apipassword)}"`);
     if (apiArgs?.model) parts.push(`model="${stEscArg(apiArgs.model)}"`);
-    if (includeWorldInfo) parts.push(`addon=worldInfo`);
+    if (addon) parts.push(`addon=${addon}`);
     if (stream === false) parts.push(`nonstream=true`);
     if (topuser) parts.push(`topuser="${stEscArg(topuser)}"`);
     if (bottomuser) parts.push(`bottomuser="${stEscArg(bottomuser)}"`);
@@ -2577,15 +2441,16 @@ async function startAnalysisByStructure(chatHistory, isAuto = false) {
     dynamicPromptState.analysis.isStreaming = true;
     dynamicPromptState.analysis.lastText = '';
     try {
-        const { top, bottom, body } = splitAnalysisPromptByHistory(chatHistory);
+        const opts = getCurrentPresetOptions();
+        const { top, bottom, body } = splitAnalysisPromptByHistory(chatHistory, true);
         const sid = 'xb2';
         const apiArgs = buildAnalysisStreamingArgs();
-        const opts = getCurrentPresetOptions();
+        const addon = opts.includeWorldInfo ? 'worldInfo,chatHistory' : 'chatHistory';
         const cmd = buildXbgenrawCmdStructured(sid, apiArgs, {
             topuser: top,
             body,
             bottomuser: bottom,
-            includeWorldInfo: !!opts.includeWorldInfo,
+            addon,
             stream: !!opts.stream
         });
         const sessionId = await executeSlashCommand(cmd);
