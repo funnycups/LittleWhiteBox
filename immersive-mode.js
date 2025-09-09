@@ -11,6 +11,13 @@ const defaultSettings = {
   autoJumpOnAI: true
 };
 
+const SEL = {
+  chat: '#chat',
+  mes: '#chat .mes',
+  ai: '#chat .mes[is_user="false"][is_system="false"]',
+  user: '#chat .mes[is_user="true"]',
+};
+
 let state = {
   isActive: false,
   eventsBound: false,
@@ -28,6 +35,10 @@ let resizeObservedEl = null;
 let recalcT = null;
 let scrollT = null;
 
+const isGlobalEnabled = () => window.isXiaobaixEnabled ?? true;
+const getSettings = () => extension_settings[EXT_ID].immersive;
+const isInChat = () => this_chid !== undefined || selected_group || getCurrentChatId() !== undefined;
+
 function initImmersiveMode() {
   initSettings();
   setupEventListeners();
@@ -39,16 +50,10 @@ function initImmersiveMode() {
 }
 
 function initSettings() {
-  if (!extension_settings[EXT_ID]) {
-    extension_settings[EXT_ID] = {};
-  }
-  if (!extension_settings[EXT_ID].immersive) {
-    extension_settings[EXT_ID].immersive = structuredClone(defaultSettings);
-  }
+  extension_settings[EXT_ID] ||= {};
+  extension_settings[EXT_ID].immersive ||= structuredClone(defaultSettings);
   const settings = extension_settings[EXT_ID].immersive;
-  Object.keys(defaultSettings).forEach(key => {
-    settings[key] = settings[key] ?? defaultSettings[key];
-  });
+  Object.keys(defaultSettings).forEach(k => settings[k] = settings[k] ?? defaultSettings[k]);
   updateControlState();
 }
 
@@ -59,9 +64,7 @@ function setupEventListeners() {
   };
   eventSource.on(event_types.CHAT_CHANGED, state.eventHandlers.chatChanged);
   document.addEventListener('xiaobaixEnabledChanged', state.eventHandlers.globalStateChange);
-  if (window.registerModuleCleanup) {
-    window.registerModuleCleanup('immersiveMode', cleanup);
-  }
+  if (window.registerModuleCleanup) window.registerModuleCleanup('immersiveMode', cleanup);
 }
 
 function setupDOMObserver() {
@@ -72,7 +75,7 @@ function setupDOMObserver() {
     if (!state.isActive) return;
     let needRecalc = false;
     let needScroll = false;
-    mutations.forEach((mutation) => {
+    for (const mutation of mutations) {
       if (mutation.type === 'childList') {
         if (mutation.addedNodes?.length) {
           mutation.addedNodes.forEach((node) => {
@@ -91,25 +94,18 @@ function setupDOMObserver() {
             }
           });
         }
-      } else if (mutation.type === 'subtree' || mutation.type === 'characterData' || mutation.type === 'attributes') {
+      } else if (mutation.type === 'characterData') {
         needScroll = true;
       }
-    });
+    }
     if (needRecalc) {
       if (recalcT) clearTimeout(recalcT);
-      recalcT = setTimeout(() => {
-        updateMessageDisplay();
-      }, 20);
+      recalcT = setTimeout(updateMessageDisplay, 20);
     } else if (needScroll) {
       scheduleScrollToBottom();
     }
   });
-  observer.observe(chatContainer, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-    attributes: false
-  });
+  observer.observe(chatContainer, { childList: true, subtree: true, characterData: true, attributes: false });
 }
 
 function processSingleMessage(mesElement) {
@@ -136,10 +132,6 @@ function destroyDOMObserver() {
     observer = null;
   }
 }
-
-const isGlobalEnabled = () => window.isXiaobaixEnabled ?? true;
-const getSettings = () => extension_settings[EXT_ID].immersive;
-const isInChat = () => this_chid !== undefined || selected_group || getCurrentChatId() !== undefined;
 
 function updateControlState() {
   const enabled = isGlobalEnabled();
@@ -184,31 +176,16 @@ function toggleImmersiveMode() {
 }
 
 function bindMessageEvents() {
-  if (!eventSource) return;
-  if (state.messageEventsBound) return;
-  const refresh = () => {
-    if (state.isActive) updateMessageDisplay();
-  };
-  const scroll = () => {
-    scheduleScrollToBottom();
-  };
-  state.eventHandlers.onSent = () => {
-    refresh();
-    scroll();
-  };
-  state.eventHandlers.onReceived = () => {
-    refresh();
-    scroll();
-  };
+  if (!eventSource || state.messageEventsBound) return;
+
+  const refresh = () => state.isActive && updateMessageDisplay();
+  const scroll = () => scheduleScrollToBottom();
+
+  state.eventHandlers.onSent = () => { refresh(); scroll(); };
+  state.eventHandlers.onReceived = () => { refresh(); scroll(); };
   state.eventHandlers.onDeleted = refresh;
-  state.eventHandlers.onUpdated = () => {
-    refresh();
-    scroll();
-  };
-  state.eventHandlers.onSwiped = () => {
-    refresh();
-    scroll();
-  };
+  state.eventHandlers.onUpdated = () => { refresh(); scroll(); };
+  state.eventHandlers.onSwiped = () => { refresh(); scroll(); };
   state.eventHandlers.onGenStart = () => {
     state.isGenerating = true;
     state.autoScrollPaused = false;
@@ -222,15 +199,15 @@ function bindMessageEvents() {
     state.pauseUntilGenEnd = false;
     refresh();
   };
+
   eventSource.on(event_types.MESSAGE_SENT, state.eventHandlers.onSent);
   eventSource.on(event_types.MESSAGE_RECEIVED, state.eventHandlers.onReceived);
   eventSource.on(event_types.MESSAGE_DELETED, state.eventHandlers.onDeleted);
   eventSource.on(event_types.MESSAGE_UPDATED, state.eventHandlers.onUpdated);
   eventSource.on(event_types.MESSAGE_SWIPED, state.eventHandlers.onSwiped);
-  if (event_types.GENERATION_STARTED) {
-    eventSource.on(event_types.GENERATION_STARTED, state.eventHandlers.onGenStart);
-  }
+  if (event_types.GENERATION_STARTED) eventSource.on(event_types.GENERATION_STARTED, state.eventHandlers.onGenStart);
   eventSource.on(event_types.GENERATION_ENDED, state.eventHandlers.onGenEnd);
+
   state.messageEventsBound = true;
 }
 
@@ -241,27 +218,36 @@ function unbindMessageEvents() {
   eventSource.off(event_types.MESSAGE_DELETED, state.eventHandlers.onDeleted);
   eventSource.off(event_types.MESSAGE_UPDATED, state.eventHandlers.onUpdated);
   eventSource.off(event_types.MESSAGE_SWIPED, state.eventHandlers.onSwiped);
-  if (event_types.GENERATION_STARTED) {
-    eventSource.off(event_types.GENERATION_STARTED, state.eventHandlers.onGenStart);
-  }
+  if (event_types.GENERATION_STARTED) eventSource.off(event_types.GENERATION_STARTED, state.eventHandlers.onGenStart);
   eventSource.off(event_types.GENERATION_ENDED, state.eventHandlers.onGenEnd);
   state.messageEventsBound = false;
 }
 
+// 仅在沉浸模式的“单回合模式”下隐藏 show_more_messages
 function injectImmersiveStyles() {
-  if (document.getElementById('immersive-style-tag')) return;
-  const style = document.createElement('style');
-  style.id = 'immersive-style-tag';
+  let style = document.getElementById('immersive-style-tag');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'immersive-style-tag';
+    document.head.appendChild(style);
+  }
   style.textContent = `
-    body.immersive-mode #show_more_messages { display: none !important; }
+    body.immersive-mode.immersive-single #show_more_messages { display: none !important; }
   `;
-  document.head.appendChild(style);
+}
+
+function applyModeClasses() {
+  const settings = getSettings();
+  $('body')
+    .toggleClass('immersive-single', !settings.showAllMessages)
+    .toggleClass('immersive-all', settings.showAllMessages);
 }
 
 function enableImmersiveMode() {
   if (!isGlobalEnabled()) return;
   injectImmersiveStyles();
   $('body').addClass('immersive-mode');
+  applyModeClasses();
   moveAvatarWrappers();
   bindMessageEvents();
   bindScrollGuard();
@@ -271,9 +257,9 @@ function enableImmersiveMode() {
 }
 
 function disableImmersiveMode() {
-  $('body').removeClass('immersive-mode');
+  $('body').removeClass('immersive-mode immersive-single immersive-all');
   restoreAvatarWrappers();
-  $('#chat .mes').show();
+  $(`${SEL.mes}`).show();
   hideNavigationButtons();
   $('.swipe_left, .swipeRightBlock').show();
   unbindMessageEvents();
@@ -287,13 +273,11 @@ function disableImmersiveMode() {
 }
 
 function moveAvatarWrappers() {
-  $('#chat .mes').each(function() {
-    processSingleMessage(this);
-  });
+  $(`${SEL.mes}`).each(function() { processSingleMessage(this); });
 }
 
 function restoreAvatarWrappers() {
-  $('#chat .mes').each(function() {
+  $(`${SEL.mes}`).each(function() {
     const $mes = $(this);
     const $avatarWrapper = $mes.find('.mesAvatarWrapper');
     const $verticalWrapper = $mes.find('.xiaobaix-vertical-wrapper');
@@ -304,9 +288,7 @@ function restoreAvatarWrappers() {
       const $chName = $mes.find('.ch_name.flex-container.justifySpaceBetween');
       const $flexContainer = $mes.find('.flex-container.flex1.alignitemscenter');
       const $nameText = $mes.find('.name_text');
-      if ($flexContainer.length && $chName.length) {
-        $chName.prepend($flexContainer);
-      }
+      if ($flexContainer.length && $chName.length) $chName.prepend($flexContainer);
       if ($nameText.length) {
         const $originalContainer = $mes.find('.flex-container.alignItemsBaseline');
         if ($originalContainer.length) $originalContainer.prepend($nameText);
@@ -317,12 +299,12 @@ function restoreAvatarWrappers() {
 }
 
 function findLastAIMessage() {
-  const $aiMessages = $('#chat .mes[is_user="false"][is_system="false"]');
+  const $aiMessages = $(SEL.ai);
   return $aiMessages.length ? $($aiMessages[$aiMessages.length - 1]) : null;
 }
 
 function findLastUserMessage() {
-  const $userMessages = $('#chat .mes[is_user="true"]');
+  const $userMessages = $(SEL.user);
   return $userMessages.length ? $($userMessages[$userMessages.length - 1]) : null;
 }
 
@@ -330,61 +312,52 @@ function isUser($mes) {
   return $mes && $mes.length && $mes.attr('is_user') === 'true';
 }
 
-function hideShowMoreBanner() {
-  $('#show_more_messages').hide();
-}
-
 function showSingleModeMessages() {
-  const $messages = $('#chat .mes');
+  const $messages = $(SEL.mes);
   if (!$messages.length) return;
   $messages.hide();
-  hideShowMoreBanner();
+
   const $last = $messages.last();
   if ($last.length && isUser($last)) {
     $last.show();
-    showNavigationButtons($last);
-    updateSwipesCounter($last);
-    attachResizeObserverTo($last[0]);
+    showNavAndCounters($last);
     return;
   }
+
   let $targetAI = findLastAIMessage();
   if ($targetAI && $targetAI.length) {
     $targetAI.show();
     const $prev = $targetAI.prevAll('.mes').first();
-    if ($prev.length && $prev.attr('is_user') === 'true') {
-      $prev.show();
-    }
-    showNavigationButtons($targetAI);
-    updateSwipesCounter($targetAI);
-    attachResizeObserverTo($targetAI[0]);
+    if ($prev.length && $prev.attr('is_user') === 'true') $prev.show();
+    showNavAndCounters($targetAI);
   } else {
     const $lastUser = findLastUserMessage();
     if ($lastUser && $lastUser.length) {
       $lastUser.show();
-      showNavigationButtons($lastUser);
-      updateSwipesCounter($lastUser);
-      attachResizeObserverTo($lastUser[0]);
+      showNavAndCounters($lastUser);
     } else {
       const $fallback = $messages.last().show();
-      showNavigationButtons($fallback);
-      updateSwipesCounter($fallback);
-      attachResizeObserverTo($fallback[0]);
+      showNavAndCounters($fallback);
     }
   }
 }
 
+function showNavAndCounters($mes) {
+  showNavigationButtons($mes);
+  updateSwipesCounter($mes);
+  attachResizeObserverTo($mes[0]);
+}
+
 function updateMessageDisplay() {
   if (!state.isActive) return;
-  const $messages = $('#chat .mes');
+  const $messages = $(SEL.mes);
   if (!$messages.length) return;
   const settings = getSettings();
+
   if (settings.showAllMessages) {
     $messages.show();
-    hideShowMoreBanner();
-    const $lastVisible = $('#chat .mes:visible').last();
-    showNavigationButtons($lastVisible);
-    updateSwipesCounter($lastVisible);
-    attachResizeObserverTo($lastVisible[0]);
+    const $lastVisible = $(`${SEL.mes}:visible`).last();
+    showNavAndCounters($lastVisible);
   } else {
     showSingleModeMessages();
   }
@@ -392,19 +365,18 @@ function updateMessageDisplay() {
 }
 
 function showNavigationButtons($targetMes) {
-  if (!isInChat()) {
-    hideNavigationButtons();
-    return;
-  }
+  if (!isInChat()) return hideNavigationButtons();
+
   $('#immersive-navigation').remove();
+
   if (!$targetMes || !$targetMes.length) {
-    $targetMes = $('#chat .mes:visible[is_user="false"][is_system="false"]').last();
-    if (!$targetMes.length) {
-      $targetMes = $('#chat .mes:visible').last();
-    }
+    $targetMes = $(`${SEL.mes}:visible[is_user="false"][is_system="false"]`).last();
+    if (!$targetMes.length) $targetMes = $(`${SEL.mes}:visible`).last();
   }
+
   const $verticalWrapper = $targetMes.find('.xiaobaix-vertical-wrapper');
   if (!$verticalWrapper.length) return;
+
   const settings = getSettings();
   const buttonText = settings.showAllMessages ? '切换：锁定单回合' : '切换：传统多楼层';
   const navigationHtml = `
@@ -435,15 +407,20 @@ function updateNavigationButtons() {
   $toggleBtn.attr('title', settings.showAllMessages ? '切换到单层模式' : '切换到多层模式');
 }
 
+function currentVisibleTarget($fallbackScope) {
+  let $current = $fallbackScope && $fallbackScope.length ? $fallbackScope : $(`${SEL.mes}:visible[is_user="false"][is_system="false"]`).last();
+  if (!$current.length) $current = $(`${SEL.mes}:visible`).last();
+  return $current;
+}
+
 function updateSwipesCounter($targetMes) {
   if (!state.isActive) return;
   const $swipesCounter = $('.swipes-counter');
   if (!$swipesCounter.length) return;
-  let $currentMessage = $targetMes && $targetMes.length ? $targetMes : $('#chat .mes:visible[is_user="false"][is_system="false"]').last();
-  if (!$currentMessage.length) {
-    $currentMessage = $('#chat .mes:visible').last();
-  }
+
+  const $currentMessage = currentVisibleTarget($targetMes);
   const mesId = $currentMessage.attr('mesid');
+
   if (mesId !== undefined) {
     try {
       const chat = getContext().chat;
@@ -454,7 +431,7 @@ function updateSwipesCounter($targetMes) {
         $swipesCounter.html(`${currentSwipeIndex + 1}&ZeroWidthSpace;/&ZeroWidthSpace;${message.swipes.length}`);
         return;
       }
-    } catch (error) {}
+    } catch {}
   }
   $swipesCounter.html('1&ZeroWidthSpace;/&ZeroWidthSpace;1');
 }
@@ -463,6 +440,7 @@ function toggleDisplayMode() {
   if (!state.isActive) return;
   const settings = getSettings();
   settings.showAllMessages = !settings.showAllMessages;
+  applyModeClasses();
   updateMessageDisplay();
   if (settings.showAllMessages) {
     setTimeout(() => {
@@ -475,8 +453,7 @@ function toggleDisplayMode() {
 
 function handleSwipe(swipeSelector, $targetMes) {
   if (!state.isActive) return;
-  let $scope = $targetMes && $targetMes.length ? $targetMes : $('#chat .mes:visible[is_user="false"][is_system="false"]').last();
-  if (!$scope.length) $scope = $('#chat .mes:visible').last();
+  const $scope = currentVisibleTarget($targetMes);
   const $btn = $scope.find(swipeSelector);
   if ($btn.length) {
     $btn.click();
@@ -575,9 +552,7 @@ function attachResizeObserverTo(el) {
       scheduleScrollToBottom();
     });
   }
-  if (resizeObservedEl) {
-    detachResizeObserver();
-  }
+  if (resizeObservedEl) detachResizeObserver();
   resizeObservedEl = el;
   resizeObs.observe(el);
 }
@@ -591,8 +566,7 @@ function detachResizeObserver() {
 
 function bindScrollGuard() {
   const el = getChatContainer();
-  if (!el) return;
-  if (state.eventHandlers.onScroll) return;
+  if (!el || state.eventHandlers.onScroll) return;
   state.lastScrollTop = el.scrollTop;
   state.eventHandlers.onScroll = () => {
     const cur = el.scrollTop;
@@ -608,9 +582,7 @@ function bindScrollGuard() {
 
 function unbindScrollGuard() {
   const el = getChatContainer();
-  if (el && state.eventHandlers.onScroll) {
-    el.removeEventListener('scroll', state.eventHandlers.onScroll);
-  }
+  if (el && state.eventHandlers.onScroll) el.removeEventListener('scroll', state.eventHandlers.onScroll);
   state.eventHandlers.onScroll = null;
 }
 
