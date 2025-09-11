@@ -7,8 +7,70 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { callPopup } from "../../../../script.js";
 import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { accountStorage } from "../../../util/AccountStorage.js";
-import { download, getFileText, uuidv4, debounce } from "../../../utils.js";
+import { download, getFileText, uuidv4, debounce, getSortableDelay } from "../../../utils.js";
 import { executeSlashCommand } from "./index.js";
+
+// ====== Task Aggregation BEGIN ===================================================
+const __taskModuleRegistry = {};
+const __taskPropCache = new Map();
+
+async function __taskDynamicImport(path) {
+    const mod = await import(path);
+    __taskModuleRegistry[path] = mod;
+    return mod;
+}
+
+function __createModuleProxy(moduleName) {
+    const modulePath = moduleName === 'script' ? `/script.js` : `/scripts/${moduleName}.js`;
+    return new Proxy({}, {
+        get(_tt, exportName) {
+            if (exportName === 'import') {
+                return () => __taskDynamicImport(modulePath);
+            }
+            return async (...args) => {
+                try {
+                    const mod = await __taskDynamicImport(modulePath);
+                    const value = mod?.[exportName];
+                    if (typeof value === 'function') {
+                        return await value.apply(mod, args);
+                    }
+                    return value;
+                } catch (err) {
+                    console.debug('[Task] 动态导入失败:', modulePath, err);
+                    return undefined;
+                }
+            };
+        },
+        has() { return true; },
+    });
+}
+
+const Task = new Proxy({}, {
+    get(_t, prop) {
+        if (prop === 'import') return __taskDynamicImport;
+        if (__taskPropCache.has(prop)) return __taskPropCache.get(prop);
+        for (const mod of Object.values(__taskModuleRegistry)) {
+            if (prop in mod) {
+                const val = mod[prop];
+                __taskPropCache.set(prop, val);
+                return val;
+            }
+        }
+        if (prop in window) {
+            const val = window[prop];
+            __taskPropCache.set(prop, val);
+            return val;
+        }
+        if (typeof prop === 'string' && /^[A-Za-z0-9_\-]+$/.test(prop)) {
+            const moduleProxy = __createModuleProxy(prop);
+            __taskPropCache.set(prop, moduleProxy);
+            return moduleProxy;
+        }
+        return undefined;
+    },
+});
+/** @type {any} */ (window).Task = Task;
+// ====== Task Aggregation END =====================================================
 
 const TASKS_MODULE_NAME = "xiaobaix-tasks";
 const EXT_ID = "LittleWhiteBox";
@@ -18,73 +80,92 @@ const CONFIG = { MAX_PROCESSED: 20, MAX_COOLDOWN: 10, CLEANUP_INTERVAL: 30000, T
 let state = {
     currentEditingTask: null, currentEditingIndex: -1, lastChatId: null, chatJustChanged: false,
     isNewChat: false, lastTurnCount: 0, isExecutingTask: false, isCommandGenerated: false,
-    taskLastExecutionTime: new Map(), cleanupTimer: null, lastTasksHash: '', taskBarVisible: true
+    taskLastExecutionTime: new Map(), cleanupTimer: null, lastTasksHash: '', taskBarVisible: true,
+    processedMessagesSet: new Set(),
+    taskBarSignature: ''
 };
 
 const debouncedSave = debounce(() => saveSettingsDebounced(), CONFIG.DEBOUNCE_DELAY);
 
+// ------------- Small Helpers -------------
+const isGloballyEnabled = () => (window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true) && getSettings().enabled;
+const allTasks = () => [...getSettings().globalTasks, ...getCharacterTasks()];
+const clampInt = (v, min, max, d = 0) => (Number.isFinite(+v) ? Math.max(min, Math.min(max, +v)) : d);
+const nowMs = () => Date.now();
+
+// ------------- Settings ------------------
 function getSettings() {
-    if (!extension_settings[EXT_ID].tasks) {
-        extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
+    const ext = extension_settings[EXT_ID] || (extension_settings[EXT_ID] = {});
+    if (!ext.tasks) {
+        ext.tasks = structuredClone(defaultSettings);
+        return ext.tasks;
     }
-    return Object.assign(structuredClone(defaultSettings), extension_settings[EXT_ID].tasks);
+    const t = ext.tasks;
+    if (typeof t.enabled !== 'boolean') t.enabled = defaultSettings.enabled;
+    if (!Array.isArray(t.globalTasks)) t.globalTasks = [];
+    if (!Array.isArray(t.processedMessages)) t.processedMessages = [];
+    if (!Array.isArray(t.character_allowed_tasks)) t.character_allowed_tasks = [];
+    return t;
 }
 
+function hydrateProcessedSetFromSettings() {
+    try {
+        state.processedMessagesSet = new Set(getSettings().processedMessages || []);
+    } catch {}
+}
+
+// ------------- Cleanup / Cooldown --------
 function scheduleCleanup() {
     if (state.cleanupTimer) return;
     state.cleanupTimer = setInterval(() => {
-        const now = Date.now();
+        const n = nowMs();
         for (const [taskName, lastTime] of state.taskLastExecutionTime.entries()) {
-            if (now - lastTime > CONFIG.TASK_COOLDOWN * 2) {
-                state.taskLastExecutionTime.delete(taskName);
-            }
+            if (n - lastTime > CONFIG.TASK_COOLDOWN * 2) state.taskLastExecutionTime.delete(taskName);
         }
         if (state.taskLastExecutionTime.size > CONFIG.MAX_COOLDOWN) {
-            const entries = Array.from(state.taskLastExecutionTime.entries())
-                .sort((a, b) => b[1] - a[1]).slice(0, CONFIG.MAX_COOLDOWN);
+            const entries = [...state.taskLastExecutionTime.entries()].sort((a, b) => b[1] - a[1]).slice(0, CONFIG.MAX_COOLDOWN);
             state.taskLastExecutionTime.clear();
-            entries.forEach(([name, time]) => state.taskLastExecutionTime.set(name, time));
+            entries.forEach(([k, v]) => state.taskLastExecutionTime.set(k, v));
         }
         const settings = getSettings();
         if (settings.processedMessages.length > CONFIG.MAX_PROCESSED) {
             settings.processedMessages = settings.processedMessages.slice(-CONFIG.MAX_PROCESSED);
+            state.processedMessagesSet = new Set(settings.processedMessages);
             debouncedSave();
         }
     }, CONFIG.CLEANUP_INTERVAL);
 }
 
-function isTaskInCooldown(taskName) {
-    const lastExecution = state.taskLastExecutionTime.get(taskName);
-    return lastExecution && (Date.now() - lastExecution) < CONFIG.TASK_COOLDOWN;
-}
+const isTaskInCooldown = (name, t = nowMs()) => {
+    const last = state.taskLastExecutionTime.get(name);
+    return last && (t - last) < CONFIG.TASK_COOLDOWN;
+};
+const setTaskCooldown = (name) => state.taskLastExecutionTime.set(name, nowMs());
 
-function setTaskCooldown(taskName) {
-    state.taskLastExecutionTime.set(taskName, Date.now());
-}
-
-function isMessageProcessed(messageKey) {
-    return getSettings().processedMessages.includes(messageKey);
-}
-
-function markMessageAsProcessed(messageKey) {
+// ------------- Message processed cache ---
+const isMessageProcessed = (key) => state.processedMessagesSet.has(key);
+function markMessageAsProcessed(key) {
+    if (state.processedMessagesSet.has(key)) return;
+    state.processedMessagesSet.add(key);
     const settings = getSettings();
-    if (settings.processedMessages.includes(messageKey)) return;
-    settings.processedMessages.push(messageKey);
+    settings.processedMessages.push(key);
     if (settings.processedMessages.length > CONFIG.MAX_PROCESSED) {
-        settings.processedMessages = settings.processedMessages.slice(-Math.floor(CONFIG.MAX_PROCESSED/2));
+        settings.processedMessages = settings.processedMessages.slice(-Math.floor(CONFIG.MAX_PROCESSED / 2));
+        state.processedMessagesSet = new Set(settings.processedMessages);
     }
     debouncedSave();
 }
 
+// ------------- Character tasks -----------
 function getCharacterTasks() {
     if (!this_chid || !characters[this_chid]) return [];
-    const character = characters[this_chid];
-    if (!character.data?.extensions?.[TASKS_MODULE_NAME]) {
-        if (!character.data) character.data = {};
-        if (!character.data.extensions) character.data.extensions = {};
-        character.data.extensions[TASKS_MODULE_NAME] = { tasks: [] };
+    const c = characters[this_chid];
+    if (!c.data?.extensions?.[TASKS_MODULE_NAME]) {
+        if (!c.data) c.data = {};
+        if (!c.data.extensions) c.data.extensions = {};
+        c.data.extensions[TASKS_MODULE_NAME] = { tasks: [] };
     }
-    return character.data.extensions[TASKS_MODULE_NAME].tasks || [];
+    return c.data.extensions[TASKS_MODULE_NAME].tasks || [];
 }
 
 async function saveCharacterTasks(tasks) {
@@ -93,14 +174,15 @@ async function saveCharacterTasks(tasks) {
     const settings = getSettings();
     const avatar = characters[this_chid].avatar;
     if (avatar && !settings.character_allowed_tasks?.includes(avatar)) {
-        if (!settings.character_allowed_tasks) settings.character_allowed_tasks = [];
+        settings.character_allowed_tasks ??= [];
         settings.character_allowed_tasks.push(avatar);
         debouncedSave();
     }
 }
 
+// ------------- Command execution ---------
 async function executeCommands(commands, taskName) {
-    if (!commands?.trim()) return null;
+    if (!String(commands || '').trim()) return null;
     state.isCommandGenerated = state.isExecutingTask = true;
     try {
         return await processTaskCommands(commands);
@@ -143,19 +225,20 @@ async function executeTaskJS(jsCode) {
 
     const iframes = document.querySelectorAll('iframe.xiaobaix-iframe');
     if (iframes.length > 0) {
-        const latestIframe = iframes[iframes.length - 1];
+        const latestIframe = /** @type {HTMLIFrameElement} */ (iframes[iframes.length - 1]);
         if (latestIframe?.contentWindow) {
             try {
-                latestIframe.contentWindow.STscript = STscript;
-                await latestIframe.contentWindow.eval(`(async function() { try { ${jsCode} } catch (error) { console.error('Task JS Error:', error); throw error; } })();`);
+                const cw = /** @type {any} */ (latestIframe.contentWindow);
+                cw.STscript = STscript;
+                cw.Task = /** @type {any} */ (window).Task;
+                await cw.eval(`(async function() { try { ${jsCode} } catch (error) { console.error('Task JS Error:', error); throw error; } })();`);
                 return;
             } catch (error) { console.error('IFRAME JS执行失败:', error); }
         }
     }
-
     try {
-        const executeFunction = new Function('STscript', `return (async function() { ${jsCode} })();`);
-        await executeFunction(STscript);
+        const executeFunction = new Function('STscript', 'Task', `return (async function() { ${jsCode} })();`);
+        await executeFunction(STscript, /** @type {any} */ (window).Task);
     } catch (error) {
         console.error('主窗口JS执行失败:', error);
         throw error;
@@ -172,17 +255,24 @@ function handleTaskMessage(event) {
     } catch (error) { console.error('执行任务JS失败:', error); }
 }
 
-function calculateFloorByType(floorType) {
-    if (!Array.isArray(chat) || chat.length === 0) return 0;
-    let count = 0;
-    switch (floorType) {
-        case 'user': count = Math.max(0, chat.filter(msg => msg.is_user && !msg.is_system).length - 1); break;
-        case 'llm': count = Math.max(0, chat.filter(msg => !msg.is_user && !msg.is_system).length - 1); break;
-        default: count = Math.max(0, chat.length - 1); break;
+// ------------- Chat metrics --------------
+function getFloorCounts() {
+    if (!Array.isArray(chat) || chat.length === 0) return { all: 0, user: 0, llm: 0 };
+    let user = 0, llm = 0, all = 0;
+    for (const m of chat) {
+        all++;
+        if (m.is_system) continue;
+        if (m.is_user) user++; else llm++;
     }
-    return count;
+    return { all, user, llm };
 }
-
+function pickFloorByType(floorType, counts) {
+    switch (floorType) {
+        case 'user': return Math.max(0, counts.user - 1);
+        case 'llm': return Math.max(0, counts.llm - 1);
+        default:     return Math.max(0, counts.all - 1);
+    }
+}
 function calculateTurnCount() {
     if (!Array.isArray(chat) || chat.length === 0) return 0;
     const userMessages = chat.filter(msg => msg.is_user && !msg.is_system).length;
@@ -190,66 +280,64 @@ function calculateTurnCount() {
     return Math.min(userMessages, aiMessages);
 }
 
+// ------------- Task trigger core ---------
+function shouldSkipByContext(taskTriggerTiming, triggerContext) {
+    if (taskTriggerTiming === 'initialization') return triggerContext !== 'chat_created';
+    if (taskTriggerTiming === 'only_this_floor' || taskTriggerTiming === 'any_message') {
+        return triggerContext !== 'before_user' && triggerContext !== 'after_ai';
+    }
+    return taskTriggerTiming !== triggerContext;
+}
+function matchInterval(task, counts, triggerContext) {
+    const currentFloor = pickFloorByType(task.floorType || 'all', counts);
+    if (currentFloor <= 0) return false;
+    if (task.triggerTiming === 'only_this_floor') return currentFloor === task.interval;
+    if (task.triggerTiming === 'any_message') return currentFloor % task.interval === 0;
+    return currentFloor % task.interval === 0;
+}
+
 async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatChanged = null, overrideNewChat = null) {
-    const settings = getSettings();
-    const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-    if (!settings.enabled || !globalEnabled || state.isExecutingTask) return;
+    if (!isGloballyEnabled() || state.isExecutingTask) return;
 
-    const allTasks = [...settings.globalTasks, ...getCharacterTasks()];
-    if (allTasks.length === 0) return;
+    const tasks = allTasks();
+    if (tasks.length === 0) return;
 
-    const now = Date.now();
-    const tasksToExecute = allTasks.filter(task => {
-        if (task.disabled || isTaskInCooldown(task.name)) return false;
+    const n = nowMs();
+    const counts = getFloorCounts();
 
-        const taskTriggerTiming = task.triggerTiming || 'after_ai';
+    const tasksToExecute = tasks.filter(task => {
+        if (task.disabled) return false;
+        if (isTaskInCooldown(task.name, n)) return false;
 
-        if (taskTriggerTiming === 'initialization') {
-            return triggerContext === 'chat_created';
-        }
+        const tt = task.triggerTiming || 'after_ai';
+        if (tt === 'initialization') return triggerContext === 'chat_created';
 
         if ((overrideChatChanged ?? state.chatJustChanged) || (overrideNewChat ?? state.isNewChat)) return false;
         if (task.interval <= 0) return false;
 
-        if (taskTriggerTiming === 'only_this_floor') {
-            if (triggerContext !== 'before_user' && triggerContext !== 'after_ai') return false;
-            const currentFloor = calculateFloorByType(task.floorType || 'all');
-            return currentFloor === task.interval && currentFloor > 0;
-        }
-
-        if (taskTriggerTiming === 'any_message') {
-            if (triggerContext !== 'before_user' && triggerContext !== 'after_ai') return false;
-            const currentFloor = calculateFloorByType(task.floorType || 'all');
-            return currentFloor % task.interval === 0 && currentFloor > 0;
-        }
-
-        if (taskTriggerTiming !== triggerContext) return false;
-
-        const currentFloor = calculateFloorByType(task.floorType || 'all');
-        return currentFloor % task.interval === 0 && currentFloor > 0;
+        if (shouldSkipByContext(tt, triggerContext)) return false;
+        return matchInterval(task, counts, triggerContext);
     });
 
     for (const task of tasksToExecute) {
-        state.taskLastExecutionTime.set(task.name, now);
+        state.taskLastExecutionTime.set(task.name, n);
         await executeCommands(task.commands, task.name);
     }
 
     if (triggerContext === 'after_ai') state.lastTurnCount = calculateTurnCount();
 }
 
-async function onMessageReceived(messageId, type) {
+// ------------- Event handlers ------------
+async function onMessageReceived(messageId) {
     if (typeof messageId !== 'number' || messageId < 0 || !chat[messageId]) return;
-
     const message = chat[messageId];
     if (message.is_user || message.is_system || message.mes === '...' ||
         state.isCommandGenerated || state.isExecutingTask ||
         (message.swipe_id !== undefined && message.swipe_id > 0)) return;
 
-    const settings = getSettings();
-    const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-    if (!settings.enabled || !globalEnabled) return;
+    if (!isGloballyEnabled()) return;
 
-    const messageKey = `${getContext().chatId}_${messageId}_${message.send_date || Date.now()}`;
+    const messageKey = `${getContext().chatId}_${messageId}_${message.send_date || nowMs()}`;
     if (isMessageProcessed(messageKey)) return;
 
     markMessageAsProcessed(messageKey);
@@ -258,10 +346,7 @@ async function onMessageReceived(messageId, type) {
 }
 
 async function onUserMessage() {
-    const settings = getSettings();
-    const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-    if (!settings.enabled || !globalEnabled) return;
-
+    if (!isGloballyEnabled()) return;
     const messageKey = `${getContext().chatId}_user_${chat.length}`;
     if (isMessageProcessed(messageKey)) return;
 
@@ -270,10 +355,11 @@ async function onUserMessage() {
     state.chatJustChanged = state.isNewChat = false;
 }
 
-function onMessageDeleted(data) {
+function onMessageDeleted() {
     const settings = getSettings();
     const chatId = getContext().chatId;
     settings.processedMessages = settings.processedMessages.filter(key => !key.startsWith(`${chatId}_`));
+    state.processedMessagesSet = new Set(settings.processedMessages);
     state.isExecutingTask = state.isCommandGenerated = false;
     debouncedSave();
 }
@@ -291,6 +377,7 @@ function onChatChanged(chatId) {
 
     const settings = getSettings();
     settings.processedMessages = settings.processedMessages.filter(key => !key.startsWith(`${chatId}_`));
+    state.processedMessagesSet = new Set(settings.processedMessages);
     debouncedSave();
 
     checkEmbeddedTasks();
@@ -302,9 +389,10 @@ async function onChatCreated() {
     await checkAndExecuteTasks('chat_created', false, false);
 }
 
+// ------------- UI: lists & items ----------
 function getTasksHash() {
-    const allTasks = [...getSettings().globalTasks, ...getCharacterTasks()];
-    return allTasks.map(t => `${t.id}_${t.disabled}_${t.name}_${t.interval}_${t.floorType}_${t.triggerTiming || 'after_ai'}`).join('|');
+    const tasks = [...getSettings().globalTasks, ...getCharacterTasks()];
+    return tasks.map(t => `${t.id}_${t.disabled}_${t.name}_${t.interval}_${t.floorType}_${t.triggerTiming || 'after_ai'}`).join('|');
 }
 
 function createTaskItem(task, index, isCharacterTask = false) {
@@ -312,11 +400,11 @@ function createTaskItem(task, index, isCharacterTask = false) {
 
     const taskType = isCharacterTask ? 'character' : 'global';
     const floorTypeText = { user: '用户楼层', llm: 'LLM楼层' }[task.floorType] || '全部楼层';
-    const triggerTimingText = { before_user: '用户前', any_message: '任意对话', initialization: '初始化', only_this_floor: '仅该楼层' }[task.triggerTiming] || 'AI后';
+    const triggerTimingText = { before_user: '用户前', any_message: '任意对话', initialization: '角色卡初始化', only_this_floor: '仅该楼层' }[task.triggerTiming] || 'AI后';
 
     let displayName;
     if (task.interval === 0) displayName = `${task.name} (手动触发)`;
-    else if (task.triggerTiming === 'initialization') displayName = `${task.name} (初始化)`;
+    else if (task.triggerTiming === 'initialization') displayName = `${task.name} (角色卡初始化)`;
     else if (task.triggerTiming === 'only_this_floor') displayName = `${task.name} (仅第${task.interval}${floorTypeText})`;
     else displayName = `${task.name} (每${task.interval}${floorTypeText}·${triggerTimingText})`;
 
@@ -330,16 +418,30 @@ function createTaskItem(task, index, isCharacterTask = false) {
         task.disabled = taskElement.find('.disable_task').prop('checked');
         saveTask(task, index, isCharacterTask);
     });
-    taskElement.find('.test_task').on('click', () => testTask(index, taskType));
     taskElement.find('.edit_task').on('click', () => editTask(index, taskType));
+    taskElement.find('.export_task').on('click', () => exportSingleTask(index, isCharacterTask));
     taskElement.find('.delete_task').on('click', () => deleteTask(index, taskType));
 
     return taskElement;
 }
 
+function initSortable($list, onUpdate) {
+    const inst = (() => { try { return $list.sortable('instance'); } catch { return undefined; } })();
+    if (inst) return;
+    $list.sortable({
+        delay: getSortableDelay?.() || 0,
+        handle: '.drag-handle.menu-handle',
+        items: '> .task-item',
+        update: onUpdate
+    });
+}
+
 function refreshTaskLists() {
     const currentHash = getTasksHash();
-    if (currentHash === state.lastTasksHash) return;
+    if (currentHash === state.lastTasksHash) {
+        updateTaskBar();
+        return;
+    }
     state.lastTasksHash = currentHash;
 
     const $globalList = $('#global_tasks_list');
@@ -350,26 +452,48 @@ function refreshTaskLists() {
     $globalList.empty();
     globalTasks.forEach((task, i) => $globalList.append(createTaskItem(task, i, false)));
 
+    initSortable($globalList, function () {
+        const newOrderIds = $globalList.sortable('toArray');
+        const current = getSettings().globalTasks;
+        const idToTask = new Map(current.map(t => [t.id, t]));
+        const reordered = newOrderIds.map(id => idToTask.get(id)).filter(Boolean);
+        const leftovers = current.filter(t => !newOrderIds.includes(t.id));
+        getSettings().globalTasks = [...reordered, ...leftovers];
+        debouncedSave();
+        refreshTaskLists();
+    });
+
     $charList.empty();
     characterTasks.forEach((task, i) => $charList.append(createTaskItem(task, i, true)));
+
+    initSortable($charList, async function () {
+        const newOrderIds = $charList.sortable('toArray');
+        const current = getCharacterTasks();
+        const idToTask = new Map(current.map(t => [t.id, t]));
+        const reordered = newOrderIds.map(id => idToTask.get(id)).filter(Boolean);
+        const leftovers = current.filter(t => !newOrderIds.includes(t.id));
+        await saveCharacterTasks([...reordered, ...leftovers]);
+        refreshTaskLists();
+    });
 
     updateTaskBar();
 }
 
-function getActivatedTasks() {
-    const allTasks = [...getSettings().globalTasks, ...getCharacterTasks()];
-    return allTasks.filter(task => task.buttonActivated && !task.disabled);
-}
+// ------------- Task bar -------------------
+const getActivatedTasks = () => allTasks().filter(t => t.buttonActivated && !t.disabled);
 
 function createTaskBar() {
     const activatedTasks = getActivatedTasks();
-    $('#xiaobaix_task_bar').remove();
+    const signature = state.taskBarVisible ? activatedTasks.map(t => `${t.name}`).join('|') : 'hidden';
+    if (signature === state.taskBarSignature) return;
+    state.taskBarSignature = signature;
 
+    $('#xiaobaix_task_bar').remove();
     if (activatedTasks.length === 0 || !state.taskBarVisible) return;
 
     const taskBar = $(`
         <div id="xiaobaix_task_bar">
-            <div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; border: 1px solid var(--SmartThemeBorderColor); border-bottom : 0px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; border: 1px solid var(--SmartThemeBorderColor); border-bottom:0;">
             </div>
         </div>
     `);
@@ -378,7 +502,7 @@ function createTaskBar() {
     activatedTasks.forEach(task => {
         const button = $(`
             <button class="menu_button menu_button_icon xiaobaix-task-button"
-                    data-task-name="${task.name}" style="margin: 1px;">
+                    data-task-name="${task.name}" style="margin:1px;">
                 <span>${task.name}</span>
             </button>
         `);
@@ -393,15 +517,13 @@ function createTaskBar() {
     if (sendForm.length > 0) sendForm.before(taskBar);
 }
 
-function updateTaskBar() { createTaskBar(); }
+const updateTaskBar = () => createTaskBar();
 
 function toggleTaskBarVisibility() {
     state.taskBarVisible = !state.taskBarVisible;
     updateTaskBar();
-
     const toggleButton = $('#toggle_task_bar');
     const smallText = toggleButton.find('small');
-
     if (state.taskBarVisible) {
         smallText.css({ 'opacity': '1', 'text-decoration': 'none' });
         toggleButton.attr('title', '隐藏任务栏');
@@ -411,6 +533,7 @@ function toggleTaskBarVisibility() {
     }
 }
 
+// ------------- Editor ---------------------
 function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
     state.currentEditingTask = task;
     state.currentEditingIndex = isEdit ? (isCharacterTask ? getCharacterTasks() : getSettings().globalTasks).indexOf(task) : -1;
@@ -425,6 +548,26 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
     editorTemplate.find('.task_enabled_edit').prop('checked', !task?.disabled);
     editorTemplate.find('.task_button_activated_edit').prop('checked', task?.buttonActivated || false);
 
+    function updateWarningDisplay() {
+        const interval = parseInt(editorTemplate.find('.task_interval_edit').val()) || 0;
+        const triggerTiming = editorTemplate.find('.task_trigger_timing_edit').val();
+        const floorType = editorTemplate.find('.task_floor_type_edit').val();
+
+        let warningElement = editorTemplate.find('.trigger-timing-warning');
+        if (warningElement.length === 0) {
+            warningElement = $('<div class="trigger-timing-warning" style="color:#ff6b6b;font-size:.8em;margin-top:4px;"></div>');
+            editorTemplate.find('.task_trigger_timing_edit').parent().append(warningElement);
+        }
+
+        const shouldShowWarning = interval > 0 && floorType === 'all' &&
+                                 (triggerTiming === 'after_ai' || triggerTiming === 'before_user');
+        if (shouldShowWarning) {
+            warningElement.html('⚠️ 警告：选择"全部楼层"配合"AI消息后"或"用户消息前"可能因楼层编号不匹配而不触发').show();
+        } else {
+            warningElement.hide();
+        }
+    }
+
     function updateControlStates() {
         const interval = parseInt(editorTemplate.find('.task_interval_edit').val()) || 0;
         const triggerTiming = editorTemplate.find('.task_trigger_timing_edit').val();
@@ -438,7 +581,7 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
             triggerTimingControl.prop('disabled', true).css('opacity', '0.5');
             let manualTriggerHint = editorTemplate.find('.manual-trigger-hint');
             if (manualTriggerHint.length === 0) {
-                manualTriggerHint = $('<small class="manual-trigger-hint" style="color: #888;">手动触发</small>');
+                manualTriggerHint = $('<small class="manual-trigger-hint" style="color:#888;">手动触发</small>');
                 triggerTimingControl.parent().append(manualTriggerHint);
             }
             manualTriggerHint.show();
@@ -452,31 +595,10 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
                 floorTypeControl.prop('disabled', true).css('opacity', '0.5');
             } else {
                 intervalControl.prop('disabled', false).css('opacity', '1');
-                if (interval !== 0) floorTypeControl.prop('disabled', false).css('opacity', '1');
+                floorTypeControl.prop('disabled', false).css('opacity', '1');
             }
         }
         updateWarningDisplay();
-    }
-
-    function updateWarningDisplay() {
-        const interval = parseInt(editorTemplate.find('.task_interval_edit').val()) || 0;
-        const triggerTiming = editorTemplate.find('.task_trigger_timing_edit').val();
-        const floorType = editorTemplate.find('.task_floor_type_edit').val();
-
-        let warningElement = editorTemplate.find('.trigger-timing-warning');
-        if (warningElement.length === 0) {
-            warningElement = $('<div class="trigger-timing-warning" style="color: #ff6b6b; font-size: 0.8em; margin-top: 4px;"></div>');
-            editorTemplate.find('.task_trigger_timing_edit').parent().append(warningElement);
-        }
-
-        const shouldShowWarning = interval > 0 && floorType === 'all' &&
-                                 (triggerTiming === 'after_ai' || triggerTiming === 'before_user');
-
-        if (shouldShowWarning) {
-            warningElement.html('⚠️ 警告：选择"全部楼层"配合"AI消息后"或"用户消息前"可能因楼层编号不匹配而不触发').show();
-        } else {
-            warningElement.hide();
-        }
     }
 
     editorTemplate.find('.task_interval_edit').on('input', updateControlStates);
@@ -581,11 +703,9 @@ function deleteTask(index, type) {
     });
 }
 
-function getAllTaskNames() {
-    return [...getSettings().globalTasks, ...getCharacterTasks()]
-        .filter(t => !t.disabled).map(t => t.name);
-}
+const getAllTaskNames = () => allTasks().filter(t => !t.disabled).map(t => t.name);
 
+// ------------- Embedded tasks -------------
 async function checkEmbeddedTasks() {
     if (!this_chid) return;
     const avatar = characters[this_chid]?.avatar;
@@ -593,7 +713,7 @@ async function checkEmbeddedTasks() {
 
     if (Array.isArray(tasks) && tasks.length > 0 && avatar) {
         const settings = getSettings();
-        if (!settings.character_allowed_tasks) settings.character_allowed_tasks = [];
+        settings.character_allowed_tasks ??= [];
 
         if (!settings.character_allowed_tasks.includes(avatar)) {
             const checkKey = `AlertTasks_${avatar}`;
@@ -613,7 +733,7 @@ async function checkEmbeddedTasks() {
                         taskListContainer.append(taskPreview);
                     });
                     result = await callGenericPopup(templateElement, POPUP_TYPE.CONFIRM, '', { okButton: '允许' });
-                } catch (error) {
+                } catch {
                     result = await callGenericPopup(`此角色包含 ${tasks.length} 个定时任务。是否允许使用？`, POPUP_TYPE.CONFIRM, '', { okButton: '允许' });
                 }
                 if (result) {
@@ -626,12 +746,21 @@ async function checkEmbeddedTasks() {
     refreshTaskLists();
 }
 
+// ------------- Import/Export --------------
 async function exportGlobalTasks() {
-    const settings = getSettings();
-    const tasks = settings.globalTasks;
+    const tasks = getSettings().globalTasks;
     if (tasks.length === 0) return;
     const fileName = `global_tasks_${new Date().toISOString().split('T')[0]}.json`;
     const fileData = JSON.stringify({ type: 'global', exportDate: new Date().toISOString(), tasks }, null, 4);
+    download(fileData, fileName, 'application/json');
+}
+
+function exportSingleTask(index, isCharacterTask) {
+    const tasks = isCharacterTask ? getCharacterTasks() : getSettings().globalTasks;
+    if (index < 0 || index >= tasks.length) return;
+    const task = tasks[index];
+    const fileName = `${isCharacterTask ? 'character' : 'global'}_task_${task?.name || 'unnamed'}_${new Date().toISOString().split('T')[0]}.json`;
+    const fileData = JSON.stringify({ type: isCharacterTask ? 'character' : 'global', exportDate: new Date().toISOString(), tasks: [task] }, null, 4);
     download(fileData, fileName, 'application/json');
 }
 
@@ -639,11 +768,29 @@ async function importGlobalTasks(file) {
     if (!file) return;
     try {
         const fileText = await getFileText(file);
-        const importData = JSON.parse(fileText);
-        if (!Array.isArray(importData.tasks)) throw new Error('无效的任务文件格式');
-        const tasksToImport = importData.tasks.map(task => ({
-            ...task, id: uuidv4(), importedAt: new Date().toISOString()
+        const raw = JSON.parse(fileText);
+        let incomingTasks = [];
+        if (Array.isArray(raw)) incomingTasks = raw;
+        else if (Array.isArray(raw.tasks)) incomingTasks = raw.tasks;
+        else if (raw && typeof raw === 'object' && raw.name && (raw.commands || raw.interval !== undefined)) incomingTasks = [raw];
+
+        if (!Array.isArray(incomingTasks) || incomingTasks.length === 0) throw new Error('无效的任务文件格式');
+
+        incomingTasks = incomingTasks.filter(t => (t?.name || '').trim() && (String(t?.commands || '').trim() || t.interval === 0));
+        const tasksToImport = incomingTasks.map(task => ({
+            id: uuidv4(),
+            name: String(task.name || '').trim(),
+            commands: String(task.commands || '').trim(),
+            interval: clampInt(task.interval, 0, 99999, 0),
+            floorType: ['all', 'user', 'llm'].includes(task.floorType) ? task.floorType : 'all',
+            triggerTiming: ['after_ai','before_user','any_message','initialization','only_this_floor'].includes(task.triggerTiming)
+                ? task.triggerTiming : (task.interval === 0 ? 'after_ai' : 'after_ai'),
+            disabled: !!task.disabled,
+            buttonActivated: !!task.buttonActivated,
+            createdAt: task.createdAt || new Date().toISOString(),
+            importedAt: new Date().toISOString(),
         }));
+
         const settings = getSettings();
         settings.globalTasks = [...settings.globalTasks, ...tasksToImport];
         debouncedSave();
@@ -653,12 +800,17 @@ async function importGlobalTasks(file) {
     }
 }
 
-function clearProcessedMessages() { getSettings().processedMessages = []; debouncedSave(); }
+// ------------- Tools / Debug -------------
+function clearProcessedMessages() {
+    getSettings().processedMessages = [];
+    state.processedMessagesSet.clear();
+    debouncedSave();
+}
 function clearTaskCooldown(taskName = null) { taskName ? state.taskLastExecutionTime.delete(taskName) : state.taskLastExecutionTime.clear(); }
 function getTaskCooldownStatus() {
     const status = {};
     for (const [taskName, lastTime] of state.taskLastExecutionTime.entries()) {
-        const remaining = Math.max(0, CONFIG.TASK_COOLDOWN - (Date.now() - lastTime));
+        const remaining = Math.max(0, CONFIG.TASK_COOLDOWN - (nowMs() - lastTime));
         status[taskName] = { lastExecutionTime: lastTime, remainingCooldown: remaining, isInCooldown: remaining > 0 };
     }
     return status;
@@ -674,6 +826,7 @@ function getMemoryUsage() {
     };
 }
 
+// ------------- UI Refresh/Cleanup --------
 function refreshUI() { refreshTaskLists(); updateTaskBar(); }
 
 function cleanup() {
@@ -693,16 +846,16 @@ function cleanup() {
     $(window).off('beforeunload', cleanup);
 }
 
+// ------------- Public API ----------------
 window.xbqte = async (name) => {
     try {
         if (!name?.trim()) throw new Error('请提供任务名称');
-        const task = [...getSettings().globalTasks, ...getCharacterTasks()]
-            .find(t => t.name.toLowerCase() === name.toLowerCase());
+        const task = allTasks().find(t => t.name.toLowerCase() === name.toLowerCase());
         if (!task) throw new Error(`找不到名为 "${name}" 的任务`);
         if (task.disabled) throw new Error(`任务 "${name}" 已被禁用`);
         if (isTaskInCooldown(task.name)) {
-            const cooldownStatus = getTaskCooldownStatus()[task.name];
-            throw new Error(`任务 "${name}" 仍在冷却中，剩余 ${cooldownStatus.remainingCooldown}ms`);
+            const cd = getTaskCooldownStatus()[task.name];
+            throw new Error(`任务 "${name}" 仍在冷却中，剩余 ${cd.remainingCooldown}ms`);
         }
         setTaskCooldown(task.name);
         const result = await executeCommands(task.commands, task.name);
@@ -721,19 +874,19 @@ window.setScheduledTaskInterval = async (name, interval) => {
     }
 
     const settings = getSettings();
-    const globalTaskIndex = settings.globalTasks.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
-    if (globalTaskIndex !== -1) {
-        settings.globalTasks[globalTaskIndex].interval = intervalNum;
+    const gi = settings.globalTasks.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
+    if (gi !== -1) {
+        settings.globalTasks[gi].interval = intervalNum;
         debouncedSave();
         refreshTaskLists();
         return `已设置全局任务 "${name}" 的间隔为 ${intervalNum === 0 ? '手动激活' : `每${intervalNum}楼层`}`;
     }
 
-    const characterTasks = getCharacterTasks();
-    const characterTaskIndex = characterTasks.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
-    if (characterTaskIndex !== -1) {
-        characterTasks[characterTaskIndex].interval = intervalNum;
-        await saveCharacterTasks(characterTasks);
+    const cts = getCharacterTasks();
+    const ci = cts.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
+    if (ci !== -1) {
+        cts[ci].interval = intervalNum;
+        await saveCharacterTasks(cts);
         refreshTaskLists();
         return `已设置角色任务 "${name}" 的间隔为 ${intervalNum === 0 ? '手动激活' : `每${intervalNum}楼层`}`;
     }
@@ -747,6 +900,7 @@ Object.assign(window, {
     getTasksMemoryUsage: getMemoryUsage
 });
 
+// ------------- Slash commands -------------
 function registerSlashCommands() {
     try {
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -790,7 +944,9 @@ function registerSlashCommands() {
     }
 }
 
+// ------------- Init -----------------------
 function initTasks() {
+    hydrateProcessedSetFromSettings();
     scheduleCleanup();
 
     if (!extension_settings[EXT_ID].tasks) {
@@ -804,8 +960,7 @@ function initTasks() {
     window.addEventListener('message', handleTaskMessage);
 
     $('#scheduled_tasks_enabled').on('input', e => {
-        const globalEnabled = window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true;
-        if (!globalEnabled) return;
+        if (!isGloballyEnabled()) return;
         const enabled = $(e.target).prop('checked');
         getSettings().enabled = enabled;
         debouncedSave();
@@ -815,7 +970,6 @@ function initTasks() {
     $('#add_global_task').on('click', () => showTaskEditor(null, false, false));
     $('#add_character_task').on('click', () => showTaskEditor(null, false, true));
     $('#toggle_task_bar').on('click', toggleTaskBarVisibility);
-    $('#export_global_tasks').on('click', exportGlobalTasks);
     $('#import_global_tasks').on('click', () => $('#import_tasks_file').trigger('click'));
     $('#import_tasks_file').on('change', function(e) {
         const file = e.target.files[0];

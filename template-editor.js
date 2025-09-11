@@ -87,7 +87,8 @@ class TemplateSettings {
             if (embeddedSettings?.enabled) result = embeddedSettings;
         }
         result = result || (this.get().characterBindings[avatar]?.enabled ? this.get().characterBindings[avatar] : null);
-        state.caches.template.set(avatar, result);
+        // 只緩存有效結果，避免將 null 緩存黏住
+        if (result) state.caches.template.set(avatar, result);
         return result;
     }
 }
@@ -1264,8 +1265,10 @@ async function openEditor() {
             recentMessageCount: parseInt(String($html.find('#recent_message_count').val())) || 5,
             skipFirstMessage: $html.find('#skip_first_message').prop('checked')
         });
+        // 立即清理本地狀態，避免舊緩存干擾
+        state.clear();
         updateStatus();
-        setTimeout(() => MessageHandler.reapplyAll(), 150);
+        setTimeout(() => MessageHandler.reapplyAll(), 300);
         toastr.success(`已保存 ${name} 的模板设置`);
     }
 }
@@ -1285,6 +1288,8 @@ function importGlobal(event) {
             Object.assign(TemplateSettings.get(), data);
             saveSettingsDebounced();
             $("#xiaobaix_template_enabled").prop("checked", data.enabled);
+            // 清理狀態，確保新設置生效
+            state.clear();
             updateStatus();
             setTimeout(() => MessageHandler.reapplyAll(), 150);
             toastr.success('全局模板设置已导入');
