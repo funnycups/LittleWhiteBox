@@ -9,18 +9,22 @@ const C = {
   ASSOC_DELAY: 1000, REQ_WINDOW: 30000
 };
 const S = {
-  active: false, isPreview: false, isLong: false, isHistoryUiBound: false, previewData: null, previewIds: new Set(),
-  interceptedIds: [], history: [], listeners: [], resolve: null, reject: null,
-  sendBtnWasDisabled: false, longPressTimer: null, longPressDelay: 1000, chatLenBefore: 0,
-  restoreLong: null, cleanTimer: null, previewAbort: null, tailAPI: null
+  active: false, isPreview: false, isLong: false, previewData: null, previewIds: new Set(),
+  interceptedIds: [], history: [], listeners: [],
+  resolve: null, reject: null, sendBtnWasDisabled: false, longPressTimer: null, longPressDelay: 1000,
+  previewAbort: null, tailAPI: null, cleanTimer: null,
 };
 
-const $q = (sel) => $(sel), ON = (e, c) => eventSource.on(e, c), OFF = (e, c) => eventSource.removeListener(e, c);
-const now = () => Date.now(), geEnabled = () => { try { return ("isXiaobaixEnabled" in window) ? !!window.isXiaobaixEnabled : true; } catch { return true; } };
+const $q = (sel) => $(sel);
+const ON = (e, c) => eventSource.on(e, c);
+const OFF = (e, c) => eventSource.removeListener(e, c);
+const now = () => Date.now();
+const geEnabled = () => { try { return ("isXiaobaixEnabled" in window) ? !!window.isXiaobaixEnabled : true; } catch { return true; } };
 const debounce = (fn, w) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), w); }; };
 const safeJson = (t) => { try { return JSON.parse(t); } catch { return null; } };
+const compose = (base, stack) => stack.reduce((acc, mw) => mw(acc), base);
 
-/* 读取文本：仅在可安全读取的类型上使用 */
+const isSafeBody = (b) => !b || typeof b === "string" || b instanceof Blob || b instanceof URLSearchParams || b instanceof ArrayBuffer || ArrayBuffer.isView(b) || (typeof FormData !== "undefined" && b instanceof FormData);
 const readText = async (b) => {
   try {
     if (!b) return "";
@@ -31,35 +35,13 @@ const readText = async (b) => {
   } catch {}
   return "";
 };
-
-/* 判定 body 是否“可重复读取”，避免误消费一次性流导致 502 */
-function isSafeBody(body) {
-  if (!body) return true;
-  return (
-    typeof body === "string" ||
-    body instanceof Blob ||
-    body instanceof URLSearchParams ||
-    body instanceof ArrayBuffer ||
-    ArrayBuffer.isView(body) ||
-    // FormData 虽然可遍历，但 readText 不会读取；保守认为安全但我们不去读取它
-    (typeof FormData !== "undefined" && body instanceof FormData)
-  );
-}
-
-/* 在不消费一次性流的前提下尝试读取请求体 */
 async function safeReadBodyFromInput(input, options) {
   try {
-    if (input instanceof Request) {
-      // Request.clone() 可安全读取
-      return await readText(input.clone());
-    }
+    if (input instanceof Request) return await readText(input.clone());
     const body = options?.body;
     if (!isSafeBody(body)) return "";
-    // 对安全类型才读取
     return await readText(body);
-  } catch {
-    return "";
-  }
+  } catch { return ""; }
 }
 
 const isGen = (u) => String(u || "").includes(C.TARGET);
@@ -68,7 +50,6 @@ const isTarget = async (input, opt = {}) => {
     const url = input instanceof Request ? input.url : input;
     if (!isGen(url)) return false;
     const text = await safeReadBodyFromInput(input, opt);
-    // 无法读取时，保守返回 true（仅基于 URL），但不会记录（recordReal 内部也会跳过）
     return text ? text.includes('"messages"') : true;
   } catch {
     return input instanceof Request ? isGen(input.url) : isGen(input);
@@ -82,7 +63,6 @@ const getSettings = () => {
   return d;
 };
 
-/* ultra-light tail hook for eventSource.emit: 尾位固定 + 最小侵入 */
 function installEventSourceTail(es) {
   if (!es || es.__lw_tailInstalled) return es?.__lw_tailAPI || null;
 
@@ -104,7 +84,6 @@ function installEventSourceTail(es) {
     } catch {}
     return es.emit?.bind?.(es) || es.emit;
   };
-  const compose = (base, stack) => stack.reduce((acc, mw) => mw(acc), base);
 
   const tails = new Map();
   const addTail = (ev, fn) => {
@@ -213,7 +192,6 @@ function installEventSourceTail(es) {
   return api;
 }
 
-/* fetch guard: 尾位固定 + 最小侵入 */
 let __installed = false;
 const MW_KEY = Symbol.for("lwbox.fetchMiddlewareStack");
 const BASE_KEY = Symbol.for("lwbox.fetchBase");
@@ -231,15 +209,9 @@ const getFetchFromDesc = (d) => {
   } catch {}
   return globalThis.fetch;
 };
-const compose = (base, stack) => stack.reduce((acc, mw) => mw(acc), base);
 
-/* 给记录加上超时保护，防止阻塞真实请求 */
 const withTimeout = (p, ms = 200) => {
-  try {
-    return Promise.race([p, new Promise((r) => setTimeout(r, ms))]);
-  } catch {
-    return p;
-  }
+  try { return Promise.race([p, new Promise((r) => setTimeout(r, ms))]); } catch { return p; }
 };
 
 const ensureAccessor = () => {
@@ -274,6 +246,7 @@ const reapply = () => {
     return window[CMP_KEY];
   } catch { return globalThis.fetch; }
 };
+
 function makeMw() {
   const mw = (next) => async function f(input, options = {}) {
     try {
@@ -299,7 +272,6 @@ function installFetch() {
     window[MW_KEY] ||= [];
     window[BASE_KEY] ||= getFetchFromDesc(Object.getOwnPropertyDescriptor(window, "fetch"));
     ensureAccessor();
-    // 确保仅有一个我们的中间件且位于末位
     if (!window[MW_KEY].some((m) => m && m[ID])) window[MW_KEY].push(makeMw());
     else {
       const i = window[MW_KEY].findIndex((m) => m && m[ID]);
@@ -311,9 +283,7 @@ function installFetch() {
     }
     queueMicrotask(reapply);
     window.addEventListener("pageshow", reapply, { passive: true });
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") reapply();
-    }, { passive: true });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reapply(); }, { passive: true });
     window.addEventListener("focus", reapply, { passive: true });
   } catch (e) { console.error("[LittleWhiteBox] fetch guard err", e); }
 }
@@ -323,71 +293,94 @@ function uninstallFetch() {
     const s = window[MW_KEY];
     const i = Array.isArray(s) ? s.findIndex((m) => m && m[ID]) : -1;
     if (i >= 0) s.splice(i, 1);
-    const others = Array.isArray(window[MW_KEY]) && window[MW_KEY].length;
+    const hasOthers = Array.isArray(window[MW_KEY]) && window[MW_KEY].length;
     const orig = window[ORIG_KEY];
-    if (!others) {
+    if (!hasOthers) {
       if (orig) {
         try { Object.defineProperty(window, "fetch", orig); }
         catch { Object.defineProperty(window, "fetch", { configurable: true, enumerable: true, writable: true, value: window[BASE_KEY] || globalThis.fetch }); }
       } else {
         Object.defineProperty(window, "fetch", { configurable: true, enumerable: true, writable: true, value: window[BASE_KEY] || globalThis.fetch });
       }
-    } else {
-      reapply();
-    }
+    } else reapply();
   } catch (e) { console.error("[LittleWhiteBox] fetch guard uninstall err", e); }
   __installed = false;
 }
 const setupFetch = () => { if (!S.active) { installFetch(); S.active = true; } };
 const restoreFetch = () => { if (S.active) { uninstallFetch(); S.active = false; } };
-const updateFetchState = () => { const st = getSettings(), need = (st.preview.enabled || st.recorded.enabled); if (need && !S.active) setupFetch(); if (!need && S.active) restoreFetch(); };
+const updateFetchState = () => {
+  const st = getSettings(), need = (st.preview.enabled || st.recorded.enabled);
+  if (need && !S.active) setupFetch();
+  if (!need && S.active) restoreFetch();
+};
 
-/* record/history */
 const pushHistory = (r) => { S.history.unshift(r); if (S.history.length > C.MAX_HISTORY) S.history.length = C.MAX_HISTORY; };
-const extractUser = (ms) => { if (!Array.isArray(ms)) return ""; for (let i = ms.length - 1; i >= 0; i--) if (ms[i]?.role === "user") return ms[i].content || ""; return ""; };
+const extractUser = (ms) => {
+  if (!Array.isArray(ms)) return "";
+  for (let i = ms.length - 1; i >= 0; i--) if (ms[i]?.role === "user") return ms[i].content || "";
+  return "";
+};
 async function recordReal(input, options) {
   try {
     const url = input instanceof Request ? input.url : input;
-    // 安全读取，读不到则跳过记录，避免消费一次性流
     const body = await safeReadBodyFromInput(input, options);
     if (!body) return;
     const data = safeJson(body) || {}, ctx = getContext();
     pushHistory({
-      url, method: options?.method || (input instanceof Request ? input.method : "POST"), requestData: data, messages: data.messages || [],
-      model: data.model || "Unknown", timestamp: now(), messageId: ctx.chat?.length || 0,
-      characterName: ctx.characters?.[ctx.characterId]?.name || "Unknown", userInput: extractUser(data.messages || []), isRealRequest: true
+      url, method: options?.method || (input instanceof Request ? input.method : "POST"),
+      requestData: data, messages: data.messages || [], model: data.model || "Unknown",
+      timestamp: now(), messageId: ctx.chat?.length || 0,
+      characterName: ctx.characters?.[ctx.characterId]?.name || "Unknown",
+      userInput: extractUser(data.messages || []), isRealRequest: true
     });
-    setTimeout(() => { if (S.history[0] && !S.history[0].associatedMessageId) S.history[0].associatedMessageId = ctx.chat?.length || 0; }, C.ASSOC_DELAY);
+    setTimeout(() => {
+      const first = S.history[0];
+      if (first && !first.associatedMessageId) first.associatedMessageId = ctx.chat?.length || 0;
+    }, C.ASSOC_DELAY);
   } catch {}
 }
 const findRec = (id) => {
   if (!S.history.length) return null;
-  const preds = [(r) => r.associatedMessageId === id, (r) => r.messageId === id, (r) => r.messageId === id - 1, (r) => Math.abs(r.messageId - id) <= 1];
+  const preds = [
+    (r) => r.associatedMessageId === id,
+    (r) => r.messageId === id,
+    (r) => r.messageId === id - 1,
+    (r) => Math.abs(r.messageId - id) <= 1
+  ];
   for (const p of preds) { const m = S.history.find(p); if (m) return m; }
   const cs = S.history.filter((r) => r.messageId <= id + 2);
   return cs.length ? cs.sort((a, b) => b.messageId - a.messageId)[0] : S.history[0];
 };
 
-/* preview intercept */
 async function interceptPreview(url, options) {
-  // 注意：不再强制读取一次性 body；仅在安全类型下构建预览数据
   const body = await safeReadBodyFromInput(url, options);
-  const data = safeJson(body) || {}, userInput = extractUser(data?.messages || []);
-  S.previewData = { url, method: options?.method || "POST", requestData: data, messages: data?.messages || [], model: data?.model || "Unknown", timestamp: now(), userInput, isPreview: true };
-  if (S.isLong) {
-    setTimeout(() => {
-      displayPreview(S.previewData);
-      if (S.restoreLong) { try { S.restoreLong(); } catch {} const ctx = getContext(); S.chatLenBefore = ctx.chat?.length || 0; S.restoreLong = hijackPush(); }
-    }, 100);
-  } else if (S.resolve) { S.resolve({ success: true, data: S.previewData }); S.resolve = S.reject = null; }
-  // 本地拦截响应，统一返回 200，避免上层误判为网络错误
-  return new Response(JSON.stringify({ choices: [{ message: { content: "" }, finish_reason: "stop" }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  const data = safeJson(body) || {};
+  const userInput = extractUser(data?.messages || []);
+  S.previewData = {
+    url,
+    method: options?.method || "POST",
+    requestData: data,
+    messages: data?.messages || [],
+    model: data?.model || "Unknown",
+    timestamp: now(),
+    userInput,
+    isPreview: true
+  };
+
+  if (S.isLong) setTimeout(() => displayPreview(S.previewData), 100);
+  else if (S.resolve) { S.resolve({ success: true, data: S.previewData }); S.resolve = S.reject = null; }
+
+  const payload = S.isLong
+    ? { choices: [{ message: { content: "【小白X】已拦截消息" }, finish_reason: "stop" }], intercepted: true }
+    : { choices: [{ message: { content: "" }, finish_reason: "stop" }] };
+
+  return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-/* DOM bypass + push hijack */
 let __mo = null;
 const startBypass = () => {
-  if (__mo) return; const chat = document.querySelector("#chat"); if (!chat) return;
+  if (__mo) return;
+  const chat = document.querySelector("#chat"); if (!chat) return;
   __mo = new MutationObserver((muts) => {
     if (!S.isPreview && !S.isLong) return;
     for (const m of muts) m.addedNodes?.forEach((n) => {
@@ -417,11 +410,13 @@ function hijackPush() {
   };
 }
 const waitIntercept = () => new Promise((resolve, reject) => {
-  const t = setTimeout(() => { if (S.resolve) { S.resolve({ success: false, error: `等待超时 (${getSettings().preview.timeoutSeconds}秒)` }); S.resolve = S.reject = null; } }, getSettings().preview.timeoutSeconds * 1000);
-  S.resolve = (v) => { clearTimeout(t); resolve(v); }; S.reject = (e) => { clearTimeout(t); reject(e); };
+  const t = setTimeout(() => {
+    if (S.resolve) { S.resolve({ success: false, error: `等待超时 (${getSettings().preview.timeoutSeconds}秒)` }); S.resolve = S.reject = null; }
+  }, getSettings().preview.timeoutSeconds * 1000);
+  S.resolve = (v) => { clearTimeout(t); resolve(v); };
+  S.reject = (e) => { clearTimeout(t); reject(e); };
 });
 
-/* mirror/format */
 const MIRROR = { MERGE: "merge", MERGE_TOOLS: "merge_tools", SEMI: "semi", SEMI_TOOLS: "semi_tools", STRICT: "strict", STRICT_TOOLS: "strict_tools", SINGLE: "single" };
 const roleMap = { system: { label: "SYSTEM:", color: "#F7E3DA" }, user: { label: "USER:", color: "#F0ADA7" }, assistant: { label: "ASSISTANT:", color: "#6BB2CC" } };
 const colorXml = (t) => (typeof t === "string" ? t.replace(/<([^>]+)>/g, '<span style="color:#999; font-weight:bold;">&lt;$1&gt;</span>') : t);
@@ -497,28 +492,25 @@ function mirror(requestData) {
 }
 const finalMsgs = (d) => { try { if (d?.requestData?.messages) return mirror(d.requestData); if (Array.isArray(d?.messages)) return d.messages; return []; } catch { return Array.isArray(d?.messages) ? d.messages : []; } };
 const formatPreview = (d) => {
-  const msgs = finalMsgs(d); let out = `↓酒馆日志↓(已整理好json格式使其更具可读性) (${msgs.length}):\n${"-".repeat(30)}\n`;
+  const msgs = finalMsgs(d);
+  let out = `↓酒馆日志↓(已整理好json格式使其更具可读性) (${msgs.length}):\n${"-".repeat(30)}\n`;
   msgs.forEach((m, i) => {
     const txt = m.content || "", rm = roleMap[m.role] || { label: `${String(m.role || "").toUpperCase()}:`, color: "#FFF" };
     out += `<div style="color:${rm.color};font-weight:bold;margin-top:${i ? "15px" : "0"};">${rm.label}</div>`;
-    out += /<[^>]+>/g.test(txt) ? `<pre style="white-space:pre-wrap;margin:5px 0;color:${rm.color};">${colorXml(txt)}</pre>` : `<div style="margin:5px 0;color:${rm.color};white-space:pre-wrap;">${txt}</div>`;
+    out += /<[^>]+>/g.test(txt)
+      ? `<pre style="white-space:pre-wrap;margin:5px 0;color:${rm.color};">${colorXml(txt)}</pre>`
+      : `<div style="margin:5px 0;color:${rm.color};white-space:pre-wrap;">${txt}</div>`;
   });
   return out;
 };
-
-// 仅保留 messages 字段（其余全部隐藏）
 const stripTop = (o) => {
   try {
     if (!o || typeof o !== "object") return o;
     if (Array.isArray(o)) return o;
-
-    // 深拷贝 messages，避免引用外部对象
     const messages = Array.isArray(o.messages) ? JSON.parse(JSON.stringify(o.messages)) : undefined;
-
     return typeof messages !== "undefined" ? { messages } : {};
   } catch { return {}; }
 };
-
 const formatRaw = (d) => {
   try {
     const hasReq = Array.isArray(d?.requestData?.messages), hasMsgs = !hasReq && Array.isArray(d?.messages);
@@ -540,22 +532,35 @@ const toggleRaw = (e) => {
   const showRaw = r.style.display === "none"; r.style.display = showRaw ? "block" : "none"; f.style.display = showRaw ? "none" : "block"; btn.textContent = showRaw ? "切换整理格式" : "切换原始格式";
 };
 const openPopup = async (html, title) => {
-  await callGenericPopup(html, POPUP_TYPE.TEXT, title, { wide: true, large: true, customButtons: [{ text: "切换原始格式", classes: ["interactable", "popup-button-toggle-raw"], action: toggleRaw }] });
+  await callGenericPopup(html, POPUP_TYPE.TEXT, title, {
+    wide: true, large: true,
+    customButtons: [{ text: "切换原始格式", classes: ["interactable", "popup-button-toggle-raw"], action: toggleRaw }]
+  });
 };
 const displayPreview = async (d) => { try { await openPopup(buildPreviewHtml(d), "消息拦截"); } catch { toastr.error("显示拦截失败"); } };
 
-/* UI/send */
 const disableSend = (dis = true) => {
   const $b = $q("#send_but");
-  if (dis) { S.sendBtnWasDisabled = $b.prop("disabled"); $b.prop("disabled", true).off("click.preview-block").on("click.preview-block", (e) => { e.preventDefault(); e.stopImmediatePropagation(); return false; }); }
-  else { $b.prop("disabled", S.sendBtnWasDisabled).off("click.preview-block"); S.sendBtnWasDisabled = false; }
+  if (dis) {
+    S.sendBtnWasDisabled = $b.prop("disabled");
+    $b.prop("disabled", true)
+      .off("click.preview-block")
+      .on("click.preview-block", (e) => { e.preventDefault(); e.stopImmediatePropagation(); return false; });
+  } else {
+    $b.prop("disabled", S.sendBtnWasDisabled).off("click.preview-block");
+    S.sendBtnWasDisabled = false;
+  }
 };
 const triggerSend = () => {
-  const $b = $q("#send_but"), $t = $q("#send_textarea"), txt = String($t.val() || ""); if (!txt.trim()) return false;
-  const was = $b.prop("disabled"); $b.prop("disabled", false); $b[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); if (was) $b.prop("disabled", true); return true;
+  const $b = $q("#send_but"), $t = $q("#send_textarea"), txt = String($t.val() || "");
+  if (!txt.trim()) return false;
+  const was = $b.prop("disabled");
+  $b.prop("disabled", false);
+  $b[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+  if (was) $b.prop("disabled", true);
+  return true;
 };
 
-/* preview actions */
 async function showPreview() {
   let restore = null, toast = null, backup = null;
   try {
@@ -583,7 +588,8 @@ async function showHistoryPreview(messageId) {
   try {
     const set = getSettings(); if (!set.recorded.enabled || !geEnabled()) return;
     const rec = findRec(messageId);
-    if (rec?.messages?.length || rec?.requestData?.messages?.length) await openPopup(buildPreviewHtml({ ...rec, isHistoryPreview: true, targetMessageId: messageId }), `消息历史查看 - 第 ${messageId + 1} 条消息`);
+    if (rec?.messages?.length || rec?.requestData?.messages?.length)
+      await openPopup(buildPreviewHtml({ ...rec, isHistoryPreview: true, targetMessageId: messageId }), `消息历史查看 - 第 ${messageId + 1} 条消息`);
     else toastr.warning(`未找到第 ${messageId + 1} 条消息的API请求记录`);
   } catch { toastr.error("查看历史消息失败"); }
 }
@@ -593,16 +599,17 @@ const addHistoryButtonsDebounced = debounce(() => {
   $("#chat .mes").each(function () {
     const id = parseInt($(this).attr("mesid")), isUser = $(this).attr("is_user") === "true";
     if (id <= 0 || isUser) return;
-    const btn = $(`<div class="mes_btn mes_history_preview" title="查看历史API请求"><i class="fa-regular fa-note-sticky"></i></div>`).on("click", (e) => { e.preventDefault(); e.stopPropagation(); showHistoryPreview(id); });
+    const btn = $(`<div class="mes_btn mes_history_preview" title="查看历史API请求"><i class="fa-regular fa-note-sticky"></i></div>`)
+      .on("click", (e) => { e.preventDefault(); e.stopPropagation(); showHistoryPreview(id); });
     if (window.registerButtonToSubContainer && window.registerButtonToSubContainer(id, btn[0])) return;
     $(this).find(".flex-container.flex1.alignitemscenter").append(btn);
   });
 }, C.DEBOUNCE);
 
-/* small utils */
 const cleanupMemory = () => {
   if (S.history.length > C.MAX_HISTORY) S.history = S.history.slice(0, C.MAX_HISTORY);
-  S.previewIds.clear(); S.previewData = null; $(".mes_history_preview").each(function () { if (!$(this).closest(".mes").length) $(this).remove(); });
+  S.previewIds.clear(); S.previewData = null;
+  $(".mes_history_preview").each(function () { if (!$(this).closest(".mes").length) $(this).remove(); });
   if (!S.isLong) S.interceptedIds = [];
 };
 function onLast(ev, handler) {
@@ -616,7 +623,6 @@ function onLast(ev, handler) {
     S.listeners.push({ e: ev, h: handler, off });
     return;
   }
-  // 退化情況：無法保證“最後”，但仍掛普通監聽，內部用 microtask 推遲一拍。
   const tail = (...args) => queueMicrotask(() => { try { handler(...args); } catch (e) { console.error("[lw tail]", e); } });
   eventSource.on(ev, tail);
   S.listeners.push({ e: ev, h: tail, off: () => eventSource.removeListener?.(ev, tail) });
@@ -628,30 +634,49 @@ const addEvents = () => {
     { e: event_types.CHARACTER_MESSAGE_RENDERED, h: addHistoryButtonsDebounced },
     { e: event_types.USER_MESSAGE_RENDERED, h: addHistoryButtonsDebounced },
     { e: event_types.CHAT_CHANGED, h: () => { S.history = []; setTimeout(addHistoryButtonsDebounced, C.CHECK); } },
-    { e: event_types.MESSAGE_RECEIVED, h: (messageId) => setTimeout(() => { const r = S.history.find((x) => !x.associatedMessageId && now() - x.timestamp < C.REQ_WINDOW); if (r) r.associatedMessageId = messageId; }, 100) },
+    { e: event_types.MESSAGE_RECEIVED, h: (messageId) => setTimeout(() => {
+      const r = S.history.find((x) => !x.associatedMessageId && now() - x.timestamp < C.REQ_WINDOW);
+      if (r) r.associatedMessageId = messageId;
+    }, 100) },
   ].forEach(({ e, h }) => onLast(e, h));
+
   const late = (payload) => {
     try {
       const ctx = getContext();
       pushHistory({
-        url: C.TARGET, method: "POST", requestData: payload, messages: payload?.messages || [], model: payload?.model || "Unknown",
-        timestamp: now(), messageId: ctx.chat?.length || 0, characterName: ctx.characters?.[ctx.characterId]?.name || "Unknown",
+        url: C.TARGET, method: "POST", requestData: payload, messages: payload?.messages || [],
+        model: payload?.model || "Unknown", timestamp: now(), messageId: ctx.chat?.length || 0,
+        characterName: ctx.characters?.[ctx.characterId]?.name || "Unknown",
         userInput: extractUser(payload?.messages || []), isRealRequest: true, source: "settings_ready",
       });
     } catch {}
     queueMicrotask(() => updateFetchState());
   };
-  if (typeof eventSource.makeLast === "function") { eventSource.makeLast(event_types.CHAT_COMPLETION_SETTINGS_READY, late); S.listeners.push({ e: event_types.CHAT_COMPLETION_SETTINGS_READY, h: late, off: () => {} }); }
-  else if (S.tailAPI?.onLast) { const off = S.tailAPI.onLast(event_types.CHAT_COMPLETION_SETTINGS_READY, late); S.listeners.push({ e: event_types.CHAT_COMPLETION_SETTINGS_READY, h: late, off }); }
-  else { ON(event_types.CHAT_COMPLETION_SETTINGS_READY, late); S.listeners.push({ e: event_types.CHAT_COMPLETION_SETTINGS_READY, h: late, off: () => OFF(event_types.CHAT_COMPLETION_SETTINGS_READY, late) }); queueMicrotask(() => { try { OFF(event_types.CHAT_COMPLETION_SETTINGS_READY, late); } catch {} try { ON(event_types.CHAT_COMPLETION_SETTINGS_READY, late); } catch {} }); }
+  if (typeof eventSource.makeLast === "function") {
+    eventSource.makeLast(event_types.CHAT_COMPLETION_SETTINGS_READY, late);
+    S.listeners.push({ e: event_types.CHAT_COMPLETION_SETTINGS_READY, h: late, off: () => {} });
+  } else if (S.tailAPI?.onLast) {
+    const off = S.tailAPI.onLast(event_types.CHAT_COMPLETION_SETTINGS_READY, late);
+    S.listeners.push({ e: event_types.CHAT_COMPLETION_SETTINGS_READY, h: late, off });
+  } else {
+    ON(event_types.CHAT_COMPLETION_SETTINGS_READY, late);
+    S.listeners.push({ e: event_types.CHAT_COMPLETION_SETTINGS_READY, h: late, off: () => OFF(event_types.CHAT_COMPLETION_SETTINGS_READY, late) });
+    queueMicrotask(() => { try { OFF(event_types.CHAT_COMPLETION_SETTINGS_READY, late); } catch {} try { ON(event_types.CHAT_COMPLETION_SETTINGS_READY, late); } catch {} });
+  }
 };
-const removeEvents = () => { S.listeners.forEach(({ e, h, off }) => { if (typeof off === "function") { try { off(); } catch {} } else { try { OFF(e, h); } catch {} } }); S.listeners = []; };
+const removeEvents = () => {
+  S.listeners.forEach(({ e, h, off }) => {
+    if (typeof off === "function") { try { off(); } catch {} }
+    else { try { OFF(e, h); } catch {} }
+  });
+  S.listeners = [];
+};
 
-/* long mode */
 const toggleLong = () => {
-  S.isLong = !S.isLong; const $b = $q("#message_preview_btn");
-  if (S.isLong) { const ctx = getContext(); S.chatLenBefore = ctx.chat?.length || 0; S.restoreLong = hijackPush(); $b.css("color", "red"); toastr.info("持续拦截已开启", "", { timeOut: 2000 }); }
-  else { $b.css("color", ""); try { S.restoreLong?.(); } catch {} S.restoreLong = null; S.interceptedIds = []; S.chatLenBefore = 0; toastr.info("持续拦截已关闭", "", { timeOut: 2000 }); }
+  S.isLong = !S.isLong;
+  const $b = $q("#message_preview_btn");
+  $b.css("color", S.isLong ? "red" : "");
+  toastr.info(`持续拦截已${S.isLong ? "开启" : "关闭"}`, "", { timeOut: 2000 });
 };
 const bindBtn = () => {
   const $b = $q("#message_preview_btn");
@@ -665,7 +690,11 @@ async function deleteMessageById(id) {
   try {
     const ctx = getContext();
     if (id === ctx.chat?.length - 1) { if (typeof deleteLastMessage === "function") { await deleteLastMessage(); return true; } }
-    if (ctx.chat && ctx.chat[id]) { ctx.chat.splice(id, 1); $(`#chat .mes[mesid="${id}"]`).remove(); if (ctx.chat_metadata) ctx.chat_metadata.tainted = true; return true; }
+    if (ctx.chat && ctx.chat[id]) {
+      ctx.chat.splice(id, 1); $(`#chat .mes[mesid="${id}"]`).remove();
+      if (ctx.chat_metadata) ctx.chat_metadata.tainted = true;
+      return true;
+    }
     const el = $(`#chat .mes[mesid="${id}"]`); if (el.length) { el.remove(); return true; }
     return false;
   } catch { return false; }
@@ -675,18 +704,18 @@ async function deleteInterceptedMessages() {
     if (!S.interceptedIds.length) return;
     const ids = [...S.interceptedIds].sort((a, b) => b - a); let n = 0;
     for (const id of ids) if (await deleteMessageById(id)) n++;
-    S.interceptedIds = []; try { if (typeof saveChatConditional === "function") await saveChatConditional(); } catch {}
+    S.interceptedIds = [];
+    try { if (typeof saveChatConditional === "function") await saveChatConditional(); } catch {}
     if (n) toastr.success(`拦截模式下的 ${n} 条消息已自动删除`, "", { timeOut: 2000 });
   } catch { toastr.error("删除拦截消息失败"); }
 }
 
-/* lifecycle */
 function cleanup() {
   removeEvents(); restoreFetch(); disableSend(false);
   $(".mes_history_preview").remove(); $("#message_preview_btn").remove(); cleanupMemory();
-  Object.assign(S, { resolve: null, reject: null, isPreview: false, isLong: false, interceptedIds: [], chatLenBefore: 0, sendBtnWasDisabled: false });
+  Object.assign(S, { resolve: null, reject: null, isPreview: false, isLong: false, interceptedIds: [], sendBtnWasDisabled: false, previewIds: new Set(), previewData: null });
   if (S.longPressTimer) { clearTimeout(S.longPressTimer); S.longPressTimer = null; }
-  if (S.restoreLong) { try { S.restoreLong(); } catch {} S.restoreLong = null; }
+  if (S.cleanTimer) { clearInterval(S.cleanTimer); S.cleanTimer = null; }
   stopBypass();
 }
 function initMessagePreview() {
@@ -695,22 +724,28 @@ function initMessagePreview() {
     const set = getSettings();
     const btn = $(`<div id="message_preview_btn" class="fa-regular fa-note-sticky interactable" title="预览消息"></div>`);
     $("#send_but").before(btn); bindBtn();
+
     $("#xiaobaix_preview_enabled").prop("checked", set.preview.enabled).on("change", function () {
-      if (!geEnabled()) return; set.preview.enabled = $(this).prop("checked"); saveSettingsDebounced();
+      if (!geEnabled()) return;
+      set.preview.enabled = $(this).prop("checked"); saveSettingsDebounced();
       $("#message_preview_btn").toggle(set.preview.enabled);
       if (set.preview.enabled) { if (!S.cleanTimer) S.cleanTimer = setInterval(cleanupMemory, C.CLEAN); }
       else { if (S.cleanTimer) { clearInterval(S.cleanTimer); S.cleanTimer = null; } }
       updateFetchState();
       if (!set.preview.enabled && set.recorded.enabled) { addEvents(); addHistoryButtonsDebounced(); }
     });
+
     $("#xiaobaix_recorded_enabled").prop("checked", set.recorded.enabled).on("change", function () {
-      if (!geEnabled()) return; set.recorded.enabled = $(this).prop("checked"); saveSettingsDebounced();
+      if (!geEnabled()) return;
+      set.recorded.enabled = $(this).prop("checked"); saveSettingsDebounced();
       if (set.recorded.enabled) { addEvents(); addHistoryButtonsDebounced(); }
       else { $(".mes_history_preview").remove(); S.history.length = 0; if (!set.preview.enabled) removeEvents(); }
       updateFetchState();
     });
+
     if (!set.preview.enabled) $("#message_preview_btn").hide();
-    updateFetchState(); if (set.recorded.enabled) addHistoryButtonsDebounced();
+    updateFetchState();
+    if (set.recorded.enabled) addHistoryButtonsDebounced();
     if (set.preview.enabled || set.recorded.enabled) addEvents();
     if (window.registerModuleCleanup) window.registerModuleCleanup("messagePreview", cleanup);
     if (set.preview.enabled) S.cleanTimer = setInterval(cleanupMemory, C.CLEAN);
