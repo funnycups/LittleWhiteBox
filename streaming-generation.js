@@ -1,6 +1,6 @@
 import {
     eventSource, event_types, main_api, chat, name1, getRequestHeaders,
-    extractMessageFromData,
+    extractMessageFromData, activateSendButtons, deactivateSendButtons,
 } from "../../../../script.js";
 import { getStreamingReply, chat_completion_sources, oai_settings, promptManager, getChatCompletionModel } from "../../../openai.js";
 import { ChatCompletionService } from "../../../custom-request.js";
@@ -9,6 +9,7 @@ import { getContext } from "../../../st-context.js";
 import { SlashCommandParser } from "../../../slash-commands/SlashCommandParser.js";
 import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from "../../../slash-commands/SlashCommandArgument.js";
+import { SECRET_KEYS, writeSecret } from "../../../secrets.js";
 
 const EVT_DONE = 'xiaobaix_streaming_completed';
 
@@ -124,6 +125,25 @@ class StreamingGeneration {
         const model = String(opts.model || '').trim();
         if (!model) throw new Error('未检测到当前模型，请在聊天面板选择模型或在插件设置中为分析显式指定模型。');
 
+        try {
+            const provider = String(opts.api || '').toLowerCase();
+            const reverseProxyConfigured = String(opts.apiurl || '').trim().length > 0;
+            const pwd = String(opts.apipassword || '').trim();
+            if (!reverseProxyConfigured && pwd) {
+                const providerToSecretKey = {
+                    openai: SECRET_KEYS.OPENAI,
+                    gemini: SECRET_KEYS.MAKERSUITE,
+                    google: SECRET_KEYS.MAKERSUITE,
+                    cohere: SECRET_KEYS.COHERE,
+                    deepseek: SECRET_KEYS.DEEPSEEK,
+                };
+                const secretKey = providerToSecretKey[provider];
+                if (secretKey) {
+                    await writeSecret(secretKey, pwd, 'xbgen-inline');
+                }
+            }
+        } catch {}
+
         const body = {
             messages, model, stream,
             chat_completion_source: source,
@@ -135,8 +155,16 @@ class StreamingGeneration {
             stop: Array.isArray(generateData?.stop) ? generateData.stop : undefined,
         };
 
-        const reverseProxy = String(opts.apiurl || oai_settings?.reverse_proxy || '').trim();
-        const proxyPassword = String(opts.apipassword || oai_settings?.proxy_password || '').trim();
+        let reverseProxy = String(opts.apiurl || oai_settings?.reverse_proxy || '').trim();
+        let proxyPassword = String(oai_settings?.proxy_password || '').trim();
+        const cmdApiUrl = String(opts.apiurl || '').trim();
+        const cmdApiPwd = String(opts.apipassword || '').trim();
+        if (cmdApiUrl) {
+            if (cmdApiPwd) proxyPassword = cmdApiPwd;
+        } else if (cmdApiPwd) {
+            reverseProxy = '';
+            proxyPassword = '';
+        }
 
         if (PROXY_SUPPORTED.has(source) && reverseProxy) {
             body.reverse_proxy = reverseProxy.replace(/\/?$/, '');
@@ -186,6 +214,14 @@ class StreamingGeneration {
         }
     }
 
+    async _emitPromptReady(chatArray) {
+        try {
+            if (Array.isArray(chatArray)) {
+                await eventSource?.emit?.(event_types.CHAT_COMPLETION_PROMPT_READY, { chat: chatArray, dryRun: false });
+            }
+        } catch {}
+    }
+
     async processGeneration(generateData, prompt, sessionId, stream = true) {
         const session = this._ensureSession(sessionId, prompt);
         const abortController = new AbortController();
@@ -225,7 +261,7 @@ class StreamingGeneration {
             session.isStreaming = false;
             this.activeCount = Math.max(0, this.activeCount - 1);
             this.isStreaming = this.activeCount > 0;
-            if (!abortController.signal.aborted) abortController.abort();
+            try { session.abortController = null; } catch {}
         }
     }
 
@@ -311,6 +347,8 @@ class StreamingGeneration {
         if (!prompt?.trim()) return '';
         const role = ['user', 'system', 'assistant'].includes(args?.as) ? args.as : 'user';
         const sessionId = this._getSlotId(args?.id);
+        const lockArg = String(args?.lock || '').toLowerCase();
+        const lock = lockArg === 'on' || lockArg === 'true' || lockArg === '1';
         const apiOptions = {
             api: args?.api, apiurl: args?.apiurl,
             apipassword: args?.apipassword, model: args?.model
@@ -336,201 +374,271 @@ class StreamingGeneration {
             return msgs;
         };
         const [topMsgs, bottomMsgs] = [createMsgs('top'), createMsgs('bottom')];
+
+        const buildAddonFinalMessages = async () => {
+            const context = getContext();
+            let capturedData = null;
+            /** @type {{prompt?: any[]} | any[] | null} */
+            capturedData = null;
+            const dataListener = (data) => {
+                capturedData = (data && typeof data === 'object' && !Array.isArray(data) && Array.isArray(data.prompt))
+                    ? { ...data, prompt: data.prompt.slice() }
+                    : (Array.isArray(data) ? data.slice() : data);
+            };
+            eventSource.on(event_types.GENERATE_AFTER_DATA, dataListener);
+            const tempKeys = [];
+            const pushTemp = () => {};
+            const skipWIAN = addonSet.has('worldInfo') ? false : true;
+            await this._withTemporaryPromptToggles(addonSet, async () => {
+                const sandboxed = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
+                let chatBackup = null;
+                if (sandboxed) {
+                    try {
+                        chatBackup = chat.slice();
+                        chat.length = 0;
+                        chat.push({ name: name1 || 'User', is_user: true, is_system: false, mes: '[hist]', send_date: new Date().toISOString() });
+                    } catch {}
+                }
+                try {
+                    await context.generate('normal', {
+                        quiet_prompt: prompt.trim(), quietToLoud: false,
+                        skipWIAN, force_name2: true
+                    }, true);
+                } finally {
+                    if (sandboxed && Array.isArray(chatBackup)) {
+                        chat.length = 0;
+                        chat.push(...chatBackup);
+                    }
+                }
+            });
+            eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
+            tempKeys.forEach(key => {});
+            let src = [];
+            const cd = /** @type {{prompt?: any[]} | any[] | null} */ (capturedData);
+            if (Array.isArray(cd)) {
+                src = cd.slice();
+            } else if (cd && typeof cd === 'object' && Array.isArray((/** @type {any} */(cd)).prompt)) {
+                src = /** @type {any[]} */((/** @type {any} */(cd)).prompt).slice();
+            }
+            const sandboxedAfter = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
+            const isFromChat = this._createIsFromChat();
+            const finalPromptMessages = src.filter(m => {
+                if (!sandboxedAfter) return true;
+                if (!m) return false;
+                if (m.role === 'system') return true;
+                if ((m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) return false;
+                return true;
+            });
+            const norm = this._normStrip;
+            const position = ['history', 'after_history', 'afterhistory', 'chathistory']
+                .includes(String(args?.position || '').toLowerCase()) ? 'history' : 'bottom';
+            const targetIdx = finalPromptMessages.findIndex(m => m && typeof m.content === 'string' && norm(m.content) === norm(prompt));
+            if (targetIdx !== -1) {
+                const [msg] = finalPromptMessages.splice(targetIdx, 1);
+                if (position === 'history') {
+                    let lastHistoryIndex = -1;
+                    const isFromChat2 = this._createIsFromChat();
+                    for (let i = 0; i < finalPromptMessages.length; i++) {
+                        const m = finalPromptMessages[i];
+                        if (m && (m.role === 'user' || m.role === 'assistant') && isFromChat2(m.content)) {
+                            lastHistoryIndex = i;
+                        }
+                    }
+                    if (lastHistoryIndex >= 0) finalPromptMessages.splice(lastHistoryIndex + 1, 0, msg);
+                    else {
+                        let lastSystemIndex = -1;
+                        for (let i = 0; i < finalPromptMessages.length; i++) {
+                            if (finalPromptMessages[i]?.role === 'system') lastSystemIndex = i;
+                        }
+                        if (lastSystemIndex >= 0) finalPromptMessages.splice(lastSystemIndex + 1, 0, msg);
+                        else finalPromptMessages.push(msg);
+                    }
+                } else {
+                    finalPromptMessages.push(msg);
+                }
+            }
+            const mergedOnce = ([]).concat(topMsgs).concat(finalPromptMessages).concat(bottomMsgs);
+            const seenKey = new Set();
+            const finalMessages = [];
+            for (const m of mergedOnce) {
+                if (!m || !m.content) continue;
+                const key = `${m.role}:${this._normStrip(m.content)}`;
+                if (seenKey.has(key)) continue;
+                seenKey.add(key);
+                finalMessages.push(m);
+            }
+            return finalMessages;
+        };
         if (addonSet.size === 0) {
             const messages = [...topMsgs, { role, content: prompt.trim() }, ...bottomMsgs];
             const common = { messages, apiOptions, stop: parsedStop };
-            this.processGeneration(common, prompt, sessionId, !nonstream).catch(() => {});
+            if (nonstream) {
+                try { if (lock) deactivateSendButtons(); } catch {}
+                try {
+                    await this._emitPromptReady(messages);
+                    const finalText = await this.processGeneration(common, prompt, sessionId, false);
+                    return String(finalText ?? '');
+                } finally {
+                    try { if (lock) activateSendButtons(); } catch {}
+                }
+            } else {
+                try { if (lock) deactivateSendButtons(); } catch {}
+                await this._emitPromptReady(messages);
+                const p = this.processGeneration(common, prompt, sessionId, true);
+                p.finally(() => { try { if (lock) activateSendButtons(); } catch {} });
+                p.catch(() => {});
+                return String(sessionId);
+            }
+        }
+        if (nonstream) {
+            try { if (lock) deactivateSendButtons(); } catch {}
+            try {
+                const finalMessages = await buildAddonFinalMessages();
+                const common = { messages: finalMessages, apiOptions, stop: parsedStop };
+                await this._emitPromptReady(finalMessages);
+                const finalText = await this.processGeneration(common, prompt, sessionId, false);
+                return String(finalText ?? '');
+            } finally {
+                try { if (lock) activateSendButtons(); } catch {}
+            }
+        } else {
+            (async () => {
+                try {
+                    try { if (lock) deactivateSendButtons(); } catch {}
+                    const finalMessages = await buildAddonFinalMessages();
+                    const common = { messages: finalMessages, apiOptions, stop: parsedStop };
+                    await this._emitPromptReady(finalMessages);
+                    await this.processGeneration(common, prompt, sessionId, true);
+                } catch {} finally {
+                    try { if (lock) activateSendButtons(); } catch {}
+                }
+            })();
             return String(sessionId);
         }
-        (async () => {
-            try {
-                const context = getContext();
-                let capturedData = null;
-                const dataListener = (data) => {
-                    capturedData = (data && typeof data === 'object' && !Array.isArray(data) && Array.isArray(data.prompt))
-                        ? { ...data, prompt: data.prompt.slice() }
-                        : (Array.isArray(data) ? data.slice() : data);
-                };
-                eventSource.on(event_types.GENERATE_AFTER_DATA, dataListener);
-                const tempKeys = [];
-                const pushTemp = () => {};
-                const skipWIAN = addonSet.has('worldInfo') ? false : true;
-                await this._withTemporaryPromptToggles(addonSet, async () => {
-                    const sandboxed = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
-                    let chatBackup = null;
-                    if (sandboxed) {
-                        try {
-                            chatBackup = chat.slice();
-                            chat.length = 0;
-                            chat.push({ name: name1 || 'User', is_user: true, is_system: false, mes: '[hist]', send_date: new Date().toISOString() });
-                        } catch {}
-                    }
-                    try {
-                        await context.generate('normal', {
-                            quiet_prompt: prompt.trim(), quietToLoud: false,
-                            skipWIAN, force_name2: true
-                        }, true);
-                    } finally {
-                        if (sandboxed && Array.isArray(chatBackup)) {
-                            chat.length = 0;
-                            chat.push(...chatBackup);
-                        }
-                    }
-                });
-                eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
-                tempKeys.forEach(key => {});
-                let src = [];
-                if (capturedData && typeof capturedData === 'object' && Array.isArray(capturedData?.prompt)) {
-                    src = capturedData.prompt.slice();
-                } else if (Array.isArray(capturedData)) {
-                    src = capturedData.slice();
-                }
-                const sandboxedAfter = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
-                const isFromChat = this._createIsFromChat();
-                const finalPromptMessages = src.filter(m => {
-                    if (!sandboxedAfter) return true;
-                    if (!m) return false;
-                    if (m.role === 'system') return true;
-                    if ((m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) return false;
-                    return true;
-                });
-                const norm = this._normStrip;
-                const position = ['history', 'after_history', 'afterhistory', 'chathistory']
-                    .includes(String(args?.position || '').toLowerCase()) ? 'history' : 'bottom';
-                const targetIdx = finalPromptMessages.findIndex(m => m && typeof m.content === 'string' && norm(m.content) === norm(prompt));
-                if (targetIdx !== -1) {
-                    const [msg] = finalPromptMessages.splice(targetIdx, 1);
-                    if (position === 'history') {
-                        let lastHistoryIndex = -1;
-                        const isFromChat = this._createIsFromChat();
-                        for (let i = 0; i < finalPromptMessages.length; i++) {
-                            const m = finalPromptMessages[i];
-                            if (m && (m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) {
-                                lastHistoryIndex = i;
-                            }
-                        }
-                        if (lastHistoryIndex >= 0) finalPromptMessages.splice(lastHistoryIndex + 1, 0, msg);
-                        else {
-                            let lastSystemIndex = -1;
-                            for (let i = 0; i < finalPromptMessages.length; i++) {
-                                if (finalPromptMessages[i]?.role === 'system') lastSystemIndex = i;
-                            }
-                            if (lastSystemIndex >= 0) finalPromptMessages.splice(lastSystemIndex + 1, 0, msg);
-                            else finalPromptMessages.push(msg);
-                        }
-                    } else {
-                        finalPromptMessages.push(msg);
-                    }
-                }
-                const mergedOnce = ([]).concat(topMsgs).concat(finalPromptMessages).concat(bottomMsgs);
-                const seenKey = new Set();
-                const finalMessages = [];
-                for (const m of mergedOnce) {
-                    if (!m || !m.content) continue;
-                    const key = `${m.role}:${this._normStrip(m.content)}`;
-                    if (seenKey.has(key)) continue;
-                    seenKey.add(key);
-                    finalMessages.push(m);
-                }
-                const common = { messages: finalMessages, apiOptions, stop: parsedStop };
-                await this.processGeneration(common, prompt, sessionId, !nonstream);
-            } catch {}
-        })();
-        return String(sessionId);
     }
 
     async xbgenCommand(args, prompt) {
         if (!prompt?.trim()) return '';
         const role = ['user', 'system', 'assistant'].includes(args?.as) ? args.as : 'system';
         const sessionId = this._getSlotId(args?.id);
-        (async () => {
+        const lockArg = String(args?.lock || '').toLowerCase();
+        const lock = lockArg === 'on' || lockArg === 'true' || lockArg === '1';
+        const nonstream = String(args?.nonstream || '').toLowerCase() === 'true';
+
+        const buildGenDataWithOptions = async () => {
+            const context = getContext();
+            const tempMessage = {
+                name: role === 'user' ? (name1 || 'User') : 'System',
+                is_user: role === 'user',
+                is_system: role === 'system',
+                mes: prompt.trim(),
+                send_date: new Date().toISOString(),
+            };
+            const originalLength = chat.length;
+            chat.push(tempMessage);
+            let capturedData = null;
+            const dataListener = (data) => {
+                if (data?.prompt && Array.isArray(data.prompt)) {
+                    let messages = [...data.prompt];
+                    const promptText = prompt.trim();
+                    for (let i = messages.length - 1; i >= 0; i--) {
+                        const m = messages[i];
+                        if (m.content === promptText &&
+                            ((role !== 'system' && m.role === 'system') ||
+                             (role === 'system' && m.role === 'user'))) {
+                            messages.splice(i, 1);
+                            break;
+                        }
+                    }
+                    capturedData = { ...data, prompt: messages };
+                } else {
+                    capturedData = data;
+                }
+            };
+            eventSource.on(event_types.GENERATE_AFTER_DATA, dataListener);
             try {
-                const context = getContext();
-                const tempMessage = {
-                    name: role === 'user' ? (name1 || 'User') : 'System',
-                    is_user: role === 'user',
-                    is_system: role === 'system',
-                    mes: prompt.trim(),
-                    send_date: new Date().toISOString(),
-                };
-                const originalLength = chat.length;
-                chat.push(tempMessage);
-                let capturedData = null;
-                const dataListener = (data) => {
-                    if (data?.prompt && Array.isArray(data.prompt)) {
-                        let messages = [...data.prompt];
-                        const promptText = prompt.trim();
-                        for (let i = messages.length - 1; i >= 0; i--) {
-                            const m = messages[i];
-                            if (m.content === promptText &&
-                                ((role !== 'system' && m.role === 'system') ||
-                                 (role === 'system' && m.role === 'user'))) {
-                                messages.splice(i, 1);
-                                break;
-                            }
-                        }
-                        capturedData = { ...data, prompt: messages };
-                    } else {
-                        capturedData = data;
-                    }
-                };
-                eventSource.on(event_types.GENERATE_AFTER_DATA, dataListener);
-                try {
-                    await context.generate('normal', {
-                        quiet_prompt: prompt.trim(), quietToLoud: false,
-                        skipWIAN: false, force_name2: true
-                    }, true);
-                } finally {
-                    eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
-                    chat.length = originalLength;
+                await context.generate('normal', {
+                    quiet_prompt: prompt.trim(), quietToLoud: false,
+                    skipWIAN: false, force_name2: true
+                }, true);
+            } finally {
+                eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
+                chat.length = originalLength;
+            }
+            const apiOptions = {
+                api: args?.api, apiurl: args?.apiurl,
+                apipassword: args?.apipassword, model: args?.model
+            };
+            const cd = capturedData;
+            let finalPromptMessages = [];
+            if (cd && typeof cd === 'object' && Array.isArray(cd.prompt)) {
+                finalPromptMessages = cd.prompt.slice();
+            } else if (Array.isArray(cd)) {
+                finalPromptMessages = cd.slice();
+            }
+            const norm = this._normStrip;
+            const promptNorm = norm(prompt);
+            for (let i = finalPromptMessages.length - 1; i >= 0; i--) {
+                if (norm(finalPromptMessages[i]?.content) === promptNorm) {
+                    finalPromptMessages.splice(i, 1);
                 }
-                const apiOptions = {
-                    api: args?.api, apiurl: args?.apiurl,
-                    apipassword: args?.apipassword, model: args?.model
-                };
-                const cd = capturedData;
-                let finalPromptMessages = [];
-                if (cd && typeof cd === 'object' && Array.isArray(cd.prompt)) {
-                    finalPromptMessages = cd.prompt.slice();
-                } else if (Array.isArray(cd)) {
-                    finalPromptMessages = cd.slice();
-                }
-                const norm = this._normStrip;
-                const promptNorm = norm(prompt);
-                for (let i = finalPromptMessages.length - 1; i >= 0; i--) {
-                    if (norm(finalPromptMessages[i]?.content) === promptNorm) {
-                        finalPromptMessages.splice(i, 1);
+            }
+            const messageToInsert = { role, content: prompt.trim() };
+            const position = ['history', 'after_history', 'afterhistory', 'chathistory']
+                .includes(String(args?.position || '').toLowerCase()) ? 'history' : 'bottom';
+            if (position === 'history') {
+                const isFromChat = this._createIsFromChat();
+                let lastHistoryIndex = -1;
+                for (let i = 0; i < finalPromptMessages.length; i++) {
+                    const m = finalPromptMessages[i];
+                    if (m && (m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) {
+                        lastHistoryIndex = i;
                     }
                 }
-                const messageToInsert = { role, content: prompt.trim() };
-                const position = ['history', 'after_history', 'afterhistory', 'chathistory']
-                    .includes(String(args?.position || '').toLowerCase()) ? 'history' : 'bottom';
-                if (position === 'history') {
-                    const isFromChat = this._createIsFromChat();
-                    let lastHistoryIndex = -1;
-                    for (let i = 0; i < finalPromptMessages.length; i++) {
-                        const m = finalPromptMessages[i];
-                        if (m && (m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) {
-                            lastHistoryIndex = i;
-                        }
-                    }
-                    if (lastHistoryIndex >= 0) {
-                        finalPromptMessages.splice(lastHistoryIndex + 1, 0, messageToInsert);
-                    } else {
-                        finalPromptMessages.push(messageToInsert);
-                    }
+                if (lastHistoryIndex >= 0) {
+                    finalPromptMessages.splice(lastHistoryIndex + 1, 0, messageToInsert);
                 } else {
                     finalPromptMessages.push(messageToInsert);
                 }
-                const cd2 = capturedData;
-                let dataWithOptions;
-                if (cd2 && typeof cd2 === 'object' && !Array.isArray(cd2)) {
-                    dataWithOptions = Object.assign({}, cd2, { prompt: finalPromptMessages, apiOptions });
-                } else {
-                    dataWithOptions = { messages: finalPromptMessages, apiOptions };
-                }
-                await this.processGeneration(dataWithOptions, prompt, sessionId);
+            } else {
+                finalPromptMessages.push(messageToInsert);
+            }
+            const cd2 = capturedData;
+            let dataWithOptions;
+            if (cd2 && typeof cd2 === 'object' && !Array.isArray(cd2)) {
+                dataWithOptions = Object.assign({}, cd2, { prompt: finalPromptMessages, apiOptions });
+            } else {
+                dataWithOptions = { messages: finalPromptMessages, apiOptions };
+            }
+            return dataWithOptions;
+        };
+
+        if (nonstream) {
+            try { if (lock) deactivateSendButtons(); } catch {}
+            try {
+                const dataWithOptions = await buildGenDataWithOptions();
+                const chatMsgs = Array.isArray(dataWithOptions?.prompt) ? dataWithOptions.prompt
+                    : (Array.isArray(dataWithOptions?.messages) ? dataWithOptions.messages : []);
+                await this._emitPromptReady(chatMsgs);
+                const finalText = await this.processGeneration(dataWithOptions, prompt, sessionId, false);
+                return String(finalText ?? '');
+            } finally {
+                try { if (lock) activateSendButtons(); } catch {}
+            }
+        }
+        (async () => {
+            try {
+                try { if (lock) deactivateSendButtons(); } catch {}
+                const dataWithOptions = await buildGenDataWithOptions();
+                const chatMsgs = Array.isArray(dataWithOptions?.prompt) ? dataWithOptions.prompt
+                    : (Array.isArray(dataWithOptions?.messages) ? dataWithOptions.messages : []);
+                await this._emitPromptReady(chatMsgs);
+                const finalText = await this.processGeneration(dataWithOptions, prompt, sessionId, true);
+                try { if (args && args._scope) args._scope.pipe = String(finalText ?? ''); } catch {}
             } catch {}
+            finally {
+                try { if (lock) activateSendButtons(); } catch {}
+            }
         })();
         return String(sessionId);
     }
@@ -549,6 +657,8 @@ class StreamingGeneration {
             callback: (args, prompt) => this.xbgenCommand(args, prompt),
             namedArgumentList: [
                 { name: 'as', description: '消息角色', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'system', enumList: ['user', 'system', 'assistant'] },
+                { name: 'nonstream', description: '非流式：true/false', typeList: [ARGUMENT_TYPE.STRING], enumList: ['true', 'false'] },
+                { name: 'lock', description: '生成时锁定输入 on/off', typeList: [ARGUMENT_TYPE.STRING], enumList: ['on', 'off'] },
                 ...commonArgs
             ].map(SlashCommandNamedArgument.fromProps),
             unnamedArgumentList: [SlashCommandArgument.fromProps({
@@ -563,6 +673,7 @@ class StreamingGeneration {
             namedArgumentList: [
                 { name: 'as', description: '消息角色', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'user', enumList: ['user', 'system', 'assistant'] },
                 { name: 'nonstream', description: '非流式：true/false', typeList: [ARGUMENT_TYPE.STRING], enumList: ['true', 'false'] },
+                { name: 'lock', description: '生成时锁定输入 on/off', typeList: [ARGUMENT_TYPE.STRING], enumList: ['on', 'off'] },
                 { name: 'addon', description: '附加上下文', typeList: [ARGUMENT_TYPE.STRING] },
                 { name: 'topsys', description: '置顶 system', typeList: [ARGUMENT_TYPE.STRING] },
                 { name: 'topuser', description: '置顶 user', typeList: [ARGUMENT_TYPE.STRING] },
@@ -614,9 +725,9 @@ const streamingGeneration = new StreamingGeneration();
 
 export function initStreamingGeneration() {
     const w = window;
-    if ((w)?.isXiaobaixEnabled === false) return;
+    if ((/** @type {any} */(w))?.isXiaobaixEnabled === false) return;
     streamingGeneration.init();
-    (w)?.registerModuleCleanup?.('streamingGeneration', () => streamingGeneration.cleanup());
+    (/** @type {any} */(w))?.registerModuleCleanup?.('streamingGeneration', () => streamingGeneration.cleanup());
 }
 
 export { streamingGeneration };
@@ -624,6 +735,6 @@ export { streamingGeneration };
 if (typeof window !== 'undefined') {
     Object.assign(window, {
         xiaobaixStreamingGeneration: streamingGeneration,
-        eventSource: (window).eventSource || eventSource
+        eventSource: (/** @type {any} */(window))?.eventSource || eventSource
     });
 }
