@@ -103,6 +103,7 @@ class StreamingGeneration {
             [chat_completion_sources.MAKERSUITE]: 'gemini',
             [chat_completion_sources.COHERE]: 'cohere',
             [chat_completion_sources.DEEPSEEK]: 'deepseek',
+            [chat_completion_sources.CUSTOM]: 'custom',
         };
         const api = map[source] || 'openai';
         return { api, model };
@@ -120,6 +121,7 @@ class StreamingGeneration {
             google: chat_completion_sources.MAKERSUITE,
             cohere: chat_completion_sources.COHERE,
             deepseek: chat_completion_sources.DEEPSEEK,
+            custom: chat_completion_sources.CUSTOM,
         }[String(opts.api || '').toLowerCase()];
         if (!source) throw new Error(`不支持的 api: ${opts.api}`);
         const model = String(opts.model || '').trim();
@@ -136,6 +138,7 @@ class StreamingGeneration {
                     google: SECRET_KEYS.MAKERSUITE,
                     cohere: SECRET_KEYS.COHERE,
                     deepseek: SECRET_KEYS.DEEPSEEK,
+                    custom: SECRET_KEYS.CUSTOM,
                 };
                 const secretKey = providerToSecretKey[provider];
                 if (secretKey) {
@@ -169,6 +172,19 @@ class StreamingGeneration {
         if (PROXY_SUPPORTED.has(source) && reverseProxy) {
             body.reverse_proxy = reverseProxy.replace(/\/?$/, '');
             if (proxyPassword) body.proxy_password = proxyPassword;
+        }
+
+        // 自定义（兼容 OpenAI）专用字段
+        if (source === chat_completion_sources.CUSTOM) {
+            const customUrl = String(cmdApiUrl || oai_settings?.custom_url || '').trim();
+            if (customUrl) {
+                body.custom_url = customUrl;
+            } else {
+                throw new Error('未配置自定义后端URL，请在命令中提供 apiurl 或在设置中填写 custom_url');
+            }
+            if (oai_settings?.custom_include_headers) body.custom_include_headers = oai_settings.custom_include_headers;
+            if (oai_settings?.custom_include_body) body.custom_include_body = oai_settings.custom_include_body;
+            if (oai_settings?.custom_exclude_body) body.custom_exclude_body = oai_settings.custom_exclude_body;
         }
 
         if (stream) {
@@ -646,7 +662,7 @@ class StreamingGeneration {
     registerCommands() {
         const commonArgs = [
             { name: 'id', description: '会话ID', typeList: [ARGUMENT_TYPE.STRING] },
-            { name: 'api', description: '后端: openai/claude/gemini/cohere/deepseek', typeList: [ARGUMENT_TYPE.STRING] },
+            { name: 'api', description: '后端: openai/claude/gemini/cohere/deepseek/custom', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'apiurl', description: '自定义后端URL', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'apipassword', description: '后端密码', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'model', description: '模型名', typeList: [ARGUMENT_TYPE.STRING] },
