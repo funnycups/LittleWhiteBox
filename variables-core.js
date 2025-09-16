@@ -48,26 +48,81 @@ const joinPath=(base, more)=> base ? (more ? base + '.' + more : base) : more;
 
 
 /* ============= 第一区：聊天消息变量处理 ============= */
-function getBumpStoreRaw() {
-  const ctx = getContext();
-  const meta = ctx?.chatMetadata || {};
-  if (!meta.LWB_BUMP_ALIAS || typeof meta.LWB_BUMP_ALIAS !== 'object') {
-    meta.LWB_BUMP_ALIAS = {};
-    ctx?.saveMetadataDebounced?.();
-  }
-  return meta.LWB_BUMP_ALIAS;
-}
-function getBumpAliasStore() { return getBumpStoreRaw(); }
-function setBumpAliasStore(newStore) {
+function getActiveCharacter() {
   try {
     const ctx = getContext();
-    const meta = ctx?.chatMetadata || {};
-    meta.LWB_BUMP_ALIAS = structuredClone(newStore || {});
-    ctx?.saveMetadataDebounced?.();
-  } catch (e) {}
+    const id = ctx?.characterId ?? ctx?.this_chid;
+    if (id == null) return null;
+    const char = ctx?.getCharacter?.(id) ?? (Array.isArray(ctx?.characters) ? ctx.characters[id] : null);
+    return char || null;
+  } catch { return null; }
 }
-function clearBumpAliasStore() { setBumpAliasStore({}); }
-
+function readCharExtBumpAliases() {
+  try {
+    const ctx = getContext();
+    const id = ctx?.characterId ?? ctx?.this_chid;
+    if (id == null) return {};
+    const char = ctx?.getCharacter?.(id) ?? (Array.isArray(ctx?.characters) ? ctx.characters[id] : null);
+    const ns = char?.data?.extensions?.[LWB_EXT_ID];
+    const vc = ns?.variablesCore;
+    const bump = vc?.bumpAliases;
+    if (bump && typeof bump === 'object') return bump;
+    const legacy = char?.extensions?.[LWB_EXT_ID]?.variablesCore?.bumpAliases;
+    if (legacy && typeof legacy === 'object') {
+      writeCharExtBumpAliases(legacy);
+      return legacy;
+    }
+    return {};
+  } catch { return {}; }
+}
+async function writeCharExtBumpAliases(newStore) {
+  try {
+    const ctx = getContext();
+    const id = ctx?.characterId ?? ctx?.this_chid;
+    if (id == null) return;
+    if (typeof ctx?.writeExtensionField === 'function') {
+      await ctx.writeExtensionField(id, LWB_EXT_ID, {
+        variablesCore: { bumpAliases: structuredClone(newStore || {}) },
+      });
+      const char = ctx?.getCharacter?.(id) ?? (Array.isArray(ctx?.characters) ? ctx.characters[id] : null);
+      if (char) {
+        char.data = char.data && typeof char.data === 'object' ? char.data : {};
+        char.data.extensions = char.data.extensions && typeof char.data.extensions === 'object' ? char.data.extensions : {};
+        const ns = (char.data.extensions[LWB_EXT_ID] ||= {});
+        ns.variablesCore = ns.variablesCore && typeof ns.variablesCore === 'object' ? ns.variablesCore : {};
+        ns.variablesCore.bumpAliases = structuredClone(newStore || {});
+      }
+      if (typeof ctx?.saveCharacter === 'function') {
+        await ctx.saveCharacter();
+      } else {
+        ctx?.saveCharacterDebounced?.();
+      }
+      return;
+    }
+    const char = ctx?.getCharacter?.(id) ?? (Array.isArray(ctx?.characters) ? ctx.characters[id] : null);
+    if (char) {
+      char.data = char.data && typeof char.data === 'object' ? char.data : {};
+      char.data.extensions = char.data.extensions && typeof char.data.extensions === 'object' ? char.data.extensions : {};
+      const ns = (char.data.extensions[LWB_EXT_ID] ||= {});
+      ns.variablesCore = ns.variablesCore && typeof ns.variablesCore === 'object' ? ns.variablesCore : {};
+      ns.variablesCore.bumpAliases = structuredClone(newStore || {});
+    }
+    if (typeof ctx?.saveCharacter === 'function') {
+      await ctx.saveCharacter();
+    } else {
+      ctx?.saveCharacterDebounced?.();
+    }
+  } catch {}
+}
+function getBumpAliasStore() {
+  return readCharExtBumpAliases();
+}
+async function setBumpAliasStore(newStore) {
+  await writeCharExtBumpAliases(newStore);
+}
+async function clearBumpAliasStore() {
+  await writeCharExtBumpAliases({});
+}
 function extractVareventBlocks(text) {
   if (!text || typeof text!=='string') return [];
   const out=[]; let m;
@@ -75,7 +130,6 @@ function extractVareventBlocks(text) {
   while((m=TAG_RE.scenario.exec(text))!==null){ const inner=m[1]??''; if(inner.trim()) out.push(inner) }
   return out;
 }
-
 function getBumpAliasMap() {
   try { return getBumpAliasStore(); } catch { return {}; }
 }
@@ -97,7 +151,6 @@ function matchAlias(varOrKey, rhs) {
   }
   return null;
 }
-
 function preprocessBumpAliases(innerText) {
   const lines = String(innerText || '').split(/\r?\n/);
   const out = [];
@@ -105,13 +158,11 @@ function preprocessBumpAliases(innerText) {
   const indentOf = (s) => s.length - s.trimStart().length;
   const stack = [];
   let currentVarRoot = '';
-
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const t = raw.trim();
     if (!t) { out.push(raw); continue; }
     const ind = indentOf(raw);
-
     const mTop = TOP_OP_RE.exec(t);
     if (mTop && ind === 0) {
       const opKey = OP_MAP[mTop[1].toLowerCase()] || '';
@@ -121,25 +172,20 @@ function preprocessBumpAliases(innerText) {
       out.push(raw);
       continue;
     }
-
     if (!inBump) { out.push(raw); continue; }
-
     while (stack.length && stack[stack.length - 1].indent >= ind) stack.pop();
-
     const mKV = t.match(/^([^:]+):\s*(.*)$/);
     if (mKV) {
       const key = mKV[1].trim();
       const val = mKV[2].trim();
       const parentPath = stack.length ? stack[stack.length - 1].path : '';
       const curPath = parentPath ? `${parentPath}.${key}` : key;
-
       if (val === '') {
         stack.push({ indent: ind, path: curPath });
         if (!parentPath) currentVarRoot = key;
         out.push(raw);
         continue;
       }
-
       let rhs = val.replace(/^['"]|['"]$/g, '');
       const leafKey = key;
       const num = matchAlias(leafKey, rhs) ?? matchAlias(currentVarRoot, rhs) ?? matchAlias('', rhs);
@@ -150,7 +196,6 @@ function preprocessBumpAliases(innerText) {
       }
       continue;
     }
-
     const mArr = t.match(/^-\s*(.+)$/);
     if (mArr) {
       let rhs = mArr[1].trim().replace(/^['"]|['"]$/g, '');
@@ -163,7 +208,6 @@ function preprocessBumpAliases(innerText) {
       }
       continue;
     }
-
     out.push(raw);
   }
   return out.join('\n');
@@ -180,7 +224,6 @@ function parseBlock(innerText) {
   const putPush = (top, path, value) => { (ops.push[top] ||= {}); const arr = (ops.push[top][path] ||= []); Array.isArray(value) ? arr.push(...value) : arr.push(value); };
   const putBump = (top, path, delta) => { const n = Number(String(delta).replace(/^\+/, '')); if (!Number.isFinite(n)) return; (ops.bump[top] ||= {}); ops.bump[top][path] = (ops.bump[top][path] ?? 0) + n; };
   const putDel = (top, path) => { (ops.del[top] ||= []); ops.del[top].push(path); };
-
   const finalizeResults = () => {
     const results = [];
     for (const [top, flat] of Object.entries(ops.set)) if (flat && Object.keys(flat).length) results.push({ name: top, operation: 'setObject', data: flat });
@@ -189,7 +232,6 @@ function parseBlock(innerText) {
     for (const [top, list] of Object.entries(ops.del)) if (Array.isArray(list) && list.length) results.push({ name: top, operation: 'del', data: list });
     return results;
   };
-
   const tryParseJsonFirst = (text) => {
     const s = String(text || '').trim();
     if (!s) return false;
@@ -267,7 +309,6 @@ function parseBlock(innerText) {
       return true;
     } catch { return false; }
   };
-
   const tryParseTomlSecond = (text) => {
     const src = String(text || '');
     const s = src.trim();
@@ -305,7 +346,7 @@ function parseBlock(innerText) {
         let line = L[i].trim();
         i++;
         if (!line || line.startsWith('#')) continue;
-        const sec = line.match(/^\[\s*([^\]]+)\s*\]$/);
+        const sec = line.match(/\[\s*([^\]]+)\s*\]$/);
         if (sec) { currentOp = resolveOp(sec[1]) || ''; continue; }
         if (!currentOp) continue;
         const kv = line.match(/^([^=]+)=(.*)$/);
@@ -362,10 +403,8 @@ function parseBlock(innerText) {
       return true;
     } catch { return false; }
   };
-
   if (tryParseJsonFirst(innerText)) return finalizeResults();
   if (tryParseTomlSecond(innerText)) return finalizeResults();
-
   const readList = (startIndex, parentIndent) => {
     const out = [];
     let i = startIndex;
@@ -380,7 +419,6 @@ function parseBlock(innerText) {
     }
     return { arr: out, next: i - 1 };
   };
-
   const readBlockScalar = (startIndex, parentIndent, ch) => {
     const out = [];
     let i = startIndex;
@@ -404,7 +442,6 @@ function parseBlock(innerText) {
     if (ch === '>') text = text.replace(/\n(?!\n)/g, ' ');
     return { text, next: i - 1 };
   };
-
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const t = raw.trim();
@@ -477,16 +514,13 @@ function parseBlock(innerText) {
       continue;
     }
   }
-
   return finalizeResults();
 }
-
 async function applyVariablesForMessage(messageId){
   try{
     const ctx=getContext(); const msg=ctx?.chat?.[messageId]; if(!msg) return;
     const raw=(typeof msg.mes==='string'?msg.mes:(typeof msg.content==='string'?msg.content:'')) ?? '';
     const blocks=extractVareventBlocks(raw); if(blocks.length===0) return;
-
     const ops=[]; const delVarNames=new Set();
     blocks.forEach((b,idx)=>{
       const parts=parseBlock(b);
@@ -500,7 +534,6 @@ async function applyVariablesForMessage(messageId){
       }
     });
     if(ops.length===0 && delVarNames.size===0) return;
-
     const byName=new Map();
     for(const {name} of ops){
       const {root}=getRootAndPath(name);
@@ -513,7 +546,6 @@ async function applyVariablesForMessage(messageId){
         }
       }
     }
-
     function bumpAtPath(rec, path, delta){
       const numDelta=Number(delta);
       if(!Number.isFinite(numDelta)) return false;
@@ -528,7 +560,6 @@ async function applyVariablesForMessage(messageId){
         }
         return false;
       }
-
       const obj=asObject(rec);
       const segs=splitPathSegments(path);
       const { parent, lastKey }=ensureDeepContainer(obj, segs);
@@ -540,22 +571,18 @@ async function applyVariablesForMessage(messageId){
       if(prev!==next){ parent[lastKey]=next; rec.changed=true; return true; }
       return false;
     }
-
     function parseScalarArrayMaybe(str){
       try{
         const v = JSON.parse(String(str??''));
         return Array.isArray(v) ? v : null;
       }catch{ return null; }
     }
-
     for(const op of ops){
       const {root, subPath}=getRootAndPath(op.name);
       const rec=byName.get(root); if(!rec) continue;
-
       if(op.operation==='setObject'){
         for(const [k,v] of Object.entries(op.data)){
           const path=joinPath(subPath,k);
-
           if(!path){
             if(v!==null && typeof v==='object'){
               rec.mode='object';
@@ -593,10 +620,8 @@ async function applyVariablesForMessage(messageId){
       else if(op.operation==='push'){
         for(const [k,vals] of Object.entries(op.data)){
           const path=joinPath(subPath,k);
-
           if(!path){
             let arrRef=null;
-
             if(rec.mode==='object'){
               if(Array.isArray(rec.next)){
                 arrRef=rec.next;
@@ -613,7 +638,6 @@ async function applyVariablesForMessage(messageId){
               rec.next = parsed ?? [];
               arrRef = rec.next;
             }
-
             const incoming = Array.isArray(vals) ? vals : [vals];
             let changed=false;
             for(const v of incoming){
@@ -634,10 +658,8 @@ async function applyVariablesForMessage(messageId){
         }
       }
     }
-
     const hasChanges = Array.from(byName.values()).some(rec => rec && rec.changed === true);
     if(!hasChanges && delVarNames.size===0) return;
-
     for(const [name,rec] of byName.entries()){
       if(!rec.changed) continue;
       try{
@@ -648,7 +670,6 @@ async function applyVariablesForMessage(messageId){
         }
       }catch(e){}
     }
-
     if(delVarNames.size>0){
       try{
         const meta=ctx?.chatMetadata;
@@ -660,7 +681,6 @@ async function applyVariablesForMessage(messageId){
     }
   }catch(err){}
 }
-
 function rebuildVariablesFromScratch() {
   try {
     setVarDict({});
@@ -744,7 +764,6 @@ function registerWIEventSystem() {
               if (r2 !== msg.content) msg.content = r2;
             }
           }
-          // 无论是否包含 <varevent>，统一处理 xbgetvar 替换
           if (typeof msg?.content === 'string' && msg.content.indexOf('{{xbgetvar::') !== -1) {
             const r3 = replaceXbGetVarInString(msg.content);
             if (r3 !== msg.content) msg.content = r3;
@@ -766,7 +785,6 @@ function registerWIEventSystem() {
                   if (r2 !== part.text) part.text = r2;
                 }
               }
-              // 无论是否包含 <varevent>，统一处理 xbgetvar 替换
               if (part && part.type === 'text' && typeof part.text === 'string' && part.text.indexOf('{{xbgetvar::') !== -1) {
                 const r3 = replaceXbGetVarInString(part.text);
                 if (r3 !== part.text) part.text = r3;
@@ -788,7 +806,6 @@ function registerWIEventSystem() {
               if (r2 !== msg.mes) msg.mes = r2;
             }
           }
-          // 无论是否包含 <varevent>，统一处理 xbgetvar 替换
           if (typeof msg?.mes === 'string' && msg.mes.indexOf('{{xbgetvar::') !== -1) {
             const r3 = replaceXbGetVarInString(msg.mes);
             if (r3 !== msg.mes) msg.mes = r3;
@@ -819,7 +836,6 @@ function registerWIEventSystem() {
             if (r2 !== data.prompt) data.prompt = r2;
           }
         }
-        // 无论是否包含 <varevent>，统一处理 xbgetvar 替换
         if (typeof data?.prompt === 'string' && data.prompt.indexOf('{{xbgetvar::') !== -1) {
           const r3 = replaceXbGetVarInString(data.prompt);
           if (r3 !== data.prompt) data.prompt = r3;
@@ -1509,7 +1525,6 @@ function openVarEditor(entryEl, uid) {
       });
       renderPage(0);
     }
-    // 绑定 “+组 / -组” 按钮逻辑
     try {
       btnAddTab.addEventListener('click', () => {
         const tabCount = tabs.querySelectorAll('.lwb-ve-tab').length;
@@ -1523,7 +1538,6 @@ function openVarEditor(entryEl, uid) {
           tabs.insertBefore(tab, tabsCtrl);
           pagesWrap["_lwbRenderPage"](newIdx);
         } else {
-          // 无 renderPage（初始空白场景）的降级处理
           const { page, eventsWrap } = makePage();
           pagesWrap.appendChild(page);
           eventsWrap.appendChild(createEventBlock(1));
@@ -1877,23 +1891,24 @@ function openBumpAliasBuilder(block) {
     } catch {
       addRow();
     }
-    ui.btnOk.addEventListener('click', () => {
-      const rows = Array.from(list.querySelectorAll('.lwb-ve-row'));
-      const items = rows.map(r=>{
-        const ins = Array.from(r.querySelectorAll('.lwb-ve-input')).map(i=>i.value);
-        return { scope: (ins[0]||'').trim(), phrase: (ins[1]||'').trim(), val: Number(ins[2]||0) };
-      }).filter(x=>x.phrase);
-      const next = {};
-      for (const it of items) {
-        const bucket = it.scope ? (next[it.scope] ||= {}) : (next._global ||= {});
-        bucket[it.phrase] = Number.isFinite(it.val) ? it.val : 0;
-      }
-      setBumpAliasStore(next);
-      window?.toastr?.success?.('Bump 映射已保存到聊天元数据');
-      ui.wrap.remove();
+    ui.btnOk.addEventListener('click', async () => {
+      try {
+        const rows = Array.from(list.querySelectorAll('.lwb-ve-row'));
+        const items = rows.map(r => {
+          const ins = Array.from(r.querySelectorAll('.lwb-ve-input')).map(i => i.value);
+          return { scope: (ins[0] || '').trim(), phrase: (ins[1] || '').trim(), val: Number(ins[2] || 0) };
+        }).filter(x => x.phrase);
+        const next = {};
+        for (const it of items) {
+          const bucket = it.scope ? (next[it.scope] ||= {}) : (next._global ||= {});
+          bucket[it.phrase] = Number.isFinite(it.val) ? it.val : 0;
+        }
+        await setBumpAliasStore(next);
+        window?.toastr?.success?.('Bump 映射已保存到角色卡');
+        ui.wrap.remove();
+      } catch (e) {}
     });
   }
-
 
 /* ============= 第四区：xbgetvar 宏与命令 ============= */
 function lwbResolveVarPath(path){
@@ -2059,21 +2074,6 @@ function rollbackToPreviousOf(messageId) {
   if (snap) setVarDict(snap);
 }
 
-function initBumpAliasesForChat() {
-  try {
-    if (typeof getBumpStoreRaw === 'function') {
-      getBumpStoreRaw();
-    } else {
-      const ctx = getContext();
-      const meta = ctx?.chatMetadata || {};
-      if (!meta.LWB_BUMP_ALIAS || typeof meta.LWB_BUMP_ALIAS !== 'object') {
-        meta.LWB_BUMP_ALIAS = {};
-        ctx?.saveMetadataDebounced?.();
-      }
-    }
-  } catch (e) {}
-}
-
 async function executeQueuedVareventJsAfterTurn() {
   const blocks = drainPendingVareventBlocks();
   if (!blocks.length) {
@@ -2115,13 +2115,6 @@ async function executeQueuedVareventJsAfterTurn() {
 function bindEvents() {
   const { eventSource, event_types } = getContext();
   if (!eventSource || !event_types) return;
-
-  if (event_types?.EXTENSIONS_FIRST_LOAD) {
-    on(eventSource, event_types.EXTENSIONS_FIRST_LOAD, initBumpAliasesForChat);
-  }
-  if (event_types?.CHAT_CHANGED) {
-    on(eventSource, event_types.CHAT_CHANGED, initBumpAliasesForChat);
-  }
 
   const getMsgIdLoose = (payload) => {
     if (payload && typeof payload === 'object') {
