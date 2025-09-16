@@ -9,7 +9,7 @@
     <div class="inline-drawer-content">
         <div class="littlewhitebox settings-grid">
             <div class="settings-menu-vertical">
-                <div class="menu-tab active" data-target="js-memory" style="border-bottom: 1px solid #303030;"><span class="vertical-text">小白X模板</span></div>
+                <div class="menu-tab active" data-target="js-memory" style="border-bottom: 1px solid #303030;"><span class="vertical-text">渲染交互</span></div>
                 <div class="menu-tab" data-target="task" style="border-bottom: 1px solid #303030;"><span class="vertical-text">循环任务</span></div>
                 <div class="menu-tab" data-target="template" style="border-bottom: 1px solid #303030;"><span class="vertical-text">数据互动</span></div>
                 <div class="menu-tab" data-target="wallhaven" style="border-bottom: 1px solid #303030;"><span class="vertical-text">辅助工具</span></div>
@@ -39,7 +39,11 @@
                     </div>
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_use_blob" />
-                        <label for="xiaobaix_use_blob" class="has-tooltip" data-tooltip="可以常开，尤其是超大型html（1mb以上）也能极速完成渲染">启用Blob渲染</label>
+                        <label for="xiaobaix_use_blob" class="has-tooltip" data-tooltip="可以常开">启用Blob渲染</label>
+                    </div>
+                    <div class="flex-container">
+                        <input type="checkbox" id="Wrapperiframe" />
+                        <label for="Wrapperiframe" class="has-tooltip" data-tooltip="按需启用封装函数">启用封装函数</label>
                     </div>
                     <br>
                     <div class="section-divider">流式，非基础的渲染
@@ -233,8 +237,12 @@
                         <label for="xiaobaix_dynamic_prompt_enabled" class="has-tooltip" data-tooltip="对用户和AI的文字指纹分析，并注入改进提示词">动态提示词</label>
                     </div>
                     <br>
-                    <div class="section-divider">查看酒馆变量</div>
+                    <div class="section-divider">变量控制､世界书执行</div>
                     <hr class="sysHR" />
+                    <div class="flex-container">
+                        <input type="checkbox" id="xiaobaix_variables_core_enabled" />
+                        <label for="xiaobaix_variables_core_enabled">剧情管理</label>
+                    </div>
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_variables_panel_enabled" />
                         <label for="xiaobaix_variables_panel_enabled">变量面板</label>

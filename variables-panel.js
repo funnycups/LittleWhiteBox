@@ -118,11 +118,12 @@ const VARIABLE_TYPES = {
   }
 };
 
+function debounce(fn, wait=200){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), wait); }; }
+
 class VariablesPanel {
   constructor(){
     this.state = { isOpen:false, isEnabled:false, container:null, timers:{ watcher:null, longPress:null, touch:new Map() }, currentInlineForm:null, formState:{} };
     this.variableSnapshot = null; this.eventHandlers = {}; this.savingInProgress = false;
-    this.sharedBtn = null; this.lastMesId = null;
   }
 
   async init(){
@@ -142,15 +143,15 @@ class VariablesPanel {
   vt(t){ return VARIABLE_TYPES[t]; }
   store(t){ return this.vt(t).storage(); }
 
-  enable(){ this.createContainer(); this.bindEvents(); this.loadVariables(); this.addMessageButtons(); }
+  enable(){ this.createContainer(); this.bindEvents(); this.loadVariables(); this.installMessageButtons(); }
   disable(){ this.cleanup(); }
 
   cleanup(){
-    this.stopWatcher(); this.unbindEvents(); this.unbindControlToggle(); this.removeContainer(); this.removeMessageButtons();
+    this.stopWatcher(); this.unbindEvents(); this.unbindControlToggle(); this.removeContainer(); this.removeAllMessageButtons();
     const t=this.state.timers; if(t.watcher)clearInterval(t.watcher); if(t.longPress)clearTimeout(t.longPress);
     t.touch.forEach(x=>clearTimeout(x)); t.touch.clear();
     Object.assign(this.state,{ isOpen:false, timers:{ watcher:null,longPress:null,touch:new Map()}, currentInlineForm:null, formState:{} });
-    this.variableSnapshot=null; this.savingInProgress=false; this.lastMesId=null;
+    this.variableSnapshot=null; this.savingInProgress=false;
   }
 
   createContainer(){
@@ -529,47 +530,88 @@ class VariablesPanel {
 
   toggleEnabled(en){
     const s=this.getSettings(); s.enabled=this.state.isEnabled=en; saveSettingsDebounced(); this.syncCheckboxState();
-    if(en){ this.enable(); if(!this.state.isOpen) this.open(); } else this.disable();
+    if(en){ this.enable(); this.open(); } else this.disable();
   }
 
-  ensureSharedButton(){
-    if (this.sharedBtn) return this.sharedBtn;
-    const btn=document.createElement('div'); btn.title='变量面板'; btn.className='mes_btn mes_variables_panel'; btn.innerHTML='<i class="fa-solid fa-database"></i>';
+  createPerMessageBtn(messageId){
+    const btn=document.createElement('div');
+    btn.className='mes_btn mes_variables_panel';
+    btn.title='变量面板';
+    btn.dataset.mid=messageId;
+    btn.innerHTML='<i class="fa-solid fa-database"></i>';
     btn.addEventListener('click',(e)=>{ e.preventDefault(); e.stopPropagation(); this.open(); });
-    this.sharedBtn=btn; return btn;
+    return btn;
   }
-  placeBtnToLast(){
-    const last=document.querySelector('#chat>.mes:last-child'); if(!last) return;
-    const id=last.getAttribute('mesid'); if(!id) return;
-    if(id===this.lastMesId && this.sharedBtn) return;
-    this.lastMesId=id;
-    const btn=this.ensureSharedButton();
-    if (typeof window.registerButtonToSubContainer === 'function') window.registerButtonToSubContainer(id, btn);
-  }
-  addMessageButtons(){
-    if (typeof eventSource !== 'undefined') {
-      if (this.eventHandlers.messageRendered) {
-        eventSource.removeListener(event_types.CHARACTER_MESSAGE_RENDERED, this.eventHandlers.messageRendered);
-        eventSource.removeListener(event_types.CHAT_CHANGED, this.eventHandlers.chatChanged);
+
+  addButtonToMessage(messageId){
+    const msg=$(`#chat .mes[mesid="${messageId}"]`);
+    if(!msg.length) return;
+    if (msg.find('.mes_btn.mes_variables_panel').length) return;
+    const btn=this.createPerMessageBtn(messageId);
+    if (typeof window.registerButtonToSubContainer === 'function') {
+      const ok=window.registerButtonToSubContainer(messageId, btn);
+      if (!ok) {
+        const flex=msg.find('.flex-container.flex1.alignitemscenter');
+        if (flex.length) flex.append(btn);
       }
-      this.eventHandlers={
-        messageRendered: ()=>this.placeBtnToLast(),
-        chatChanged: ()=>{ this.lastMesId=null; this.placeBtnToLast(); }
-      };
-      eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, this.eventHandlers.messageRendered);
-      eventSource.on(event_types.CHAT_CHANGED, this.eventHandlers.chatChanged);
+    } else {
+      const flex=msg.find('.flex-container.flex1.alignitemscenter');
+      if (flex.length) flex.append(btn);
     }
-    this.placeBtnToLast();
   }
-  removeMessageButtons(){
-    if (typeof eventSource !== 'undefined' && this.eventHandlers) {
-      eventSource.removeListener(event_types.CHARACTER_MESSAGE_RENDERED, this.eventHandlers.messageRendered);
-      eventSource.removeListener(event_types.CHAT_CHANGED, this.eventHandlers.chatChanged);
-      this.eventHandlers={};
+
+  addButtonsToAllMessages(){
+    $('#chat .mes').each((_,el)=>{
+      const mid=el.getAttribute('mesid');
+      if(mid) this.addButtonToMessage(mid);
+    });
+  }
+
+  removeAllMessageButtons(){
+    $('#chat .mes .mes_btn.mes_variables_panel').remove();
+  }
+
+  installMessageButtons(){
+    const delayedAdd=(id)=> setTimeout(()=>{ if(id!=null) this.addButtonToMessage(id); },120);
+    const delayedScan=()=> setTimeout(()=> this.addButtonsToAllMessages(),150);
+    this.removeMessageButtonsListeners();
+    this.eventHandlers.messageRendered = (data)=> delayedAdd(typeof data==='object'? (data.messageId||data.id) : data);
+    this.eventHandlers.messageReceived = (data)=> delayedAdd(typeof data==='object'? (data.messageId||data.id) : data);
+    this.eventHandlers.messageUpdated = (data)=> delayedAdd(typeof data==='object'? (data.messageId||data.id) : data);
+    this.eventHandlers.messageSwiped  = (data)=> delayedAdd(typeof data==='object'? (data.messageId||data.id) : data);
+    this.eventHandlers.messageEdited  = (data)=> delayedAdd(typeof data==='object'? (data.messageId||data.id) : data);
+    this.eventHandlers.messageSent    = debounce(()=> delayedScan(), 300);
+    this.eventHandlers.chatChanged    = ()=> { delayedScan(); };
+    if (eventSource){
+      if (event_types.USER_MESSAGE_RENDERED) eventSource.on(event_types.USER_MESSAGE_RENDERED, this.eventHandlers.messageRendered);
+      if (event_types.CHARACTER_MESSAGE_RENDERED) eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, this.eventHandlers.messageRendered);
+      if (event_types.MESSAGE_RECEIVED) eventSource.on(event_types.MESSAGE_RECEIVED, this.eventHandlers.messageReceived);
+      if (event_types.MESSAGE_UPDATED) eventSource.on(event_types.MESSAGE_UPDATED, this.eventHandlers.messageUpdated);
+      if (event_types.MESSAGE_SWIPED) eventSource.on(event_types.MESSAGE_SWIPED, this.eventHandlers.messageSwiped);
+      if (event_types.MESSAGE_EDITED) eventSource.on(event_types.MESSAGE_EDITED, this.eventHandlers.messageEdited);
+      if (event_types.MESSAGE_SENT) eventSource.on(event_types.MESSAGE_SENT, this.eventHandlers.messageSent);
+      if (event_types.CHAT_CHANGED) eventSource.on(event_types.CHAT_CHANGED, this.eventHandlers.chatChanged);
     }
-    if (this.sharedBtn?.parentNode) this.sharedBtn.parentNode.removeChild(this.sharedBtn);
-    this.sharedBtn=null; this.lastMesId=null;
+    this.addButtonsToAllMessages();
   }
+
+  removeMessageButtonsListeners(){
+    if (!eventSource) return;
+    const h=this.eventHandlers||{};
+    if (h.messageRendered){ if (event_types.USER_MESSAGE_RENDERED) eventSource.removeListener(event_types.USER_MESSAGE_RENDERED, h.messageRendered); if (event_types.CHARACTER_MESSAGE_RENDERED) eventSource.removeListener(event_types.CHARACTER_MESSAGE_RENDERED, h.messageRendered); }
+    if (h.messageReceived && event_types.MESSAGE_RECEIVED) eventSource.removeListener(event_types.MESSAGE_RECEIVED, h.messageReceived);
+    if (h.messageUpdated && event_types.MESSAGE_UPDATED) eventSource.removeListener(event_types.MESSAGE_UPDATED, h.messageUpdated);
+    if (h.messageSwiped && event_types.MESSAGE_SWIPED) eventSource.removeListener(event_types.MESSAGE_SWIPED, h.messageSwiped);
+    if (h.messageEdited && event_types.MESSAGE_EDITED) eventSource.removeListener(event_types.MESSAGE_EDITED, h.messageEdited);
+    if (h.messageSent && event_types.MESSAGE_SENT) eventSource.removeListener(event_types.MESSAGE_SENT, h.messageSent);
+    if (h.chatChanged && event_types.CHAT_CHANGED) eventSource.removeListener(event_types.CHAT_CHANGED, h.chatChanged);
+    this.eventHandlers={};
+  }
+
+  getCurrentChatIdSafe(){ try{ return getContext().chatId||null; }catch{ return null; } }
+  getChatExtMeta(chatId = this.getCurrentChatIdSafe()){ if(!chatId) return null; const meta = chat_metadata[chatId] || (chat_metadata[chatId] = {}); meta.extensions = meta.extensions || {}; meta.extensions[CONFIG.extensionName] = meta.extensions[CONFIG.extensionName] || {}; return meta.extensions[CONFIG.extensionName]; }
+
+  removeMessageButtons(){ this.removeMessageButtonsListeners(); this.removeAllMessageButtons(); }
 }
 
 let variablesPanelInstance=null;
@@ -580,7 +622,6 @@ export async function initVariablesPanel(){
     if(variablesPanelInstance) variablesPanelInstance.cleanup();
     variablesPanelInstance=new VariablesPanel();
     await variablesPanelInstance.init();
-    console.log(`[${CONFIG.extensionName}] Variables Panel已加载`);
     return variablesPanelInstance;
   }catch(e){
     console.error(`[${CONFIG.extensionName}] 加载失败:`, e);
@@ -590,4 +631,4 @@ export async function initVariablesPanel(){
 }
 
 export function getVariablesPanelInstance(){ return variablesPanelInstance; }
-export function cleanupVariablesPanel(){ if(variablesPanelInstance){ variablesPanelInstance.cleanup(); variablesPanelInstance=null; } }
+export function cleanupVariablesPanel(){ if(variablesPanelInstance){ variablesPanelInstance.removeMessageButtons(); variablesPanelInstance.cleanup(); variablesPanelInstance=null; } }

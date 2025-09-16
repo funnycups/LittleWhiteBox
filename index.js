@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types, getRequestHeaders } from "../../../../script.js";
 import { statsTracker } from "./relationship-metrics.js";
@@ -12,6 +13,7 @@ import { initDynamicPrompt } from "./dynamic-prompt.js";
 import { initButtonCollapse } from "./button-collapse.js";
 import { initVariablesPanel, getVariablesPanelInstance, cleanupVariablesPanel } from "./variables-panel.js";
 import { initStreamingGeneration } from "./streaming-generation.js";
+import { initVariablesCore, cleanupVariablesCore } from "./variables-core.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
@@ -34,7 +36,9 @@ extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     characterUpdater: { enabled: true, showNotifications: true, serverUrl: "https://db.littlewhitebox.qzz.io" },
     dynamicPrompt: { enabled: true },
     variablesPanel: { enabled: false },
-    useBlob: false
+    variablesCore: { enabled: true },
+    useBlob: false,
+    wrapperIframe: false
 };
 
 const settings = extension_settings[EXT_ID];
@@ -350,26 +354,32 @@ function iframeClientScript(){return `
           var d=e&&e.data||{};
           if(d.source!=='xiaobaix-host')return;
           if((d.type==='commandResult'||d.type==='commandError')&&d.id===id){
-            window.removeEventListener('message',onMessage);
+            try{ window.removeEventListener('message',onMessage); }catch(e){}
             if(d.type==='commandResult')resolve(d.result);else reject(new Error(d.error||'error'))
           }
         }
-        window.addEventListener('message',onMessage);
+        try{ window.addEventListener('message',onMessage); }catch(e){}
         post({type:'runCommand',id,command});
         setTimeout(function(){try{window.removeEventListener('message',onMessage)}catch(e){};reject(new Error('Command timeout'))},180000)
       }catch(e){reject(e)}
     })
-  }
+  };
+  try{ if(typeof window['stscript']!=='function') window['stscript']=window.STscript }catch(e){}
 })();`}
 
 function buildWrappedHtml(html){
     const api = `<script>${iframeClientScript()}</script>`;
+    const wrapperToggle = settings && settings.wrapperIframe ? true : false;
+    const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
+    const optWrapperUrl = `${origin}/scripts/extensions/third-party/${EXT_ID}/Wrapperiframe.js`;
+    const optWrapper = wrapperToggle ? `<script src="${optWrapperUrl}"></script>` : "";
+    const baseTag = settings && settings.useBlob ? `<base href="${origin}/">` : "";
     const headHints = buildResourceHints(html);
     const vhFix = `<style>html,body{height:auto!important;min-height:0!important;max-height:none!important}.profile-container,[style*="100vh"]{height:auto!important;min-height:600px!important}[style*="height:100%"]{height:auto!important;min-height:100%!important}</style>`;
     if (html.includes('<html') && html.includes('</html')) {
-        if (html.includes('<head>')) return html.replace('<head>', `<head>${api}${headHints}${vhFix}`);
-        if (html.includes('</head>')) return html.replace('</head>', `${api}${headHints}${vhFix}</head>`);
-        return html.replace('<body', `<head>${api}${headHints}${vhFix}</head><body`);
+        if (html.includes('<head>')) return html.replace('<head>', `<head>${baseTag}${api}${optWrapper}${headHints}${vhFix}`);
+        if (html.includes('</head>')) return html.replace('</head>', `${baseTag}${api}${optWrapper}${headHints}${vhFix}</head>`);
+        return html.replace('<body', `<head>${baseTag}${api}${optWrapper}${headHints}${vhFix}</head><body`);
     }
     return `<!DOCTYPE html>
 <html>
@@ -377,7 +387,9 @@ function buildWrappedHtml(html){
 <meta charset="UTF-8">
 <meta name="color-scheme" content="dark light">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+${baseTag}
 ${api}
+${optWrapper}
 ${headHints}
 ${vhFix}
 <style>html,body{margin:0;padding:0;background:transparent;font-family:inherit;color:inherit}</style>
@@ -572,7 +584,7 @@ function toggleSettingsControls(enabled) {
         'wallhaven_enabled', 'wallhaven_bg_mode', 'wallhaven_category',
         'wallhaven_purity', 'wallhaven_opacity',
         'xiaobaix_immersive_enabled', 'character_updater_enabled', 'xiaobaix_dynamic_prompt_enabled',
-        'xiaobaix_use_blob'
+        'xiaobaix_use_blob', 'xiaobaix_variables_core_enabled', 'Wrapperiframe'
     ];
     controls.forEach(id => {
         $(`#${id}`).prop('disabled', !enabled).closest('.flex-container').toggleClass('disabled-control', !enabled);
@@ -600,6 +612,7 @@ function setDefaultSettings() {
         { module: 'characterUpdater', control: 'character_updater_enabled', enabled: true },
         { module: 'dynamicPrompt', control: 'xiaobaix_dynamic_prompt_enabled', enabled: true },
         { module: 'variablesPanel', control: 'xiaobaix_variables_panel_enabled', enabled: false },
+        { module: 'variablesCore', control: 'xiaobaix_variables_core_enabled', enabled: true },
         { module: 'preview', control: 'xiaobaix_preview_enabled', enabled: false },
         { module: 'scriptAssistant', control: 'xiaobaix_script_assistant', enabled: false }
     ];
@@ -655,8 +668,9 @@ function toggleAllFeatures(enabled) {
             { condition: extension_settings[EXT_ID].characterUpdater?.enabled, init: initCharacterUpdater },
             { condition: extension_settings[EXT_ID].dynamicPrompt?.enabled, init: initDynamicPrompt },
             { condition: extension_settings[EXT_ID].variablesPanel?.enabled, init: initVariablesPanel },
+            { condition: extension_settings[EXT_ID].variablesCore?.enabled, init: initVariablesCore },
             { condition: true, init: initStreamingGeneration },
-            { condition: true, init: initButtonCollapse } 
+            { condition: true, init: initButtonCollapse }
         ];
         moduleInits.forEach(({ condition, init }) => {
             if (condition) init();
@@ -680,7 +694,7 @@ function toggleAllFeatures(enabled) {
         if (window.buttonCollapseCleanup) try { window.buttonCollapseCleanup(); } catch (e) {}
         try { cleanupVariablesPanel(); } catch (e) {}
         Object.assign(settings, { sandboxMode: false, memoryEnabled: false, memoryInjectEnabled: false });
-        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive', 'templateEditor', 'wallhaven', 'characterUpdater', 'dynamicPrompt', 'variablesPanel'].forEach(module => {
+        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive', 'templateEditor', 'wallhaven', 'characterUpdater', 'dynamicPrompt', 'variablesPanel', 'variablesCore'].forEach(module => {
             if (!extension_settings[EXT_ID][module]) extension_settings[EXT_ID][module] = {};
             extension_settings[EXT_ID][module].enabled = false;
         });
@@ -688,7 +702,7 @@ function toggleAllFeatures(enabled) {
             "xiaobaix_recorded_enabled", "xiaobaix_preview_enabled", "xiaobaix_script_assistant",
             "scheduled_tasks_enabled", "xiaobaix_template_enabled", "wallhaven_enabled",
             "xiaobaix_immersive_enabled", "character_updater_enabled", "xiaobaix_dynamic_prompt_enabled",
-            "xiaobaix_use_blob"].forEach(id => $(`#${id}`).prop("checked", false));
+            "xiaobaix_use_blob", "xiaobaix_variables_core_enabled", "Wrapperiframe"].forEach(id => $(`#${id}`).prop("checked", false));
         toggleSettingsControls(false);
         document.getElementById('xiaobaix-hide-code')?.remove();
         setActiveClass(false);
@@ -861,7 +875,8 @@ async function setupSettings() {
             { id: 'wallhaven_enabled', key: 'wallhaven', init: initWallhavenBackground },
             { id: 'character_updater_enabled', key: 'characterUpdater', init: initCharacterUpdater },
             { id: 'xiaobaix_dynamic_prompt_enabled', key: 'dynamicPrompt', init: initDynamicPrompt },
-            { id: 'xiaobaix_variables_panel_enabled', key: 'variablesPanel', init: initVariablesPanel }
+            { id: 'xiaobaix_variables_panel_enabled', key: 'variablesPanel', init: initVariablesPanel },
+            { id: 'xiaobaix_variables_core_enabled', key: 'variablesCore', init: initVariablesCore }
         ];
         moduleConfigs.forEach(({ id, key, init }) => {
             $(`#${id}`).prop("checked", settings[key]?.enabled || false).on("change", function () {
@@ -885,6 +900,12 @@ async function setupSettings() {
             if (!isXiaobaixEnabled) return;
             settings.useBlob = $(this).prop("checked");
             saveSettingsDebounced();
+        });
+        $("#Wrapperiframe").prop("checked", !!settings.wrapperIframe).on("change", function () {
+            if (!isXiaobaixEnabled) return;
+            settings.wrapperIframe = $(this).prop("checked");
+            saveSettingsDebounced();
+            try{settings.wrapperIframe?(!document.getElementById('xb-callgen')&&document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-callgen',type:'module',src:`${extensionFolderPath}/call-generate-service.js`}))):(window.cleanupCallGenerateHostBridge&&window.cleanupCallGenerateHostBridge(),document.getElementById('xb-callgen')?.remove())}catch(e){}
         });
     } catch (err) {}
 }
@@ -943,7 +964,6 @@ function setupEventListeners() {
         if (!isXiaobaixEnabled) return;
         const messageId = typeof data === 'object' ? data.messageId : data;
         if (messageId == null) return;
-        invalidateMessage(messageId);
         processMessageById(messageId, true);
     };
     const onMessageEdited = onMessageUpdated;
@@ -1071,6 +1091,7 @@ jQuery(async () => {
         statsTracker.init(EXT_ID, MODULE_NAME, settings, executeSlashCommand);
         await setupSettings();
         if (isXiaobaixEnabled) setupEventListeners();
+        try{if(isXiaobaixEnabled&&settings.wrapperIframe&&!document.getElementById('xb-callgen'))document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-callgen',type:'module',src:`${extensionFolderPath}/call-generate-service.js`}))}catch(e){}
         eventSource.on(event_types.APP_READY, () => {
             setTimeout(performExtensionUpdateCheck, 2000);
         });
@@ -1084,6 +1105,7 @@ jQuery(async () => {
                 { condition: settings.characterUpdater?.enabled, init: initCharacterUpdater },
                 { condition: settings.dynamicPrompt?.enabled, init: initDynamicPrompt },
                 { condition: settings.variablesPanel?.enabled, init: initVariablesPanel },
+                { condition: settings.variablesCore?.enabled, init: initVariablesCore },
                 { condition: true, init: initStreamingGeneration },
                 { condition: true, init: initButtonCollapse }
             ];

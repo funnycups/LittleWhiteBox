@@ -762,7 +762,11 @@ class IframeManager {
     }
     static writeContentToIframe(iframe, content) {
         try {
-            const script = `<script type="text/javascript">${this.getInlineScript()}</script>`;
+            const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
+            const baseTag = `<base href="${origin}/">`;
+            const wrapperToggle = !!(extension_settings && extension_settings[EXT_ID] && extension_settings[EXT_ID].wrapperIframe);
+            const wrapperScript = wrapperToggle ? `<script src="${origin}/${extensionFolderPath}/Wrapperiframe.js"></script>` : '';
+            const script = `${wrapperScript}<script type="text/javascript">${this.getInlineScript()}</script>`;
             let wrapped = content;
             const insertPoints = [['</body>', script + '</body>'], ['</html>', script + '</html>']];
             for (const [point, replacement] of insertPoints) {
@@ -772,7 +776,7 @@ class IframeManager {
                 }
             }
             if (wrapped === content) {
-                wrapped = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${content}${script}</body></html>`;
+                wrapped = `<!DOCTYPE html><html><head><meta charset="utf-8">${baseTag}</head><body>${content}${script}</body></html>`;
             }
             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
             iframeDoc.open();
@@ -793,43 +797,50 @@ class IframeManager {
                 if (height > 0) this.sendMessageToST('resize', { height });
             }
         };
-		window.updateTemplateVariables = function(variables) {
-		    Object.entries(variables).forEach(([varName, value]) => {
-		        const elements = document.querySelectorAll(\`[data-xiaobaix-var="\${varName}"]\`);
-		        elements.forEach(el => {
-		            if (value === null || value === undefined) {
-		                el.textContent = '';
-		            } else if (Array.isArray(value)) {
-		                el.textContent = value.join(', ');
-		            } else if (typeof value === 'object') {
-		                el.textContent = JSON.stringify(value);
-		            } else {
-		                el.textContent = String(value);
-		            }
-		            el.style.display = '';
-		        });
-		    });
-		    if (typeof window.updateAllData === 'function') {
-		        window.updateAllData();
-		    }
-		    window.dispatchEvent(new Event('contentUpdated'));
-		    window.STBridge.updateHeight();
-		};
-        window.STscript = async function(command) {
-            return new Promise((resolve, reject) => {
-                const id = Date.now() + Math.random().toString(36).substring(2);
-                window.STBridge.sendMessageToST('runCommand', { command, id });
-                const listener = e => {
-                    if (e.data?.id === id && e.data?.source === 'xiaobaix-host') {
-                        window.removeEventListener('message', listener);
-                        e.data.type === 'commandResult' ? resolve(e.data.result) : reject(new Error(e.data.error));
+        window.updateTemplateVariables = function(variables) {
+            Object.entries(variables).forEach(([varName, value]) => {
+                const elements = document.querySelectorAll(\`[data-xiaobaix-var="\${varName}"]\`);
+                elements.forEach(el => {
+                    if (value === null || value === undefined) {
+                        el.textContent = '';
+                    } else if (Array.isArray(value)) {
+                        el.textContent = value.join(', ');
+                    } else if (typeof value === 'object') {
+                        el.textContent = JSON.stringify(value);
+                    } else {
+                        el.textContent = String(value);
                     }
-                };
-                window.addEventListener('message', listener);
-                setTimeout(() => {
-                    window.removeEventListener('message', listener);
-                    reject(new Error('timeout'));
-                }, 180000);
+                    el.style.display = '';
+                });
+            });
+            if (typeof window.updateAllData === 'function') {
+                window.updateAllData();
+            }
+            window.dispatchEvent(new Event('contentUpdated'));
+            window.STBridge.updateHeight();
+        };
+        window.STscript = function(command){
+            return new Promise(function(resolve, reject){
+                try{
+                    if(!command){ reject(new Error('empty')); return; }
+                    if(command[0] !== '/') command = '/' + command;
+                    var id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+                    function onMessage(e){
+                        var d = e && e.data || {};
+                        if(d.source !== 'xiaobaix-host') return;
+                        if((d.type === 'commandResult' || d.type === 'commandError') && d.id === id){
+                            try{ window.removeEventListener('message', onMessage); }catch(_){}
+                            if(d.type === 'commandResult') resolve(d.result);
+                            else reject(new Error(d.error || 'error'));
+                        }
+                    }
+                    try{ window.addEventListener('message', onMessage); }catch(_){}
+                    try{ window.parent.postMessage({ type: 'runCommand', id: id, command: command }, '*'); }catch(_){}
+                    setTimeout(function(){
+                        try{ window.removeEventListener('message', onMessage); }catch(_){}
+                        reject(new Error('timeout'));
+                    }, 180000);
+                }catch(e){ reject(e); }
             });
         };
         function setup() {
