@@ -13,7 +13,7 @@ import { initDynamicPrompt } from "./dynamic-prompt.js";
 import { initButtonCollapse } from "./button-collapse.js";
 import { initVariablesPanel, getVariablesPanelInstance, cleanupVariablesPanel } from "./variables-panel.js";
 import { initStreamingGeneration } from "./streaming-generation.js";
-import { initVariablesCore, cleanupVariablesCore } from "./variables-core.js";
+import { initVariablesCore, cleanupVariablesCore, replaceXbGetVarInString } from "./variables-core.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
@@ -538,6 +538,13 @@ function releaseIframeBlob(iframe){
 
 function renderHtmlInIframe(htmlContent, container, preElement) {
     try {
+        if (settings.variablesCore?.enabled && typeof replaceXbGetVarInString === 'function') {
+            try {
+                htmlContent = replaceXbGetVarInString(htmlContent);
+            } catch (e) {
+                console.warn('xbgetvar 宏替换失败:', e);
+            }
+        }    	
         const iframe = document.createElement('iframe');
         iframe.id = generateUniqueId();
         iframe.className = 'xiaobaix-iframe';

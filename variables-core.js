@@ -2550,3 +2550,4 @@ export function cleanupVariablesCore(){
   try{ const btn=document.getElementById(LWB_PLOTLOG_BTN_ID); if(btn){ btn.replaceWith(); } }catch{}
   LWB_VAREDITOR_INSTALLED=false; initialized=false;
 }
+export { replaceXbGetVarInString }; 
