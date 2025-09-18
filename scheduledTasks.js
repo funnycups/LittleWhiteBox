@@ -87,13 +87,11 @@ let state = {
 
 const debouncedSave = debounce(() => saveSettingsDebounced(), CONFIG.DEBOUNCE_DELAY);
 
-// ------------- Small Helpers -------------
 const isGloballyEnabled = () => (window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true) && getSettings().enabled;
 const allTasks = () => [...getSettings().globalTasks, ...getCharacterTasks()];
 const clampInt = (v, min, max, d = 0) => (Number.isFinite(+v) ? Math.max(min, Math.min(max, +v)) : d);
 const nowMs = () => Date.now();
 
-// ------------- Settings ------------------
 function getSettings() {
     const ext = extension_settings[EXT_ID] || (extension_settings[EXT_ID] = {});
     if (!ext.tasks) {
@@ -114,7 +112,6 @@ function hydrateProcessedSetFromSettings() {
     } catch {}
 }
 
-// ------------- Cleanup / Cooldown --------
 function scheduleCleanup() {
     if (state.cleanupTimer) return;
     state.cleanupTimer = setInterval(() => {
@@ -180,18 +177,73 @@ async function saveCharacterTasks(tasks) {
     }
 }
 
+const __taskRunMap = new Map(); // name -> { abort: AbortController, timers:Set<number>, intervals:Set<number>, signature?: string }
+
+async function __runTaskSingleInstance(taskName, jsRunner, signature = null) {
+    const old = __taskRunMap.get(taskName);
+    if (old) {
+        // 如果签名一致，认为已激活，直接跳过重复注册
+        if (signature && old.signature === signature) {
+            return; // no-op
+        }
+        try { old.abort.abort(); } catch {}
+        try {
+            old.timers.forEach((id) => clearTimeout(id));
+            old.intervals.forEach((id) => clearInterval(id));
+        } catch {}
+        __taskRunMap.delete(taskName);
+    }
+
+    const abort = new AbortController();
+    const timers = new Set();
+    const intervals = new Set();
+
+    const addListener = (target, type, handler, opts = {}) => {
+        if (!target?.addEventListener) return;
+        target.addEventListener(type, handler, { ...opts, signal: abort.signal });
+    };
+    const setTimeoutSafe = (fn, t, ...a) => {
+        const id = setTimeout(() => {
+            timers.delete(id);
+            try { fn(...a); } catch (e) { console.error(e); }
+        }, t);
+        timers.add(id);
+        return id;
+    };
+    const clearTimeoutSafe = (id) => { clearTimeout(id); timers.delete(id); };
+    const setIntervalSafe = (fn, t, ...a) => {
+        const id = setInterval(fn, t, ...a);
+        intervals.add(id);
+        return id;
+    };
+    const clearIntervalSafe = (id) => { clearInterval(id); intervals.delete(id); };
+
+    __taskRunMap.set(taskName, { abort, timers, intervals, signature });
+
+    try {
+        await jsRunner({ addListener, setTimeoutSafe, clearTimeoutSafe, setIntervalSafe, clearIntervalSafe, abortSignal: abort.signal });
+    } finally {
+        try { abort.abort(); } catch {}
+        try {
+            timers.forEach((id) => clearTimeout(id));
+            intervals.forEach((id) => clearInterval(id));
+        } catch {}
+        __taskRunMap.delete(taskName);
+    }
+}
+
 // ------------- Command execution ---------
 async function executeCommands(commands, taskName) {
     if (!String(commands || '').trim()) return null;
     state.isCommandGenerated = state.isExecutingTask = true;
     try {
-        return await processTaskCommands(commands);
+        return await processTaskCommands(commands, taskName);
     } finally {
         setTimeout(() => { state.isCommandGenerated = state.isExecutingTask = false; }, 500);
     }
 }
 
-async function processTaskCommands(commands) {
+async function processTaskCommands(commands, taskName) {
     const jsTagRegex = /<<taskjs>>([\s\S]*?)<<\/taskjs>>/g;
     let lastIndex = 0, result = null, match;
 
@@ -201,7 +253,7 @@ async function processTaskCommands(commands) {
 
         const jsCode = match[1].trim();
         if (jsCode) {
-            try { await executeTaskJS(jsCode); }
+            try { await executeTaskJS(jsCode, taskName || 'AnonymousTask'); }
             catch (error) { console.error(`[任务JS执行错误] ${error.message}`); }
         }
         lastIndex = match.index + match[0].length;
@@ -216,33 +268,144 @@ async function processTaskCommands(commands) {
     return result;
 }
 
-async function executeTaskJS(jsCode) {
+function __hashStringForKey(str) {
+    try {
+        let hash = 5381;
+        for (let i = 0; i < str.length; i++) {
+            hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+        }
+        return (hash >>> 0).toString(36);
+    } catch {
+        return Math.random().toString(36).slice(2);
+    }
+}
+
+async function executeTaskJS(jsCode, taskName = 'AnonymousTask') {
     const STscript = async (command) => {
         if (!command) return { error: "命令为空" };
         if (!command.startsWith('/')) command = '/' + command;
         return await executeSlashCommand(command);
     };
 
-    const iframes = document.querySelectorAll('iframe.xiaobaix-iframe');
-    if (iframes.length > 0) {
-        const latestIframe = /** @type {HTMLIFrameElement} */ (iframes[iframes.length - 1]);
-        if (latestIframe?.contentWindow) {
+    const codeSig = __hashStringForKey(String(jsCode || ''));
+    const stableKey = (String(taskName || '').trim()) || `js-${codeSig}`;
+
+    await __runTaskSingleInstance(stableKey, async (utils) => {
+        const { addListener, setTimeoutSafe, clearTimeoutSafe, setIntervalSafe, clearIntervalSafe, abortSignal } = utils;
+
+        const originalWindowFns = {
+            setTimeout: window.setTimeout,
+            clearTimeout: window.clearTimeout,
+            setInterval: window.setInterval,
+            clearInterval: window.clearInterval,
+        };
+
+        const originals = {
+            setTimeout: originalWindowFns.setTimeout.bind(window),
+            clearTimeout: originalWindowFns.clearTimeout.bind(window),
+            setInterval: originalWindowFns.setInterval.bind(window),
+            clearInterval: originalWindowFns.clearInterval.bind(window),
+            addEventListener: EventTarget.prototype.addEventListener,
+            removeEventListener: EventTarget.prototype.removeEventListener,
+            appendChild: Node.prototype.appendChild,
+            insertBefore: Node.prototype.insertBefore,
+            replaceChild: Node.prototype.replaceChild,
+        };
+
+        const timeouts = new Set();
+        const intervals = new Set();
+        const listeners = [];
+        const createdNodes = new Set();
+
+        window.setTimeout = function(fn, t, ...args) {
+            const id = originals.setTimeout(function(...inner) {
+                try { fn?.(...inner); } finally { timeouts.delete(id); }
+            }, t, ...args);
+            timeouts.add(id);
+            return id;
+        };
+        window.clearTimeout = function(id) {
+            originals.clearTimeout(id);
+            timeouts.delete(id);
+        };
+
+        window.setInterval = function(fn, t, ...args) {
+            const id = originals.setInterval(fn, t, ...args);
+            intervals.add(id);
+            return id;
+        };
+        window.clearInterval = function(id) {
+            originals.clearInterval(id);
+            intervals.delete(id);
+        };
+
+        EventTarget.prototype.addEventListener = function(type, listener, options) {
+            listeners.push({ target: this, type, listener, options });
+            return originals.addEventListener.call(this, type, listener, options);
+        };
+        EventTarget.prototype.removeEventListener = function(type, listener, options) {
+            return originals.removeEventListener.call(this, type, listener, options);
+        };
+
+        const trackNode = (node) => { try { if (node && node.nodeType === 1) createdNodes.add(node); } catch {} };
+        Node.prototype.appendChild = function(child) { trackNode(child); return originals.appendChild.call(this, child); };
+        Node.prototype.insertBefore = function(newNode, refNode) { trackNode(newNode); return originals.insertBefore.call(this, newNode, refNode); };
+        Node.prototype.replaceChild = function(newNode, oldNode) { trackNode(newNode); return originals.replaceChild.call(this, newNode, oldNode); };
+
+        const restoreGlobals = () => {
+            window.setTimeout = originalWindowFns.setTimeout;
+            window.clearTimeout = originalWindowFns.clearTimeout;
+            window.setInterval = originalWindowFns.setInterval;
+            window.clearInterval = originalWindowFns.clearInterval;
+            EventTarget.prototype.addEventListener = originals.addEventListener;
+            EventTarget.prototype.removeEventListener = originals.removeEventListener;
+            Node.prototype.appendChild = originals.appendChild;
+            Node.prototype.insertBefore = originals.insertBefore;
+            Node.prototype.replaceChild = originals.replaceChild;
+        };
+
+        const hardCleanup = () => {
+            try { timeouts.forEach(id => originals.clearTimeout(id)); } catch {}
+            try { intervals.forEach(id => originals.clearInterval(id)); } catch {}
             try {
-                const cw = /** @type {any} */ (latestIframe.contentWindow);
-                cw.STscript = STscript;
-                cw.Task = /** @type {any} */ (window).Task;
-                await cw.eval(`(async function() { try { ${jsCode} } catch (error) { console.error('Task JS Error:', error); throw error; } })();`);
-                return;
-            } catch (error) { console.error('IFRAME JS执行失败:', error); }
+                listeners.forEach(({ target, type, listener, options }) => {
+                    originals.removeEventListener.call(target, type, listener, options);
+                });
+            } catch {}
+            try {
+                createdNodes.forEach(node => {
+                    if (!node?.parentNode) return;
+                    if (node.id?.startsWith('xiaobaix_') || node.tagName === 'SCRIPT' || node.tagName === 'STYLE') {
+                        try { node.parentNode.removeChild(node); } catch {}
+                    }
+                });
+            } catch {}
+        };
+
+        const runInScope = async (code) => {
+            const fn = new Function(
+                'STscript', 'Task',
+                'addListener', 'setTimeoutSafe', 'clearTimeoutSafe', 'setIntervalSafe', 'clearIntervalSafe', 'abortSignal',
+                `return (async () => { ${code} })();`
+            );
+            return await fn(
+                STscript,
+                /** @type {any} */ (window).Task,
+                addListener,
+                setTimeoutSafe,
+                clearTimeoutSafe,
+                setIntervalSafe,
+                clearIntervalSafe,
+                abortSignal
+            );
+        };
+
+        try {
+            await runInScope(jsCode);
+        } finally {
+            try { hardCleanup(); } finally { restoreGlobals(); }
         }
-    }
-    try {
-        const executeFunction = new Function('STscript', 'Task', `return (async function() { ${jsCode} })();`);
-        await executeFunction(STscript, /** @type {any} */ (window).Task);
-    } catch (error) {
-        console.error('主窗口JS执行失败:', error);
-        throw error;
-    }
+    }, codeSig);
 }
 
 function handleTaskMessage(event) {
