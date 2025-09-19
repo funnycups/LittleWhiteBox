@@ -6,6 +6,7 @@ import { getLocalVariable, setLocalVariable } from "../../../variables.js";
 const MODULE_ID = 'variablesCore';
 let initialized = false;
 let listeners = [];
+let origEmitMap = new WeakMap();
 
 const TAG_RE = {
   varevent: /<\s*varevent[^>]*>([\s\S]*?)<\s*\/\s*varevent\s*>/gi,
@@ -45,7 +46,6 @@ function pushDeepValue(root, path, values){ const segs=splitPathSegments(path); 
 function deleteDeepKey(root, path){ const segs=splitPathSegments(path); if(segs.length===0) return false; const {parent,lastKey}=ensureDeepContainer(root,segs); if(Object.prototype.hasOwnProperty.call(parent,lastKey)){ delete parent[lastKey]; return true; } return false; }
 const getRootAndPath=(name)=>{ const segs=String(name||'').split('.').map(s=>s.trim()).filter(Boolean); if(segs.length<=1) return {root:String(name||'').trim(), subPath:''}; return {root:segs[0], subPath: segs.slice(1).join('.')}; };
 const joinPath=(base, more)=> base ? (more ? base + '.' + more : base) : more;
-
 
 /* ============= 第一区：聊天消息变量处理 ============= */
 function getActiveCharacter() {
@@ -87,7 +87,7 @@ async function writeCharExtBumpAliases(newStore) {
       const char = ctx?.getCharacter?.(id) ?? (Array.isArray(ctx?.characters) ? ctx.characters[id] : null);
       if (char) {
         char.data = char.data && typeof char.data === 'object' ? char.data : {};
-        char.data.extensions = char.data.extensions && typeof char.data.extensions === 'object' ? char.data.extensions : {};
+        char.data.extensions = char.data.extensions && typeof char.data === 'object' ? char.data.extensions : {};
         const ns = (char.data.extensions[LWB_EXT_ID] ||= {});
         ns.variablesCore = ns.variablesCore && typeof ns.variablesCore === 'object' ? ns.variablesCore : {};
         ns.variablesCore.bumpAliases = structuredClone(newStore || {});
@@ -102,7 +102,7 @@ async function writeCharExtBumpAliases(newStore) {
     const char = ctx?.getCharacter?.(id) ?? (Array.isArray(ctx?.characters) ? ctx.characters[id] : null);
     if (char) {
       char.data = char.data && typeof char.data === 'object' ? char.data : {};
-      char.data.extensions = char.data.extensions && typeof char.data.extensions === 'object' ? char.data.extensions : {};
+      char.data.extensions = char.data.extensions && typeof char.data === 'object' ? char.data.extensions : {};
       const ns = (char.data.extensions[LWB_EXT_ID] ||= {});
       ns.variablesCore = ns.variablesCore && typeof ns.variablesCore === 'object' ? ns.variablesCore : {};
       ns.variablesCore.bumpAliases = structuredClone(newStore || {});
@@ -218,6 +218,7 @@ function parseBlock(innerText) {
   const lines = String(innerText || '').split(/\r?\n/);
   const indentOf = (s) => s.length - s.trimStart().length;
   const stripQ = (s) => { let t = String(s ?? '').trim(); if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) t = t.slice(1, -1); return t; };
+  const norm = (p) => String(p || '').replace(/\[(\d+)\]/g, '.$1');
   let curOp = '';
   const stack = [];
   const putSet = (top, path, value) => { (ops.set[top] ||= {}); ops.set[top][path] = value; };
@@ -232,25 +233,23 @@ function parseBlock(innerText) {
     for (const [top, list] of Object.entries(ops.del)) if (Array.isArray(list) && list.length) results.push({ name: top, operation: 'del', data: list });
     return results;
   };
+  function normalizeOpName(k) {
+    if (!k) return null;
+    const kl = String(k).toLowerCase().trim();
+    return OP_MAP[kl] || null;
+  }
   const tryParseJsonFirst = (text) => {
     const s = String(text || '').trim();
     if (!s) return false;
     if (s[0] !== '{' && s[0] !== '[') return false;
     try {
       const data = JSON.parse(s);
-      const OP_KEYS = { set: ['set', '录入', 'record'], push: ['push', '追加', 'append'], bump: ['bump'], del: ['del', '删除', 'erase'] };
-      const resolveOp = (k) => {
-        const kl = String(k).toLowerCase();
-        for (const [std, arr] of Object.entries(OP_KEYS)) {
-          if (arr.some(a => a.toLowerCase() === kl)) return std;
-        }
-        return null;
-      };
       const walkSetLike = (top, node, basePath = '') => {
         if (node === null || node === undefined) return;
-        if (typeof node !== 'object' || Array.isArray(node)) { putSet(top, basePath, node); return; }
+        if (typeof node !== 'object' || Array.isArray(node)) { putSet(top, norm(basePath), node); return; }
         for (const [k, v] of Object.entries(node)) {
-          const p = basePath ? `${basePath}.${k}` : k;
+          const p0 = basePath ? `${basePath}.${k}` : k;
+          const p = norm(p0);
           if (Array.isArray(v)) putSet(top, p, v);
           else if (v && typeof v === 'object') walkSetLike(top, v, p);
           else putSet(top, p, v);
@@ -259,7 +258,8 @@ function parseBlock(innerText) {
       const walkPushLike = (top, node, basePath = '') => {
         if (!node || typeof node !== 'object' || Array.isArray(node)) return;
         for (const [k, v] of Object.entries(node)) {
-          const p = basePath ? `${basePath}.${k}` : k;
+          const p0 = basePath ? `${basePath}.${k}` : k;
+          const p = norm(p0);
           if (Array.isArray(v)) for (const it of v) putPush(top, p, it);
           else if (v && typeof v === 'object') walkPushLike(top, v, p);
           else putPush(top, p, v);
@@ -268,16 +268,18 @@ function parseBlock(innerText) {
       const walkBumpLike = (top, node, basePath = '') => {
         if (!node || typeof node !== 'object' || Array.isArray(node)) return;
         for (const [k, v] of Object.entries(node)) {
-          const p = basePath ? `${basePath}.${k}` : k;
+          const p0 = basePath ? `${basePath}.${k}` : k;
+          const p = norm(p0);
           if (v && typeof v === 'object' && !Array.isArray(v)) walkBumpLike(top, v, p);
           else putBump(top, p, v);
         }
       };
       const collectDelPaths = (acc, node, basePath = '') => {
-        if (Array.isArray(node)) { for (const it of node) if (typeof it === 'string') acc.push(basePath ? `${basePath}.${it}` : it); return; }
+        if (Array.isArray(node)) { for (const it of node) if (typeof it === 'string') acc.push(norm(basePath ? `${basePath}.${it}` : it)); return; }
         if (node && typeof node === 'object') {
           for (const [k, v] of Object.entries(node)) {
-            const p = basePath ? `${basePath}.${k}` : k;
+            const p0 = basePath ? `${basePath}.${k}` : k;
+            const p = norm(p0);
             if (v === true) acc.push(p); else collectDelPaths(acc, v, p);
           }
         }
@@ -286,7 +288,7 @@ function parseBlock(innerText) {
         for (const entry of data) {
           if (!entry || typeof entry !== 'object') continue;
           for (const [k, v] of Object.entries(entry)) {
-            const op = resolveOp(k); if (!op || !v || typeof v !== 'object') continue;
+            const op = normalizeOpName(k); if (!op || !v || typeof v !== 'object') continue;
             for (const [top, payload] of Object.entries(v)) {
               if (op === 'set') walkSetLike(top, payload);
               else if (op === 'push') walkPushLike(top, payload);
@@ -297,7 +299,7 @@ function parseBlock(innerText) {
         }
       } else if (data && typeof data === 'object') {
         for (const [k, v] of Object.entries(data)) {
-          const op = resolveOp(k); if (!op || !v || typeof v !== 'object') continue;
+          const op = normalizeOpName(k); if (!op || !v || typeof v !== 'object') continue;
           for (const [top, payload] of Object.entries(v)) {
             if (op === 'set') walkSetLike(top, payload);
             else if (op === 'push') walkPushLike(top, payload);
@@ -315,14 +317,6 @@ function parseBlock(innerText) {
     if (!s) return false;
     if (!s.includes('[') || !s.includes('=')) return false;
     try {
-      const OP_KEYS = { set: ['set', '录入', 'record'], push: ['push', '追加', 'append'], bump: ['bump'], del: ['del', '删除', 'erase'] };
-      const resolveOp = (k) => {
-        const kl = String(k).toLowerCase();
-        for (const [std, arr] of Object.entries(OP_KEYS)) {
-          if (arr.some(a => a.toLowerCase() === kl)) return std;
-        }
-        return null;
-      };
       const parseScalar = (raw) => {
         const v = String(raw ?? '').trim();
         if (v === 'true') return true;
@@ -347,7 +341,7 @@ function parseBlock(innerText) {
         i++;
         if (!line || line.startsWith('#')) continue;
         const sec = line.match(/\[\s*([^\]]+)\s*\]$/);
-        if (sec) { currentOp = resolveOp(sec[1]) || ''; continue; }
+        if (sec) { currentOp = normalizeOpName(sec[1]) || ''; continue; }
         if (!currentOp) continue;
         const kv = line.match(/^([^=]+)=(.*)$/);
         if (!kv) continue;
@@ -358,7 +352,7 @@ function parseBlock(innerText) {
           const segs = keyRaw.split('.').map(s => s.trim()).filter(Boolean);
           if (!segs.length) continue;
           const top = segs[0];
-          const path = segs.slice(1).join('.');
+          const path = norm(segs.slice(1).join('.'));
           if (currentOp === 'set') putSet(top, path, value);
           else if (currentOp === 'push') putPush(top, path, value);
           else if (currentOp === 'bump') putBump(top, path, value);
@@ -394,7 +388,7 @@ function parseBlock(innerText) {
         const segs = keyRaw.split('.').map(s => s.trim()).filter(Boolean);
         if (!segs.length) continue;
         const top = segs[0];
-        const path = segs.slice(1).join('.');
+        const path = norm(segs.slice(1).join('.'));
         if (currentOp === 'set') putSet(top, path, value);
         else if (currentOp === 'push') putPush(top, path, value);
         else if (currentOp === 'bump') putBump(top, path, value);
@@ -456,7 +450,8 @@ function parseBlock(innerText) {
       const key = mKV[1].trim();
       const rhs = mKV[2].trim();
       const parentPath = stack.length ? stack[stack.length - 1].path : '';
-      const curPath = parentPath ? `${parentPath}.${key}` : key;
+      const curPath0 = parentPath ? `${parentPath}.${key}` : key;
+      const curPath = norm(curPath0);
       if (rhs && (rhs[0] === '|' || rhs[0] === '>')) {
         const { text, next } = readBlockScalar(i + 1, ind, rhs[0]);
         i = next;
@@ -547,28 +542,51 @@ async function applyVariablesForMessage(messageId){
       }
     }
     function bumpAtPath(rec, path, delta){
-      const numDelta=Number(delta);
-      if(!Number.isFinite(numDelta)) return false;
-      if(!path){
-        if(rec.mode==='scalar'){
-          let base=Number(rec.scalar);
-          if(!Number.isFinite(base)) base=0;
-          const next=base+numDelta;
-          const nextStr=String(next);
-          if(rec.scalar!==nextStr){ rec.scalar=nextStr; rec.changed=true; return true; }
-          return false;
+      const numDelta = Number(delta);
+      if (!Number.isFinite(numDelta)) return false;
+      if (!path) {
+        if (rec.mode === 'scalar') {
+          let base = Number(rec.scalar);
+          if (!Number.isFinite(base)) base = 0;
+          const next = base + numDelta;
+          const nextStr = String(next);
+          if (rec.scalar !== nextStr) {
+            rec.scalar = nextStr;
+            rec.changed = true;
+            return true;
+          }
         }
         return false;
       }
-      const obj=asObject(rec);
-      const segs=splitPathSegments(path);
-      const { parent, lastKey }=ensureDeepContainer(obj, segs);
-      const prev=parent?.[lastKey];
-      if(prev && typeof prev==='object') return false;
-      let base=Number(prev);
-      if(!Number.isFinite(base)) base=0;
-      const next=base+numDelta;
-      if(prev!==next){ parent[lastKey]=next; rec.changed=true; return true; }
+      const obj = asObject(rec);
+      const segs = splitPathSegments(path);
+      const { parent, lastKey } = ensureDeepContainer(obj, segs);
+      const prev = parent?.[lastKey];
+      if (Array.isArray(prev)) {
+        if (prev.length === 0) {
+          prev.push(numDelta);
+          rec.changed = true;
+          return true;
+        }
+        let base = Number(prev[0]);
+        if (!Number.isFinite(base)) base = 0;
+        const next = base + numDelta;
+        if (prev[0] !== next) {
+          prev[0] = next;
+          rec.changed = true;
+          return true;
+        }
+        return false;
+      }
+      if (prev && typeof prev === 'object') return false;
+      let base = Number(prev);
+      if (!Number.isFinite(base)) base = 0;
+      const next = base + numDelta;
+      if (prev !== next) {
+        parent[lastKey] = next;
+        rec.changed = true;
+        return true;
+      }
       return false;
     }
     function parseScalarArrayMaybe(str){
@@ -577,6 +595,7 @@ async function applyVariablesForMessage(messageId){
         return Array.isArray(v) ? v : null;
       }catch{ return null; }
     }
+    const norm = (p)=> String(p||'').replace(/\[(\d+)\]/g, '.$1');
     for(const op of ops){
       const {root, subPath}=getRootAndPath(op.name);
       const rec=byName.get(root); if(!rec) continue;
@@ -596,7 +615,7 @@ async function applyVariablesForMessage(messageId){
             continue;
           }
           const obj=asObject(rec);
-          if(setDeepValue(obj,path,v)) rec.changed=true;
+          if(setDeepValue(obj,norm(path),v)) rec.changed=true;
         }
       }
       else if(op.operation==='del'){
@@ -614,7 +633,7 @@ async function applyVariablesForMessage(messageId){
             }
             continue;
           }
-          if(deleteDeepKey(obj,path)) rec.changed=true;
+          if(deleteDeepKey(obj,norm(path))) rec.changed=true;
         }
       }
       else if(op.operation==='push'){
@@ -647,14 +666,14 @@ async function applyVariablesForMessage(messageId){
             continue;
           }
           const obj=asObject(rec);
-          if(pushDeepValue(obj,path,vals)) rec.changed=true;
+          if(pushDeepValue(obj,norm(path),vals)) rec.changed=true;
         }
       }
       else if(op.operation==='bump'){
         for(const [k,delta] of Object.entries(op.data)){
           const num=Number(delta); if(!Number.isFinite(num)) continue;
           const path=joinPath(subPath,k);
-          bumpAtPath(rec, path, num);
+          bumpAtPath(rec, norm(path), num);
         }
       }
     }
@@ -738,7 +757,7 @@ function registerWIEventSystem() {
   const { eventSource, event_types } = getContext() || {};
 
   if (event_types?.CHAT_COMPLETION_PROMPT_READY) {
-    on(eventSource, event_types.CHAT_COMPLETION_PROMPT_READY, async (data) => {
+    const lateChatReplacementHandler = async (data) => {
       try {
         if (data?.dryRun) {
           return;
@@ -812,7 +831,34 @@ function registerWIEventSystem() {
           }
         }
       } catch (e) {}
-    });
+    };
+
+    let emitPatched = false;
+    try {
+      if (eventSource && typeof eventSource.emit === 'function' && !origEmitMap.has(eventSource)) {
+        const origEmit = eventSource.emit.bind(eventSource);
+        origEmitMap.set(eventSource, origEmit);
+        eventSource.emit = async function (ev, payload) {
+          const result = await origEmit(ev, payload);
+          try {
+            if (ev === event_types.CHAT_COMPLETION_PROMPT_READY) {
+              await lateChatReplacementHandler(payload);
+            }
+          } catch {}
+          return result;
+        };
+        emitPatched = true;
+      }
+    } catch {}
+
+    if (!emitPatched) {
+      if (typeof eventSource?.makeLast === 'function') {
+        eventSource.makeLast(event_types.CHAT_COMPLETION_PROMPT_READY, lateChatReplacementHandler);
+        listeners.push({ target: eventSource, event: event_types.CHAT_COMPLETION_PROMPT_READY, handler: lateChatReplacementHandler });
+      } else {
+        on(eventSource, event_types.CHAT_COMPLETION_PROMPT_READY, lateChatReplacementHandler);
+      }
+    }
   }
 
   if (event_types?.GENERATE_AFTER_COMBINE_PROMPTS) {
@@ -1913,12 +1959,26 @@ function openBumpAliasBuilder(block) {
 /* ============= 第四区：xbgetvar 宏与命令 ============= */
 function lwbResolveVarPath(path){
   try{
-    const segs=String(path||'').split('.').map(s=>s.trim()).filter(Boolean); if(!segs.length) return '';
-    const rootName=segs[0]; const rootRaw=getLocalVariable(rootName);
-    if(segs.length===1){ if(rootRaw==null) return ''; if(typeof rootRaw==='object'){ try{ return JSON.stringify(rootRaw); }catch{return ''} } return String(rootRaw); }
+    path = String(path ?? '').replace(/\[(\d+)\]/g, '.$1');
+    const segs = String(path||'').split('.').map(s=>s.trim()).filter(Boolean);
+    if(!segs.length) return '';
+    const rootName=segs[0];
+    const rootRaw=getLocalVariable(rootName);
+    if(segs.length===1){
+      if(rootRaw==null) return '';
+      if(typeof rootRaw==='object'){ try{ return JSON.stringify(rootRaw); }catch{return ''} }
+      return String(rootRaw);
+    }
     const obj=parseObj(rootRaw); if(!obj) return '';
-    let cur=obj; for(let i=1;i<segs.length;i++){ const key=/^\d+$/.test(segs[i])?Number(segs[i]):segs[i]; cur=cur?.[key]; if(cur===undefined) return ''; }
-    if(cur==null) return ''; if(typeof cur==='object'){ try{ return JSON.stringify(cur); }catch{return ''} } return String(cur);
+    let cur=obj;
+    for(let i=1;i<segs.length;i++){
+      const key=/^\d+$/.test(segs[i])?Number(segs[i]):segs[i];
+      cur=cur?.[key];
+      if(cur===undefined) return '';
+    }
+    if(cur==null) return '';
+    if(typeof cur==='object'){ try{ return JSON.stringify(cur); }catch{return ''} }
+    return String(cur);
   }catch{ return ''; }
 }
 function replaceXbGetVarInString(s){ s=String(s??''); if(!s || s.indexOf('{{xbgetvar::')===-1) return s; return s.replace(TAG_RE.xbgetvar,(_,p)=>lwbResolveVarPath(p)); }
@@ -2547,7 +2607,8 @@ export function cleanupVariablesCore(){
     }
     ctx?.saveSettingsDebounced?.();
   }catch{}
+  try{ const { eventSource } = getContext()||{}; const orig = eventSource && origEmitMap && origEmitMap.get(eventSource); if(orig){ eventSource.emit = orig; origEmitMap.delete(eventSource); } }catch{}
   try{ const btn=document.getElementById(LWB_PLOTLOG_BTN_ID); if(btn){ btn.replaceWith(); } }catch{}
   LWB_VAREDITOR_INSTALLED=false; initialized=false;
 }
-export { replaceXbGetVarInString }; 
+export { replaceXbGetVarInString };
