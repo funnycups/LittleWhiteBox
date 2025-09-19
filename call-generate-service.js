@@ -548,6 +548,8 @@ class CallGenerateService {
         const raw = token.trim();
         if (!raw) return null;
         if (raw.toLowerCase() === 'all') return 'ALL';
+        // 特殊模式：仅启用预设中已开启的组件
+        if (raw.toLowerCase() === 'all_preon') return 'ALL_PREON';
         if (raw.startsWith('id:')) return raw.slice(3).trim();
         if (raw.startsWith('name:')) {
             const nm = raw.slice(5).trim();
@@ -1184,7 +1186,7 @@ class CallGenerateService {
 
         // 2) 解析组件列表与内联注入
         const list = Array.isArray(options?.components?.list) ? options.components.list.slice() : undefined;
-        let baseStrategy = 'EMPTY'; // EMPTY | ALL | SUBSET
+        let baseStrategy = 'EMPTY'; // EMPTY | ALL | ALL_PREON | SUBSET
         let orderedRefs = [];
         let inlineMapped = [];
         let listLevelOverrides = {};
@@ -1194,10 +1196,15 @@ class CallGenerateService {
             listLevelOverrides = listOverrides || {};
             const parsedRefs = references.map(t => this._parseComponentRefToken(t));
             const containsAll = parsedRefs.includes('ALL');
+            const containsAllPreOn = parsedRefs.includes('ALL_PREON');
             if (containsAll) {
                 baseStrategy = 'ALL';
                 // ALL 仅作为开关标识，子集重排目标为去除 ALL 后的引用列表
-                orderedRefs = parsedRefs.filter(x => x && x !== 'ALL');
+                orderedRefs = parsedRefs.filter(x => x && x !== 'ALL' && x !== 'ALL_PREON');
+            } else if (containsAllPreOn) {
+                baseStrategy = 'ALL_PREON';
+                // ALL_PREON：仅启用“预设里已开启”的组件，子集重排目标为去除该标记后的引用列表
+                orderedRefs = parsedRefs.filter(x => x && x !== 'ALL' && x !== 'ALL_PREON');
             } else {
                 baseStrategy = 'SUBSET';
                 orderedRefs = parsedRefs.filter(Boolean);
@@ -1234,13 +1241,26 @@ class CallGenerateService {
                 } catch {}
                 const run = async () => await this._capturePromptMessages({ includeConfig: null, quietText: '', skipWIAN: false });
                 captured = await this._withPromptEnabledSet(allow, run);
+            } else if (baseStrategy === 'ALL_PREON') {
+                // 仅启用预设里已开启的组件
+                let allow = new Set();
+                try {
+                    if (promptManager && typeof promptManager.getPromptOrderForCharacter === 'function') {
+                        const pm = promptManager;
+                        const activeChar = pm?.activeCharacter ?? null;
+                        const order = pm?.getPromptOrderForCharacter(activeChar) ?? [];
+                        allow = new Set(order.filter(e => !!e?.enabled).map(e => e.identifier));
+                    }
+                } catch {}
+                const run = async () => await this._capturePromptMessages({ includeConfig: null, quietText: '', skipWIAN: false });
+                captured = await this._withPromptEnabledSet(allow, run);
             } else {
                 captured = await this._capturePromptMessages({ includeConfig: null, quietText: '', skipWIAN: false });
             }
         }
 
         // 4) 依据策略计算启用集合与顺序
-        const annotateKeys = baseStrategy === 'SUBSET' ? orderedRefs : (baseStrategy === 'ALL' ? orderedRefs : []);
+        const annotateKeys = baseStrategy === 'SUBSET' ? orderedRefs : ((baseStrategy === 'ALL' || baseStrategy === 'ALL_PREON') ? orderedRefs : []);
         let working = await this._annotateIdentifiersIfMissing(captured.slice(), annotateKeys);
         working = this._applyOrderingStrategy(working, baseStrategy, orderedRefs, unorderedKeys);
 
@@ -1265,7 +1285,7 @@ class CallGenerateService {
         if (baseStrategy === 'SUBSET') {
             const want = new Set(orderedRefs);
             out = this._filterMessagesByComponents(out, want);
-        } else if (baseStrategy === 'ALL' && orderedRefs.length) {
+        } else if ((baseStrategy === 'ALL' || baseStrategy === 'ALL_PREON') && orderedRefs.length) {
             const targets = orderedRefs.filter(k => !unorderedKeys.has(k));
             if (targets.length) out = this._stableReorderSubset(out, targets);
         }
