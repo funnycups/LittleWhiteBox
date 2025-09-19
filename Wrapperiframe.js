@@ -1,5 +1,33 @@
 (function(){
   function defineCallGenerate(){
+    function sanitizeOptions(options){
+      // 优先用 JSON 序列化移除函数字段，避免结构化克隆失败；存在循环引用时降级到手写深拷贝
+      try{
+        return JSON.parse(JSON.stringify(options, function(k,v){ return (typeof v==='function')?undefined:v }))
+      }catch(_){
+        try{
+          const seen=new WeakSet();
+          const clone=(val)=>{
+            if(val===null||val===undefined) return val;
+            const t=typeof val;
+            if(t==='function') return undefined;
+            if(t!=='object') return val;
+            if(seen.has(val)) return undefined;
+            seen.add(val);
+            if(Array.isArray(val)){
+              const arr=[]; for(let i=0;i<val.length;i++){ const v=clone(val[i]); if(v!==undefined) arr.push(v); } return arr;
+            }
+            // 非纯对象（如 DOM/Window/Map/Set）直接跳过，避免克隆失败
+            const proto=Object.getPrototypeOf(val);
+            if(proto!==Object.prototype && proto!==null) return undefined;
+            const out={};
+            for(const k in val){ if(Object.prototype.hasOwnProperty.call(val,k)){ const v=clone(val[k]); if(v!==undefined) out[k]=v; } }
+            return out;
+          };
+          return clone(options);
+        }catch(__){ return {}; }
+      }
+    }
     function CallGenerateImpl(options){
       return new Promise(function(resolve,reject){
         try{
@@ -21,7 +49,8 @@
               reject(new Error(d.error||'Generation failed'))}
           }
           try{window.addEventListener('message',onMessage)}catch(_){}
-          post({type:'generateRequest',id:id,options:options});
+          var sanitized=sanitizeOptions(options);
+          post({type:'generateRequest',id:id,options:sanitized});
           setTimeout(function(){try{window.removeEventListener('message',onMessage)}catch(e){};reject(new Error('Generation timeout'))},300000);
         }catch(e){reject(e)}
       })
