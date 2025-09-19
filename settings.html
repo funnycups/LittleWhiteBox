@@ -30,7 +30,7 @@
                             <small>公告</small>
                         </button>
                     </div>
-                    <div class="section-divider">IFRAME渲染
+                    <div class="section-divider">内容隔离
                         <hr class="sysHR" />
                     </div>
                     <div class="flex-container">
@@ -39,11 +39,11 @@
                     </div>
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_use_blob" />
-                        <label for="xiaobaix_use_blob" class="has-tooltip" data-tooltip="可以常开">启用Blob渲染</label>
+                        <label for="xiaobaix_use_blob" class="has-tooltip" data-tooltip="可以常开，尤其是超大型html（1mb以上）也能极速完成渲染">启用Blob渲染</label>
                     </div>
                     <div class="flex-container">
                         <input type="checkbox" id="Wrapperiframe" />
-                        <label for="Wrapperiframe" class="has-tooltip" data-tooltip="按需启用封装函数">启用更多内置函数</label>
+                        <label for="Wrapperiframe" class="has-tooltip" data-tooltip="按需在 iframe 中注入 Wrapperiframe.js，提供 window.STscript(command)">启用封装函数</label>
                     </div>
                     <br>
                     <div class="section-divider">流式，非基础的渲染
@@ -307,6 +307,7 @@
                         <option value="before_user">用户消息前</option>
                         <option value="any_message">任意对话</option>
                         <option value="initialization">角色卡初始化</option>
+                        <option value="plugin_init">插件初始化</option>
                         <option value="only_this_floor">仅在“间隔楼层”的那个楼层执行一次</option>
                     </select>
                     <small>选择任务执行的时机</small>

@@ -1,10 +1,8 @@
 import { extension_settings, getContext, writeExtensionField, renderExtensionTemplateAsync } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types, characters, this_chid, chat } from "../../../../script.js";
-import { executeSlashCommandsWithOptions } from "../../../slash-commands.js";
 import { SlashCommandParser } from "../../../slash-commands/SlashCommandParser.js";
 import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
 import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/SlashCommandArgument.js";
-import { callPopup } from "../../../../script.js";
 import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { accountStorage } from "../../../util/AccountStorage.js";
 import { download, getFileText, uuidv4, debounce, getSortableDelay } from "../../../utils.js";
@@ -177,14 +175,13 @@ async function saveCharacterTasks(tasks) {
     }
 }
 
-const __taskRunMap = new Map(); // name -> { abort: AbortController, timers:Set<number>, intervals:Set<number>, signature?: string }
+const __taskRunMap = new Map();
 
 async function __runTaskSingleInstance(taskName, jsRunner, signature = null) {
     const old = __taskRunMap.get(taskName);
     if (old) {
-        // 如果签名一致，认为已激活，直接跳过重复注册
         if (signature && old.signature === signature) {
-            return; // no-op
+            return;
         }
         try { old.abort.abort(); } catch {}
         try {
@@ -446,6 +443,7 @@ function calculateTurnCount() {
 // ------------- Task trigger core ---------
 function shouldSkipByContext(taskTriggerTiming, triggerContext) {
     if (taskTriggerTiming === 'initialization') return triggerContext !== 'chat_created';
+    if (taskTriggerTiming === 'plugin_init') return triggerContext !== 'plugin_initialized';
     if (taskTriggerTiming === 'only_this_floor' || taskTriggerTiming === 'any_message') {
         return triggerContext !== 'before_user' && triggerContext !== 'after_ai';
     }
@@ -474,6 +472,7 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
 
         const tt = task.triggerTiming || 'after_ai';
         if (tt === 'initialization') return triggerContext === 'chat_created';
+        if (tt === 'plugin_init') return triggerContext === 'plugin_initialized';
 
         if ((overrideChatChanged ?? state.chatJustChanged) || (overrideNewChat ?? state.isNewChat)) return false;
         if (task.interval <= 0) return false;
@@ -562,12 +561,13 @@ function createTaskItem(task, index, isCharacterTask = false) {
     if (!task.id) task.id = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     const taskType = isCharacterTask ? 'character' : 'global';
-    const floorTypeText = { user: '用户楼层', llm: 'LLM楼层' }[task.floorType] || '全部楼层';
-    const triggerTimingText = { before_user: '用户前', any_message: '任意对话', initialization: '角色卡初始化', only_this_floor: '仅该楼层' }[task.triggerTiming] || 'AI后';
+	const floorTypeText = { user: '用户楼层', llm: 'LLM楼层' }[task.floorType] || '全部楼层';
+	const triggerTimingText = { before_user: '用户前', any_message: '任意对话', initialization: '角色卡初始化', plugin_init: '插件初始化', only_this_floor: '仅该楼层' }[task.triggerTiming] || 'AI后';
 
     let displayName;
-    if (task.interval === 0) displayName = `${task.name} (手动触发)`;
-    else if (task.triggerTiming === 'initialization') displayName = `${task.name} (角色卡初始化)`;
+	if (task.interval === 0) displayName = `${task.name} (手动触发)`;
+	else if (task.triggerTiming === 'initialization') displayName = `${task.name} (角色卡初始化)`;
+	else if (task.triggerTiming === 'plugin_init') displayName = `${task.name} (插件初始化)`;
     else if (task.triggerTiming === 'only_this_floor') displayName = `${task.name} (仅第${task.interval}${floorTypeText})`;
     else displayName = `${task.name} (每${task.interval}${floorTypeText}·${triggerTimingText})`;
 
@@ -753,7 +753,7 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
             triggerTimingControl.prop('disabled', false).css('opacity', '1');
             editorTemplate.find('.manual-trigger-hint').hide();
 
-            if (triggerTiming === 'initialization') {
+            if (triggerTiming === 'initialization' || triggerTiming === 'plugin_init') {
                 intervalControl.prop('disabled', true).css('opacity', '0.5');
                 floorTypeControl.prop('disabled', true).css('opacity', '0.5');
             } else {
@@ -769,11 +769,23 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
     editorTemplate.find('.task_floor_type_edit').on('change', updateControlStates);
     updateControlStates();
 
-    callPopup(editorTemplate, 'confirm', undefined, { okButton: '保存' }).then(result => {
+    // 改为 callGenericPopup
+    callGenericPopup(editorTemplate, POPUP_TYPE.CONFIRM, '', { okButton: '保存' }).then(result => {
         if (result) {
+            const desiredName = (editorTemplate.find('.task_name_edit').val() || '').trim();
+            const existingNames = new Set(allTasks().map(t => (t?.name || '').trim().toLowerCase()));
+            let uniqueName = desiredName;
+            if (desiredName && (!isEdit || (isEdit && task?.name?.toLowerCase() !== desiredName.toLowerCase()))) {
+                if (existingNames.has(desiredName.toLowerCase())) {
+                    let idx = 1;
+                    while (existingNames.has(`${desiredName}${idx}`.toLowerCase())) idx++;
+                    uniqueName = `${desiredName}${idx}`;
+                }
+            }
+
             const newTask = {
                 id: task?.id || `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                name: editorTemplate.find('.task_name_edit').val().trim(),
+                name: uniqueName,
                 commands: editorTemplate.find('.task_commands_edit').val().trim(),
                 interval: parseInt(editorTemplate.find('.task_interval_edit').val()) || 0,
                 floorType: editorTemplate.find('.task_floor_type_edit').val() || 'all',
@@ -946,7 +958,7 @@ async function importGlobalTasks(file) {
             commands: String(task.commands || '').trim(),
             interval: clampInt(task.interval, 0, 99999, 0),
             floorType: ['all', 'user', 'llm'].includes(task.floorType) ? task.floorType : 'all',
-            triggerTiming: ['after_ai','before_user','any_message','initialization','only_this_floor'].includes(task.triggerTiming)
+            triggerTiming: ['after_ai','before_user','any_message','initialization','plugin_init','only_this_floor'].includes(task.triggerTiming)
                 ? task.triggerTiming : (task.interval === 0 ? 'after_ai' : 'after_ai'),
             disabled: !!task.disabled,
             buttonActivated: !!task.buttonActivated,
@@ -1170,6 +1182,8 @@ function initTasks() {
     $(window).on('beforeunload', cleanup);
     registerSlashCommands();
     setTimeout(() => checkEmbeddedTasks(), 1000);
+
+    setTimeout(() => { try { checkAndExecuteTasks('plugin_initialized', false, false); } catch (e) { console.debug(e); } }, 0);
 }
 
 export { initTasks };
