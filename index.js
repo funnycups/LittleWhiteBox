@@ -538,13 +538,14 @@ function releaseIframeBlob(iframe){
 
 function renderHtmlInIframe(htmlContent, container, preElement) {
     try {
+        const originalHash = djb2(htmlContent);
         if (settings.variablesCore?.enabled && typeof replaceXbGetVarInString === 'function') {
             try {
                 htmlContent = replaceXbGetVarInString(htmlContent);
             } catch (e) {
                 console.warn('xbgetvar 宏替换失败:', e);
             }
-        }    	
+        }
         const iframe = document.createElement('iframe');
         iframe.id = generateUniqueId();
         iframe.className = 'xiaobaix-iframe';
@@ -576,7 +577,7 @@ function renderHtmlInIframe(htmlContent, container, preElement) {
         registerIframeMapping(iframe, wrapper);
         try { iframe.contentWindow?.postMessage({ type: 'probe' }, '*'); } catch (e) {}
         preElement.dataset.xbFinal = 'true';
-        preElement.dataset.xbHash = codeHash;
+        preElement.dataset.xbHash = originalHash;
         return iframe;
     } catch (err) {
         return null;
