@@ -1,7 +1,6 @@
 (function(){
   function defineCallGenerate(){
     function sanitizeOptions(options){
-      // 优先用 JSON 序列化移除函数字段，避免结构化克隆失败；存在循环引用时降级到手写深拷贝
       try{
         return JSON.parse(JSON.stringify(options, function(k,v){ return (typeof v==='function')?undefined:v }))
       }catch(_){
