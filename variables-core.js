@@ -2176,6 +2176,46 @@ function bindEvents() {
   const { eventSource, event_types } = getContext();
   if (!eventSource || !event_types) return;
 
+  // 兼容 ST-Prompt-Template 的 getvar 点路径：当顶层变量为 JSON 字符串时，自动解析并按子路径取值
+  try {
+    on(eventSource, 'prompt_template_prepare', (ctx) => {
+      try {
+        const original = ctx && typeof ctx.getvar === 'function' ? ctx.getvar : null;
+        if (!original || original.__lwb_patched) return;
+
+        const wrapped = function (key, options = {}) {
+          const direct = original.call(this, key, options);
+          if (direct !== undefined) return direct;
+
+          if (typeof key !== 'string' || key.indexOf('.') === -1) return direct;
+
+          const dot = key.indexOf('.');
+          const baseKey = key.slice(0, dot);
+          const subPath = key.slice(dot + 1);
+
+          let raw = original.call(this, baseKey, { ...options, defaults: undefined });
+          try { if (typeof raw === 'string') raw = JSON.parse(raw); } catch {}
+
+          if (raw && typeof raw === 'object') {
+            const path = String(subPath || '').replace(/\[(\d+)\]/g, '.$1').split('.').map(s => s.trim()).filter(Boolean);
+            let cur = raw;
+            for (let i = 0; i < path.length; i++) {
+              const seg = /^\d+$/.test(path[i]) ? Number(path[i]) : path[i];
+              cur = cur?.[seg];
+              if (cur === undefined) return options?.defaults;
+            }
+            return cur;
+          }
+
+          return options?.defaults;
+        };
+
+        wrapped.__lwb_patched = true;
+        ctx.getvar = wrapped;
+      } catch {}
+    });
+  } catch {}
+
   const getMsgIdLoose = (payload) => {
     if (payload && typeof payload === 'object') {
       if (typeof payload.messageId === 'number') return payload.messageId;
