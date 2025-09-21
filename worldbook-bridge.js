@@ -62,6 +62,24 @@ class WorldbookBridgeService {
         this._listener = null;
         this._forwardEvents = false;
         this._attached = false;
+        this._allowedOrigins = ['*']; // Default: allow all origins
+    }
+
+    setAllowedOrigins(origins) {
+        this._allowedOrigins = Array.isArray(origins) ? origins : [origins];
+    }
+
+    isOriginAllowed(origin) {
+        if (this._allowedOrigins.includes('*')) return true;
+        return this._allowedOrigins.some(allowed => {
+            if (allowed === origin) return true;
+            // Support wildcard subdomains like *.example.com
+            if (allowed.startsWith('*.')) {
+                const domain = allowed.slice(2);
+                return origin.endsWith('.' + domain) || origin === domain;
+            }
+            return false;
+        });
     }
 
     normalizeError(err, fallbackCode = 'API_ERROR', details = null) {
@@ -301,6 +319,7 @@ class WorldbookBridgeService {
 
         await saveWorldInfo(file, data, true);
         reloadEditor(file);
+        this.postEvent('ENTRY_UPDATED', { file, uid, fields: [field] });
         return '';
     }
 
@@ -316,6 +335,7 @@ class WorldbookBridgeService {
         if (content) entry.content = String(content);
         await saveWorldInfo(file, data, true);
         reloadEditor(file);
+        this.postEvent('ENTRY_CREATED', { file, uid: entry.uid });
         return String(entry.uid);
     }
 
@@ -348,8 +368,229 @@ class WorldbookBridgeService {
         if (ok) {
             await saveWorldInfo(file, data, true);
             reloadEditor(file);
+            this.postEvent('ENTRY_DELETED', { file, uid });
         }
         return ok ? 'ok' : '';
+    }
+
+    // ===== Enhanced Entry Operations =====
+    async getEntryAll(params) {
+        const file = params?.file;
+        const uid = String(params?.uid ?? '').trim();
+        if (!file || !world_names.includes(file)) throw new Error('VALIDATION_FAILED: file');
+        const data = await loadWorldInfo(file);
+        if (!data || !data.entries) throw new Error('NOT_FOUND');
+        const entry = data.entries[uid];
+        if (!entry) throw new Error('NOT_FOUND');
+
+        const ctx = getContext();
+        const tags = ctx.tags || [];
+        const result = {};
+
+        // Get all template fields
+        for (const field of Object.keys(newWorldInfoEntryTemplate)) {
+            try {
+                result[field] = await this.getEntryField({ file, uid, field });
+            } catch {
+                result[field] = '';
+            }
+        }
+
+        return result;
+    }
+
+    async batchSetEntryFields(params) {
+        const file = params?.file;
+        const uid = String(params?.uid ?? '').trim();
+        const fields = params?.fields || {};
+        if (!file || !world_names.includes(file)) throw new Error('VALIDATION_FAILED: file');
+        if (typeof fields !== 'object' || !fields) throw new Error('VALIDATION_FAILED: fields must be object');
+
+        const data = await loadWorldInfo(file);
+        if (!data || !data.entries) throw new Error('NOT_FOUND');
+        const entry = data.entries[uid];
+        if (!entry) throw new Error('NOT_FOUND');
+
+        // Apply all field changes
+        for (const [field, value] of Object.entries(fields)) {
+            try {
+                await this.setEntryField({ file, uid, field, value });
+            } catch (err) {
+                // Continue with other fields, but collect errors
+                console.warn(`Failed to set field ${field}:`, err);
+            }
+        }
+
+        this.postEvent('ENTRY_UPDATED', { file, uid, fields: Object.keys(fields) });
+        return 'ok';
+    }
+
+    async cloneEntry(params) {
+        const file = params?.file;
+        const uid = String(params?.uid ?? '').trim();
+        const newKey = params?.newKey;
+        if (!file || !world_names.includes(file)) throw new Error('VALIDATION_FAILED: file');
+
+        const data = await loadWorldInfo(file);
+        if (!data || !data.entries) throw new Error('NOT_FOUND');
+        const sourceEntry = data.entries[uid];
+        if (!sourceEntry) throw new Error('NOT_FOUND');
+
+        // Create new entry with same data
+        const newEntry = createWorldInfoEntry(file, data);
+        
+        // Copy all fields from source (except uid which is auto-generated)
+        for (const [key, value] of Object.entries(sourceEntry)) {
+            if (key !== 'uid') {
+                if (Array.isArray(value)) {
+                    newEntry[key] = value.slice();
+                } else if (typeof value === 'object' && value !== null) {
+                    newEntry[key] = JSON.parse(JSON.stringify(value));
+                } else {
+                    newEntry[key] = value;
+                }
+            }
+        }
+
+        // Update key if provided
+        if (newKey) {
+            newEntry.key = [String(newKey)];
+            newEntry.comment = `Copy of: ${String(newKey)}`;
+        } else if (sourceEntry.comment) {
+            newEntry.comment = `Copy of: ${sourceEntry.comment}`;
+        }
+
+        await saveWorldInfo(file, data, true);
+        reloadEditor(file);
+        this.postEvent('ENTRY_CREATED', { file, uid: newEntry.uid, clonedFrom: uid });
+        return String(newEntry.uid);
+    }
+
+    async moveEntry(params) {
+        const sourceFile = params?.sourceFile;
+        const targetFile = params?.targetFile;
+        const uid = String(params?.uid ?? '').trim();
+        if (!sourceFile || !world_names.includes(sourceFile)) throw new Error('VALIDATION_FAILED: sourceFile');
+        if (!targetFile || !world_names.includes(targetFile)) throw new Error('VALIDATION_FAILED: targetFile');
+
+        const sourceData = await loadWorldInfo(sourceFile);
+        const targetData = await loadWorldInfo(targetFile);
+        if (!sourceData?.entries || !targetData?.entries) throw new Error('NOT_FOUND');
+        
+        const entry = sourceData.entries[uid];
+        if (!entry) throw new Error('NOT_FOUND');
+
+        // Create new entry in target with same data
+        const newEntry = createWorldInfoEntry(targetFile, targetData);
+        for (const [key, value] of Object.entries(entry)) {
+            if (key !== 'uid') {
+                if (Array.isArray(value)) {
+                    newEntry[key] = value.slice();
+                } else if (typeof value === 'object' && value !== null) {
+                    newEntry[key] = JSON.parse(JSON.stringify(value));
+                } else {
+                    newEntry[key] = value;
+                }
+            }
+        }
+
+        // Remove from source
+        delete sourceData.entries[uid];
+
+        // Save both files
+        await saveWorldInfo(sourceFile, sourceData, true);
+        await saveWorldInfo(targetFile, targetData, true);
+        reloadEditor(sourceFile);
+        reloadEditor(targetFile);
+
+        this.postEvent('ENTRY_MOVED', { 
+            sourceFile, 
+            targetFile, 
+            oldUid: uid, 
+            newUid: newEntry.uid 
+        });
+        return String(newEntry.uid);
+    }
+
+    async reorderEntry(params) {
+        const file = params?.file;
+        const uid = String(params?.uid ?? '').trim();
+        const newOrder = Number(params?.newOrder ?? 0);
+        if (!file || !world_names.includes(file)) throw new Error('VALIDATION_FAILED: file');
+
+        const data = await loadWorldInfo(file);
+        if (!data || !data.entries) throw new Error('NOT_FOUND');
+        const entry = data.entries[uid];
+        if (!entry) throw new Error('NOT_FOUND');
+
+        entry.order = newOrder;
+        setWIOriginalDataValue(data, uid, 'order', newOrder);
+
+        await saveWorldInfo(file, data, true);
+        reloadEditor(file);
+        this.postEvent('ENTRY_UPDATED', { file, uid, fields: ['order'] });
+        return 'ok';
+    }
+
+    // ===== File-level Operations =====
+    async renameWorldbook(params) {
+        const oldName = params?.oldName;
+        const newName = params?.newName;
+        if (!oldName || !world_names.includes(oldName)) throw new Error('VALIDATION_FAILED: oldName');
+        if (!newName || world_names.includes(newName)) throw new Error('VALIDATION_FAILED: newName already exists');
+
+        // This is a complex operation that would require ST core support
+        // For now, we'll throw an error indicating it's not implemented
+        throw new Error('NOT_IMPLEMENTED: renameWorldbook requires ST core support');
+    }
+
+    async deleteWorldbook(params) {
+        const name = params?.name;
+        if (!name || !world_names.includes(name)) throw new Error('VALIDATION_FAILED: name');
+
+        // This is a complex operation that would require ST core support
+        // For now, we'll throw an error indicating it's not implemented
+        throw new Error('NOT_IMPLEMENTED: deleteWorldbook requires ST core support');
+    }
+
+    async exportWorldbook(params) {
+        const file = params?.file;
+        if (!file || !world_names.includes(file)) throw new Error('VALIDATION_FAILED: file');
+        
+        const data = await loadWorldInfo(file);
+        if (!data) throw new Error('NOT_FOUND');
+        
+        return JSON.stringify(data, null, 2);
+    }
+
+    async importWorldbook(params) {
+        const name = params?.name;
+        const jsonData = params?.data;
+        const overwrite = !!params?.overwrite;
+        
+        if (!name) throw new Error('VALIDATION_FAILED: name');
+        if (!jsonData) throw new Error('VALIDATION_FAILED: data');
+        
+        if (world_names.includes(name) && !overwrite) {
+            throw new Error('VALIDATION_FAILED: worldbook exists and overwrite=false');
+        }
+        
+        let data;
+        try {
+            data = JSON.parse(jsonData);
+        } catch {
+            throw new Error('VALIDATION_FAILED: invalid JSON data');
+        }
+        
+        if (!world_names.includes(name)) {
+            await createNewWorldInfo(name, { interactive: false });
+            await updateWorldInfoList();
+        }
+        
+        await saveWorldInfo(name, data, true);
+        reloadEditor(name);
+        this.postEvent('WORLDBOOK_IMPORTED', { name });
+        return 'ok';
     }
 
     // ===== Timed effects (minimal parity) =====
@@ -511,24 +752,45 @@ class WorldbookBridgeService {
     // ===== Dispatcher =====
     async handleRequest(action, params) {
         switch (action) {
+            // Basic operations
             case 'getChatBook': return await this.getChatBook(params);
             case 'getGlobalBooks': return await this.getGlobalBooks(params);
             case 'listWorldbooks': return await this.listWorldbooks(params);
             case 'getPersonaBook': return await this.getPersonaBook(params);
             case 'getCharBook': return await this.getCharBook(params);
             case 'world': return await this.world(params);
+            
+            // Entry operations
             case 'findEntry': return await this.findEntry(params);
             case 'getEntryField': return await this.getEntryField(params);
             case 'setEntryField': return await this.setEntryField(params);
             case 'createEntry': return await this.createEntry(params);
             case 'listEntries': return await this.listEntries(params);
             case 'deleteEntry': return await this.deleteEntry(params);
+            
+            // Enhanced entry operations
+            case 'getEntryAll': return await this.getEntryAll(params);
+            case 'batchSetEntryFields': return await this.batchSetEntryFields(params);
+            case 'cloneEntry': return await this.cloneEntry(params);
+            case 'moveEntry': return await this.moveEntry(params);
+            case 'reorderEntry': return await this.reorderEntry(params);
+            
+            // File-level operations
+            case 'renameWorldbook': return await this.renameWorldbook(params);
+            case 'deleteWorldbook': return await this.deleteWorldbook(params);
+            case 'exportWorldbook': return await this.exportWorldbook(params);
+            case 'importWorldbook': return await this.importWorldbook(params);
+            
+            // Timed effects
             case 'wiGetTimedEffect': return await this.wiGetTimedEffect(params);
             case 'wiSetTimedEffect': return await this.wiSetTimedEffect(params);
+            
+            // Binding operations
             case 'bindWorldbookToChat': return await this.bindWorldbookToChat(params);
             case 'unbindWorldbookFromChat': return await this.unbindWorldbookFromChat(params);
             case 'bindWorldbookToCharacter': return await this.bindWorldbookToCharacter(params);
             case 'unbindWorldbookFromCharacter': return await this.unbindWorldbookFromCharacter(params);
+            
             default: throw new Error('INVALID_ACTION');
         }
     }
@@ -552,11 +814,19 @@ class WorldbookBridgeService {
         this._forwardEvents = false;
     }
 
-    init({ forwardEvents = false } = {}) {
+    init({ forwardEvents = false, allowedOrigins = null } = {}) {
         if (this._attached) return;
+        if (allowedOrigins) this.setAllowedOrigins(allowedOrigins);
+        
         const self = this;
         this._listener = async function (event) {
             try {
+                // Security check: validate origin
+                if (!self.isOriginAllowed(event.origin)) {
+                    console.warn('Worldbook bridge: Rejected request from unauthorized origin:', event.origin);
+                    return;
+                }
+                
                 const data = event && event.data || {};
                 if (!data || data.type !== 'worldbookRequest') return;
                 const id = data.id;
@@ -595,7 +865,12 @@ export function cleanupWorldbookHostBridge() {
 }
 
 if (typeof window !== 'undefined') {
-    Object.assign(window, { xiaobaixWorldbookService: worldbookBridge, initWorldbookHostBridge, cleanupWorldbookHostBridge });
+    Object.assign(window, { 
+        xiaobaixWorldbookService: worldbookBridge, 
+        initWorldbookHostBridge, 
+        cleanupWorldbookHostBridge,
+        setWorldbookBridgeOrigins: (origins) => worldbookBridge.setAllowedOrigins(origins)
+    });
     try { initWorldbookHostBridge({ forwardEvents: true }); } catch {}
     try {
         window.addEventListener('xiaobaixEnabledChanged', (e) => {
