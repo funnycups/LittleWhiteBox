@@ -306,66 +306,89 @@ function iframeClientScript(){return `
 (function(){
   function measureVisibleHeight(){
     try{
-      var de=document.documentElement, body=document.body;
-      var deH=de.getBoundingClientRect?de.getBoundingClientRect().height:(de.offsetHeight||0);
-      var bodyH=body.getBoundingClientRect?body.getBoundingClientRect().height:(body.offsetHeight||0);
-      var h=Math.max(deH, bodyH);
-      return Math.max(0, Math.ceil(h+1));
-    }catch(e){return (document.body&&document.body.offsetHeight)||0}
+      var root = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+      var h1 = root.scrollHeight || 0;
+      var h2 = root.offsetHeight || 0;
+      var h3 = 0;
+      try{ h3 = root.getBoundingClientRect ? Math.round(root.getBoundingClientRect().height) : 0 }catch(e){}
+      var h = Math.max(h1, h2, h3);
+      return Math.max(0, Math.round(h));
+    }catch(e){
+      var b=document.body;
+      return (b && (b.scrollHeight||b.offsetHeight)) || 0;
+    }
   }
-  function post(m){try{parent.postMessage(m,'*')}catch(e){}}
+
+  function post(m){ try{ parent.postMessage(m,'*') }catch(e){} }
+
   var rafPending=false, lastH=0;
+  var HYSTERESIS = 2; // px
+
   function send(force){
     if(rafPending && !force) return;
-    rafPending=true;
+    rafPending = true;
     requestAnimationFrame(function(){
-      rafPending=false;
-      var h=measureVisibleHeight();
-      if(force || Math.abs(h-lastH)>=1){
-        lastH=h;
-        post({height:h,force:!!force});
+      rafPending = false;
+      var h = measureVisibleHeight();
+      if(force || Math.abs(h - lastH) >= HYSTERESIS){
+        lastH = h;
+        post({height:h, force:!!force});
       }
     });
   }
-  try{send(true)}catch(e){}
-  document.addEventListener('DOMContentLoaded',function(){send(true)},{once:true});
-  window.addEventListener('load',function(){send(true)},{once:true});
+
+  try{ send(true) }catch(e){}
+  document.addEventListener('DOMContentLoaded', function(){ send(true) }, {once:true});
+  window.addEventListener('load', function(){ send(true) }, {once:true});
+
   ['transitionend','animationend'].forEach(function(evt){
-    document.addEventListener(evt,function(){send(true)},{passive:true,capture:true});
+    document.addEventListener(evt, function(){ send(false) }, {passive:true, capture:true});
   });
+
   try{
-    var ro=new ResizeObserver(function(){send(false)});
-    ro.observe(document.documentElement);
-    ro.observe(document.body);
+    var root = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+    var ro = new ResizeObserver(function(){ send(false) });
+    ro.observe(root);
   }catch(e){
     try{
-      new MutationObserver(function(){send(false)}).observe(document.body,{childList:true,subtree:true,attributes:true});
+      var rootMO = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+      new MutationObserver(function(){ send(false) })
+        .observe(rootMO, {childList:true, subtree:true, attributes:true, characterData:true});
     }catch(e){}
-    window.addEventListener('resize',function(){send(false)},{passive:true});
+    window.addEventListener('resize', function(){ send(false) }, {passive:true});
   }
-  window.addEventListener('message',function(e){var d=e&&e.data||{};if(d&&d.type==='probe')setTimeout(function(){send(true)},10)});
-  window.STscript=function(command){
+
+  window.addEventListener('message', function(e){
+    var d = e && e.data || {};
+    if(d && d.type === 'probe') setTimeout(function(){ send(true) }, 10);
+  });
+
+  window.STscript = function(command){
     return new Promise(function(resolve,reject){
       try{
-        if(!command){reject(new Error('empty'));return}
-        if(command[0]!=='/')command='/'+command;
-        var id=Date.now().toString(36)+Math.random().toString(36).slice(2);
+        if(!command){ reject(new Error('empty')); return }
+        if(command[0] !== '/') command = '/' + command;
+        var id = Date.now().toString(36) + Math.random().toString(36).slice(2);
         function onMessage(e){
-          var d=e&&e.data||{};
-          if(d.source!=='xiaobaix-host')return;
-          if((d.type==='commandResult'||d.type==='commandError')&&d.id===id){
-            try{ window.removeEventListener('message',onMessage); }catch(e){}
-            if(d.type==='commandResult')resolve(d.result);else reject(new Error(d.error||'error'))
+          var d = e && e.data || {};
+          if(d.source !== 'xiaobaix-host') return;
+          if((d.type === 'commandResult' || d.type === 'commandError') && d.id === id){
+            try{ window.removeEventListener('message', onMessage) }catch(e){}
+            if(d.type === 'commandResult') resolve(d.result);
+            else reject(new Error(d.error || 'error'));
           }
         }
-        try{ window.addEventListener('message',onMessage); }catch(e){}
-        post({type:'runCommand',id,command});
-        setTimeout(function(){try{window.removeEventListener('message',onMessage)}catch(e){};reject(new Error('Command timeout'))},180000)
-      }catch(e){reject(e)}
+        try{ window.addEventListener('message', onMessage) }catch(e){}
+        post({type:'runCommand', id, command});
+        setTimeout(function(){
+          try{ window.removeEventListener('message', onMessage) }catch(e){}
+          reject(new Error('Command timeout'))
+        }, 180000);
+      }catch(e){ reject(e) }
     })
   };
-  try{ if(typeof window['stscript']!=='function') window['stscript']=window.STscript }catch(e){}
-})();`}
+  try{ if(typeof window['stscript'] !== 'function') window['stscript'] = window.STscript }catch(e){}
+})();` }
 
 function buildWrappedHtml(html){
     const api = `<script>${iframeClientScript()}</script>`;
