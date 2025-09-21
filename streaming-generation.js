@@ -269,7 +269,7 @@ class StreamingGeneration {
 
             try { eventSource?.emit?.(EVT_DONE, payload); } catch {}
             this.postToFrames(EVT_DONE, payload);
-
+            try { window?.postMessage?.({ type: EVT_DONE, payload, from: 'xiaobaix' }, '*'); } catch {}
             return String(session.text || '');
         } catch {
             return String(session.text || '');

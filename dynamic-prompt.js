@@ -2105,7 +2105,7 @@ async function generateUserAnalysisReport(isAutoAnalysis = false) {
 
 async function performUserAnalysis(chatHistory) {
     clearAnalysisUI();
-    const sid = await startAnalysisByStructure(chatHistory, true) || 'xb2';
+    const sid = await startAnalysisByStructure(chatHistory, true) || 'xb10';
     const finalText = await waitForAnalysisCompletion(String(sid));
     return finalText;
 }
@@ -2443,7 +2443,7 @@ async function startAnalysisByStructure(chatHistory, isAuto = false) {
     try {
         const opts = getCurrentPresetOptions();
         const { top, bottom, body } = splitAnalysisPromptByHistory(chatHistory, true);
-        const sid = 'xb2';
+        const sid = 'xb10';
         const apiArgs = buildAnalysisStreamingArgs();
         const addon = opts.includeWorldInfo ? 'worldInfo,chatHistory' : 'chatHistory';
         const cmd = buildXbgenrawCmdStructured(sid, apiArgs, {
@@ -2451,20 +2451,39 @@ async function startAnalysisByStructure(chatHistory, isAuto = false) {
             body,
             bottomuser: bottom,
             addon,
-            stream: !!opts.stream
+            stream: !!opts.stream,
         });
-        const sessionId = await executeSlashCommand(cmd);
-        dynamicPromptState.analysis.streamSessionId = String(sessionId || sid);
+        const ret = await executeSlashCommand(cmd);
+        if (opts.stream === false) {
+            const finalText = String(ret || '');
+            dynamicPromptState.analysis.isStreaming = false;
+            dynamicPromptState.analysis.streamSessionId = null;
+            await onAnalysisFinalText(finalText, !!dynamicPromptState.analysis.isAuto);
+            dynamicPromptState.isGeneratingUser = false;
+
+            if (dynamicPromptState.isAnalysisOpen) {
+                const card = document.getElementById('analysis-streaming-card');
+                if (card) card.remove();
+                updateTabButtons();
+                await displayUserReportsPage();
+                updatePopupUI();
+            }
+            return null;
+        }
+
+        dynamicPromptState.analysis.streamSessionId = String(ret || sid);
         startAnalysisPolling(dynamicPromptState.analysis.streamSessionId);
         if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
         return dynamicPromptState.analysis.streamSessionId;
+
     } catch (err) {
         dynamicPromptState.analysis.isStreaming = false;
         dynamicPromptState.analysis.streamSessionId = null;
         stopAnalysisPolling();
-        await executeSlashCommand(`/echo ❌ 分析流式启动失败：${err?.message || '未知错误'}`);
+        await executeSlashCommand(`/echo ❌ 分析启动失败：${(err && err.message) || '未知错误'}`);
         dynamicPromptState.isGeneratingUser = false;
         if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
+        return null;
     }
 }
 
@@ -2472,7 +2491,7 @@ function startAnalysisStreaming(prompt, isAuto = false) {
     return startAnalysisByStructure(prompt, isAuto);
 }
 
-function startAnalysisPolling(sessionId = 'xb2') {
+function startAnalysisPolling(sessionId = 'xb10') {
     stopAnalysisPolling();
     const sid = String(sessionId);
     dynamicPromptState.analysis.streamTimerId = setInterval(() => {
@@ -2504,7 +2523,7 @@ async function finalizeAnalysisStreaming(sessionId) {
     if (!dynamicPromptState.analysis.isStreaming) return;
     stopAnalysisPolling();
     const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
-    const sid = String(sessionId || dynamicPromptState.analysis.streamSessionId || 'xb2');
+    const sid = String(sessionId || dynamicPromptState.analysis.streamSessionId || 'xb10');
     const finalText = (typeof gen?.getLastGeneration === 'function' ? gen.getLastGeneration(sid) : '') || '';
     dynamicPromptState.analysis.isStreaming = false;
     dynamicPromptState.analysis.streamSessionId = null;
@@ -2536,7 +2555,7 @@ async function onAnalysisFinalText(analysisResult, isAuto) {
 
 function cancelAnalysisStreaming() {
     const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
-    const sid = dynamicPromptState.analysis.streamSessionId || 'xb2';
+    const sid = dynamicPromptState.analysis.streamSessionId || 'xb10';
     try { gen?.cancel?.(String(sid)); } catch(e) {}
     stopAnalysisPolling();
     dynamicPromptState.analysis.isStreaming = false;
@@ -2551,21 +2570,42 @@ function cancelAnalysisStreaming() {
     if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
 }
 
-function waitForAnalysisCompletion(sessionId = 'xb2', timeoutMs = 600000) {
+function waitForAnalysisCompletion(sessionId = 'xb10', timeoutMs = 600000) {
     return new Promise((resolve, reject) => {
+        const sid = String(sessionId);
+
+        function cleanup() {
+            try { window.removeEventListener('message', onMsg); } catch {}
+            try { eventSource.off?.('xiaobaix_streaming_completed', onEvt); } catch {}
+        }
+
+        function done(text) {
+            cleanup();
+            resolve(String(text || ''));
+        }
+
         function onMsg(e) {
-            if (e.data?.type === 'xiaobaix_streaming_completed' &&
-                String(e.data?.payload?.sessionId) === String(sessionId)) {
-                window.removeEventListener('message', onMsg);
-                resolve(e.data?.payload?.finalText || '');
+            const data = e && e.data;
+            if (!data || data.type !== 'xiaobaix_streaming_completed') return;
+            if (String(data?.payload?.sessionId) === sid) {
+                done(data?.payload?.finalText || '');
             }
         }
+
+        function onEvt(payload) {
+            if (payload && String(payload.sessionId) === sid) {
+                done(payload.finalText || '');
+            }
+        }
+
         window.addEventListener('message', onMsg);
-        setTimeout(() => {
-            window.removeEventListener('message', onMsg);
+        eventSource.on?.('xiaobaix_streaming_completed', onEvt);
+
+        const timer = setTimeout(() => {
+            cleanup();
             try {
                 const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
-                gen?.cancel(String(sessionId));
+                gen?.cancel(sid);
             } catch {}
             reject(new Error('stream timeout'));
         }, timeoutMs);
@@ -3099,9 +3139,9 @@ async function onSendFourthWallMessage() {
     const { prompt, bottom, topuser } = await buildFourthWallPrompt(userInput);
     try {
         const nonstreamArg = dynamicPromptState.fourthWall.stream ? '' : ' nonstream=true';
-        const cmd = `/xbgenraw id=xb1 as=assistant topuser="${stEscArg(topuser)}" bottomuser="${stEscArg(bottom)}"${nonstreamArg} "${stEscArg(prompt)}"`;
+        const cmd = `/xbgenraw id=xb9 as=assistant topuser="${stEscArg(topuser)}" bottomuser="${stEscArg(bottom)}"${nonstreamArg} "${stEscArg(prompt)}"`;
         const sessionId = await executeSlashCommand(cmd);
-        dynamicPromptState.fourthWall.streamSessionId = String(sessionId || 'xb1');
+        dynamicPromptState.fourthWall.streamSessionId = String(sessionId || 'xb9');
         if (dynamicPromptState.fourthWall.stream) {
             startStreamingPoll(dynamicPromptState.fourthWall.streamSessionId);
         } else {
@@ -3164,9 +3204,9 @@ async function onRegenerateFourthWall() {
     const { prompt, bottom, topuser } = await buildFourthWallPrompt(lastUserText);
     try {
         const nonstreamArg = dynamicPromptState.fourthWall.stream ? '' : ' nonstream=true';
-        const cmd = `/xbgenraw id=xb1 as=assistant topuser="${stEscArg(topuser)}" bottomuser="${stEscArg(bottom)}"${nonstreamArg} "${stEscArg(prompt)}"`;
+        const cmd = `/xbgenraw id=xb9 as=assistant topuser="${stEscArg(topuser)}" bottomuser="${stEscArg(bottom)}"${nonstreamArg} "${stEscArg(prompt)}"`;
         const sessionId = await executeSlashCommand(cmd);
-        dynamicPromptState.fourthWall.streamSessionId = String(sessionId || 'xb1');
+        dynamicPromptState.fourthWall.streamSessionId = String(sessionId || 'xb9');
         if (dynamicPromptState.fourthWall.stream) {
             startStreamingPoll(dynamicPromptState.fourthWall.streamSessionId);
         } else {
@@ -3194,7 +3234,7 @@ async function onRegenerateFourthWall() {
 function startNonstreamAwaitFW(sessionId) {
     try { stopStreamingPoll(); } catch {}
     const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
-    const sid = String(sessionId || dynamicPromptState.fourthWall.streamSessionId || 'xb1');
+    const sid = String(sessionId || dynamicPromptState.fourthWall.streamSessionId || 'xb9');
     const timer = setInterval(() => {
         try {
             const st = gen?.getStatus?.(sid);
@@ -3208,13 +3248,13 @@ function startNonstreamAwaitFW(sessionId) {
 }
 
 /* E5. 流式处理 */
-function startStreamingPoll(sessionId = 'xb1') {
+function startStreamingPoll(sessionId = 'xb9') {
     stopStreamingPoll();
     dynamicPromptState.fourthWall.streamSessionId = String(sessionId);
     dynamicPromptState.fourthWall.streamTimerId = setInterval(() => {
         const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
         if (!gen || typeof gen.getLastGeneration !== 'function') return;
-        const sid = dynamicPromptState.fourthWall.streamSessionId || 'xb1';
+        const sid = dynamicPromptState.fourthWall.streamSessionId || 'xb9';
         const text = gen.getLastGeneration(sid) || '...';
         const $content = $('#fw-streaming-bubble');
         if ($content.length) {
@@ -3237,7 +3277,7 @@ function stopStreamingPoll() {
 
 async function finalizeStreaming(sessionId) {
     if (!dynamicPromptState.fourthWall.isStreaming) return;
-    const sid = String(sessionId || dynamicPromptState.fourthWall.streamSessionId || 'xb1');
+    const sid = String(sessionId || dynamicPromptState.fourthWall.streamSessionId || 'xb9');
     stopStreamingPoll();
     const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
     const finalTextRaw = (typeof gen?.getLastGeneration === 'function' ? gen.getLastGeneration(sid) : '') || '(无响应)';
@@ -3474,7 +3514,7 @@ function updateFourthWallSendButton() {
 
 function cancelFourthWallStreaming() {
     const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
-    const sid = String(dynamicPromptState.fourthWall.streamSessionId || 'xb1');
+    const sid = String(dynamicPromptState.fourthWall.streamSessionId || 'xb9');
 
     stopStreamingPoll();
     dynamicPromptState.fourthWall.isStreaming = false;
@@ -3682,11 +3722,11 @@ function dynamicPromptCleanup() {
 function handleStreamingComplete(event) {
     if (event.data?.type !== 'xiaobaix_streaming_completed') return;
     const sid = String(event.data?.payload?.sessionId || '');
-    if (sid && sid === String(dynamicPromptState.fourthWall.streamSessionId || 'xb1')) {
+    if (sid && sid === String(dynamicPromptState.fourthWall.streamSessionId || 'xb9')) {
         finalizeStreaming(sid);
         return;
     }
-    if (sid && sid === String(dynamicPromptState.analysis.streamSessionId || 'xb2')) {
+    if (sid && sid === String(dynamicPromptState.analysis.streamSessionId || 'xb10')) {
         finalizeAnalysisStreaming(sid);
         return;
     }
