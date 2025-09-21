@@ -694,6 +694,9 @@ function toggleAllFeatures(enabled) {
             setTimeout(() => { document.querySelectorAll('#message_preview_btn').forEach(btn => btn.style.display = ''); }, 500);
         if (extension_settings[EXT_ID].recorded?.enabled)
             setTimeout(() => addHistoryButtonsDebounced(), 600);
+        // Inject call-generate host (optional) and worldbook host bridge
+        try{if(isXiaobaixEnabled&&settings.wrapperIframe&&!document.getElementById('xb-callgen'))document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-callgen',type:'module',src:`${extensionFolderPath}/call-generate-service.js`}))}catch(e){}
+        try{if(isXiaobaixEnabled&&!document.getElementById('xb-worldbook'))document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-worldbook',type:'module',src:`${extensionFolderPath}/worldbook-bridge.js`}))}catch(e){}
         document.dispatchEvent(new CustomEvent('xiaobaixEnabledChanged', { detail: { enabled: true } }));
     } else {
         cleanupAllResources();
@@ -723,6 +726,7 @@ function toggleAllFeatures(enabled) {
         });
         moduleInstances.statsTracker?.removeMemoryPrompt?.();
         window.removeScriptDocs?.();
+        try { window.cleanupWorldbookHostBridge && window.cleanupWorldbookHostBridge(); document.getElementById('xb-worldbook')?.remove(); } catch (e) {}
         document.dispatchEvent(new CustomEvent('xiaobaixEnabledChanged', { detail: { enabled: false } }));
     }
 }
@@ -1100,6 +1104,7 @@ jQuery(async () => {
         await setupSettings();
         if (isXiaobaixEnabled) setupEventListeners();
         try{if(isXiaobaixEnabled&&settings.wrapperIframe&&!document.getElementById('xb-callgen'))document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-callgen',type:'module',src:`${extensionFolderPath}/call-generate-service.js`}))}catch(e){}
+        try{if(isXiaobaixEnabled&&!document.getElementById('xb-worldbook'))document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-worldbook',type:'module',src:`${extensionFolderPath}/worldbook-bridge.js`}))}catch(e){}
         eventSource.on(event_types.APP_READY, () => {
             setTimeout(performExtensionUpdateCheck, 2000);
         });
