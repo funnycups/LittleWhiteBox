@@ -20,7 +20,6 @@ const now = () => Date.now(), geEnabled = () => { try { return ("isXiaobaixEnabl
 const debounce = (fn, w) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), w); }; };
 const safeJson = (t) => { try { return JSON.parse(t); } catch { return null; } };
 
-/* 读取文本：仅在可安全读取的类型上使用 */
 const readText = async (b) => {
   try {
     if (!b) return "";
@@ -32,7 +31,6 @@ const readText = async (b) => {
   return "";
 };
 
-/* 判定 body 是否“可重复读取”，避免误消费一次性流导致 502 */
 function isSafeBody(body) {
   if (!body) return true;
   return (
@@ -45,7 +43,6 @@ function isSafeBody(body) {
   );
 }
 
-/* 在不消费一次性流的前提下尝试读取请求体 */
 async function safeReadBodyFromInput(input, options) {
   try {
     if (input instanceof Request) {
@@ -78,7 +75,6 @@ const getSettings = () => {
   return d;
 };
 
-/* ultra-light tail hook for eventSource.emit: 尾位固定 + 最小侵入 */
 function installEventSourceTail(es) {
   if (!es || es.__lw_tailInstalled) return es?.__lw_tailAPI || null;
 
@@ -209,7 +205,6 @@ function installEventSourceTail(es) {
   return api;
 }
 
-/* fetch guard: 尾位固定 + 最小侵入 */
 let __installed = false;
 const MW_KEY = Symbol.for("lwbox.fetchMiddlewareStack");
 const BASE_KEY = Symbol.for("lwbox.fetchBase");
@@ -229,7 +224,6 @@ const getFetchFromDesc = (d) => {
 };
 const compose = (base, stack) => stack.reduce((acc, mw) => mw(acc), base);
 
-/* 给记录加上超时保护，防止阻塞真实请求 */
 const withTimeout = (p, ms = 200) => {
   try {
     return Promise.race([p, new Promise((r) => setTimeout(r, ms))]);
@@ -338,7 +332,6 @@ const setupFetch = () => { if (!S.active) { installFetch(); S.active = true; } }
 const restoreFetch = () => { if (S.active) { uninstallFetch(); S.active = false; } };
 const updateFetchState = () => { const st = getSettings(), need = (st.preview.enabled || st.recorded.enabled); if (need && !S.active) setupFetch(); if (!need && S.active) restoreFetch(); };
 
-/* record/history */
 const pushHistory = (r) => { S.history.unshift(r); if (S.history.length > C.MAX_HISTORY) S.history.length = C.MAX_HISTORY; };
 const extractUser = (ms) => { if (!Array.isArray(ms)) return ""; for (let i = ms.length - 1; i >= 0; i--) if (ms[i]?.role === "user") return ms[i].content || ""; return ""; };
 async function recordReal(input, options) {
@@ -363,8 +356,6 @@ const findRec = (id) => {
   return cs.length ? cs.sort((a, b) => b.messageId - a.messageId)[0] : S.history[0];
 };
 
-/* preview intercept */
-// 精简后的持续拦截：仅弹窗与伪响应；不进行 DOM 拦截/劫持/记录等
 async function interceptPreview(url, options) {
   const body = await safeReadBodyFromInput(url, options);
   const data = safeJson(body) || {};
@@ -389,7 +380,6 @@ async function interceptPreview(url, options) {
     S.resolve = S.reject = null;
   }
 
-  // 单次拦截保持原行为：空内容；持续拦截返回“这是已拦截消息”
   const payload = S.isLong
     ? {
         choices: [{ message: { content: "【小白X】已拦截消息" }, finish_reason: "stop" }],
@@ -405,44 +395,6 @@ async function interceptPreview(url, options) {
   });
 }
 
-/* DOM bypass + push hijack —— 保留用于单次拦截，不用于持续拦截 */
-let __mo = null;
-const startBypass = () => {
-  if (__mo) return; const chat = document.querySelector("#chat"); if (!chat) return;
-  __mo = new MutationObserver((muts) => {
-    if (!S.isPreview && !S.isLong) return;
-    for (const m of muts) m.addedNodes?.forEach((n) => {
-      if (n instanceof HTMLElement && n.classList.contains("mes")) {
-        const id = parseInt(n.getAttribute("mesid") || ""); if (!Number.isNaN(id)) recordInterceptedId(id); n.remove();
-      }
-    });
-  });
-  __mo.observe(chat, { childList: true, subtree: true });
-};
-const stopBypass = () => { if (__mo) { try { __mo.disconnect(); } catch {} __mo = null; } };
-function hijackPush() {
-  const ctx = getContext(), orig = ctx.chat.push, before = ctx.chat.length; startBypass();
-  ctx.chat.push = function (...items) {
-    const s = this.length, res = orig.apply(this, items);
-    if (S.isPreview || S.isLong) for (let i = 0; i < items.length; i++) { const id = s + i; S.previewIds.add(id); if (S.isPreview) recordInterceptedId(id); }
-    return res;
-  };
-  return function restore() {
-    ctx.chat.push = orig; stopBypass();
-    if (S.previewIds.size) {
-      const ids = [...S.previewIds].sort((a, b) => b - a);
-      ids.forEach((id) => { if (id < ctx.chat.length) ctx.chat.splice(id, 1); $(`#chat .mes[mesid="${id}"]`).remove(); });
-      while (ctx.chat.length > before) ctx.chat.pop();
-      S.previewIds.clear();
-    }
-  };
-}
-const waitIntercept = () => new Promise((resolve, reject) => {
-  const t = setTimeout(() => { if (S.resolve) { S.resolve({ success: false, error: `等待超时 (${getSettings().preview.timeoutSeconds}秒)` }); S.resolve = S.reject = null; } }, getSettings().preview.timeoutSeconds * 1000);
-  S.resolve = (v) => { clearTimeout(t); resolve(v); }; S.reject = (e) => { clearTimeout(t); reject(e); };
-});
-
-/* mirror/format */
 const MIRROR = { MERGE: "merge", MERGE_TOOLS: "merge_tools", SEMI: "semi", SEMI_TOOLS: "semi_tools", STRICT: "strict", STRICT_TOOLS: "strict_tools", SINGLE: "single" };
 const roleMap = { system: { label: "SYSTEM:", color: "#F7E3DA" }, user: { label: "USER:", color: "#F0ADA7" }, assistant: { label: "ASSISTANT:", color: "#6BB2CC" } };
 const colorXml = (t) => (typeof t === "string" ? t.replace(/<([^>]+)>/g, '<span style="color:#999; font-weight:bold;">&lt;$1&gt;</span>') : t);
@@ -527,7 +479,6 @@ const formatPreview = (d) => {
   return out;
 };
 
-// 仅保留 messages 字段（其余全部隐藏）
 const stripTop = (o) => {
   try {
     if (!o || typeof o !== "object") return o;
@@ -562,7 +513,47 @@ const openPopup = async (html, title) => {
 };
 const displayPreview = async (d) => { try { await openPopup(buildPreviewHtml(d), "消息拦截"); } catch { toastr.error("显示拦截失败"); } };
 
-/* UI/send */
+async function cleanupEmptyAssistantPairLast3() {
+  try {
+    const ctx = getContext();
+    const ch = Array.isArray(ctx.chat) ? ctx.chat : [];
+    const n = ch.length;
+    if (!n) return;
+    const start = Math.max(0, n - 3);
+    let idx = -1;
+    for (let i = n - 1; i >= start; i--) {
+      const m = ch[i];
+      const isAssistant = m && m.is_user !== true;
+      const txt = typeof m?.mes === "string" ? m.mes.trim() : "";
+      if (isAssistant && txt.length === 0) { idx = i; break; }
+    }
+    if (idx === -1) return;
+    const toRemove = [idx];
+    if (idx - 1 >= 0 && ch[idx - 1]?.is_user === true) toRemove.push(idx - 1);
+    toRemove.sort((a, b) => b - a).forEach(i => ch.splice(i, 1));
+
+    try {
+      const $chat = $q('#chat');
+      for (const i of toRemove) {
+        $chat.find(`.mes[mesid="${i}"]`).remove();
+      }
+      const $messages = $chat.find('.mes');
+      const ids = $messages.map((_, el) => Number(el.getAttribute('mesid'))).get().filter(x => !isNaN(x));
+      const minId = ids.length ? Math.min(...ids) : 0;
+      $messages.each(function (index) {
+        const newId = minId + index;
+        $(this).attr('mesid', newId);
+        $(this).find('.mesIDDisplay').text(`#${newId}`);
+      });
+      $('#chat .mes').removeClass('last_mes');
+      $('#chat .mes').last().addClass('last_mes');
+    } catch {}
+
+    await ctx.saveChat();
+    try { await ctx.eventSource.emit(ctx.eventTypes.MESSAGE_DELETED, ch.length); } catch {}
+  } catch {}
+}
+
 const disableSend = (dis = true) => {
   const $b = $q("#send_but");
   if (dis) { S.sendBtnWasDisabled = $b.prop("disabled"); $b.prop("disabled", true).off("click.preview-block").on("click.preview-block", (e) => { e.preventDefault(); e.stopImmediatePropagation(); return false; }); }
@@ -573,15 +564,13 @@ const triggerSend = () => {
   const was = $b.prop("disabled"); $b.prop("disabled", false); $b[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); if (was) $b.prop("disabled", true); return true;
 };
 
-/* preview actions */
 async function showPreview() {
-  let restore = null, toast = null, backup = null;
+  let toast = null, backup = null;
   try {
     const set = getSettings(); if (!set.preview.enabled || !geEnabled()) return toastr.warning("消息拦截功能未启用");
     const text = String($q("#send_textarea").val() || "").trim(); if (!text) return toastr.error("请先输入消息内容");
     backup = text; disableSend(true);
     S.isPreview = true; S.previewData = null; S.previewIds.clear(); S.previewAbort = new AbortController();
-    restore = hijackPush();
     toast = toastr.info(`正在拦截请求...（${set.preview.timeoutSeconds}秒超时）`, "消息拦截", { timeOut: 0, tapToDismiss: false });
     if (!triggerSend()) throw new Error("无法触发发送事件");
     const res = await waitIntercept().catch((e) => ({ success: false, error: e?.message || e }));
@@ -593,8 +582,8 @@ async function showPreview() {
   } finally {
     try { S.previewAbort?.abort("拦截结束"); } catch {} S.previewAbort = null;
     if (S.resolve) S.resolve({ success: false, error: "拦截已取消" }); S.resolve = S.reject = null;
-    try { restore?.(); } catch {}
     S.isPreview = false; S.previewData = null; disableSend(false); if (backup) $q("#send_textarea").val(backup);
+    await cleanupEmptyAssistantPairLast3();
   }
 }
 async function showHistoryPreview(messageId) {
@@ -617,7 +606,6 @@ const addHistoryButtonsDebounced = debounce(() => {
   });
 }, C.DEBOUNCE);
 
-/* small utils */
 const cleanupMemory = () => {
   if (S.history.length > C.MAX_HISTORY) S.history = S.history.slice(0, C.MAX_HISTORY);
   S.previewIds.clear(); S.previewData = null; $(".mes_history_preview").each(function () { if (!$(this).closest(".mes").length) $(this).remove(); });
@@ -664,7 +652,6 @@ const addEvents = () => {
 };
 const removeEvents = () => { S.listeners.forEach(({ e, h, off }) => { if (typeof off === "function") { try { off(); } catch {} } else { try { OFF(e, h); } catch {} } }); S.listeners = []; };
 
-/* long mode —— 精简版：不再劫持 DOM/push/记录，仅切换状态与UI提示 */
 const toggleLong = () => {
   S.isLong = !S.isLong;
   const $b = $q("#message_preview_btn");
@@ -682,35 +669,18 @@ const bindBtn = () => {
   $b.on("mouseup touchend mouseleave", () => { if (S.longPressTimer) { clearTimeout(S.longPressTimer); S.longPressTimer = null; } });
   $b.on("click", () => { if (S.longPressTimer) { clearTimeout(S.longPressTimer); S.longPressTimer = null; return; } if (!S.isLong) showPreview(); });
 };
-const recordInterceptedId = (id) => { if ((S.isPreview || S.isLong) && !S.interceptedIds.includes(id)) S.interceptedIds.push(id); };
 
-async function deleteMessageById(id) {
-  try {
-    const ctx = getContext();
-    if (id === ctx.chat?.length - 1) { if (typeof deleteLastMessage === "function") { await deleteLastMessage(); return true; } }
-    if (ctx.chat && ctx.chat[id]) { ctx.chat.splice(id, 1); $(`#chat .mes[mesid="${id}"]`).remove(); if (ctx.chat_metadata) ctx.chat_metadata.tainted = true; return true; }
-    const el = $(`#chat .mes[mesid="${id}"]`); if (el.length) { el.remove(); return true; }
-    return false;
-  } catch { return false; }
-}
-async function deleteInterceptedMessages() {
-  try {
-    if (!S.interceptedIds.length) return;
-    const ids = [...S.interceptedIds].sort((a, b) => b - a); let n = 0;
-    for (const id of ids) if (await deleteMessageById(id)) n++;
-    S.interceptedIds = []; try { if (typeof saveChatConditional === "function") await saveChatConditional(); } catch {}
-    if (n) toastr.success(`拦截模式下的 ${n} 条消息已自动删除`, "", { timeOut: 2000 });
-  } catch { toastr.error("删除拦截消息失败"); }
-}
+const waitIntercept = () => new Promise((resolve, reject) => {
+  const t = setTimeout(() => { if (S.resolve) { S.resolve({ success: false, error: `等待超时 (${getSettings().preview.timeoutSeconds}秒)` }); S.resolve = S.reject = null; } }, getSettings().preview.timeoutSeconds * 1000);
+  S.resolve = (v) => { clearTimeout(t); resolve(v); }; S.reject = (e) => { clearTimeout(t); reject(e); };
+});
 
-/* lifecycle */
 function cleanup() {
   removeEvents(); restoreFetch(); disableSend(false);
   $(".mes_history_preview").remove(); $("#message_preview_btn").remove(); cleanupMemory();
   Object.assign(S, { resolve: null, reject: null, isPreview: false, isLong: false, interceptedIds: [], chatLenBefore: 0, sendBtnWasDisabled: false });
   if (S.longPressTimer) { clearTimeout(S.longPressTimer); S.longPressTimer = null; }
   if (S.restoreLong) { try { S.restoreLong(); } catch {} S.restoreLong = null; }
-  stopBypass();
 }
 function initMessagePreview() {
   try {
