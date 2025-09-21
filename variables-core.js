@@ -709,7 +709,6 @@ function rebuildVariablesFromScratch() {
     }
   } catch {}
 }
-
 /* ============= 第二区：世界书条件事件系统（最终流就地替换） ============= */
 const LWB_VAREVENT_PROMPT_KEY = 'LWB_varevent_display';
 
@@ -1959,25 +1958,39 @@ function openBumpAliasBuilder(block) {
 /* ============= 第四区：xbgetvar 宏与命令 ============= */
 function lwbResolveVarPath(path){
   try{
-    path = String(path ?? '').replace(/\[(\d+)\]/g, '.$1');
-    const segs = String(path||'').split('.').map(s=>s.trim()).filter(Boolean);
+    const segs = splitPathSegments(path);
     if(!segs.length) return '';
-    const rootName=segs[0];
-    const rootRaw=getLocalVariable(rootName);
+    const rootName = String(segs[0]);
+    const rootRaw = getLocalVariable(rootName);
     if(segs.length===1){
       if(rootRaw==null) return '';
-      if(typeof rootRaw==='object'){ try{ return JSON.stringify(rootRaw); }catch{return ''} }
+      if(typeof rootRaw==='object'){
+        try{ return JSON.stringify(rootRaw); }catch{ return ''; }
+      }
       return String(rootRaw);
     }
-    const obj=parseObj(rootRaw); if(!obj) return '';
-    let cur=obj;
-    for(let i=1;i<segs.length;i++){
-      const key=/^\d+$/.test(segs[i])?Number(segs[i]):segs[i];
-      cur=cur?.[key];
-      if(cur===undefined) return '';
+    let obj;
+    if (typeof rootRaw === 'string') {
+      try {
+        const s = rootRaw.trim();
+        obj = (s && (s[0] === '{' || s[0] === '[')) ? JSON.parse(s) : null;
+      } catch { obj = null; }
+    } else if (rootRaw && typeof rootRaw === 'object') {
+      obj = rootRaw;
+    } else {
+      obj = null;
     }
-    if(cur==null) return '';
-    if(typeof cur==='object'){ try{ return JSON.stringify(cur); }catch{return ''} }
+    if (!obj) return '';
+    let cur = obj;
+    for (let i = 1; i < segs.length; i++) {
+      const k = segs[i];
+      cur = cur?.[k];
+      if (cur === undefined) return '';
+    }
+    if (cur == null) return '';
+    if (typeof cur === 'object') {
+      try { return JSON.stringify(cur); } catch { return ''; }
+    }
     return String(cur);
   }catch{ return ''; }
 }
@@ -2009,10 +2022,10 @@ function registerXbGetVarSlashCommand(){
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
       name: 'xbgetvar',
       returns: 'string',
-      helpString: '通过点路径获取嵌套的本地变量值。示例: /xbgetvar A.A1.AA1.AAA1 | /echo {{pipe}}',
-unnamedArgumentList: [
+      helpString: '通过点/中括号路径获取嵌套的本地变量值。支持 ["0"] 强制字符串键、[0] 数组索引。示例: /xbgetvar 人物状态.姓名["0"].时光啊 | /echo {{pipe}}',
+      unnamedArgumentList: [
         SlashCommandArgument.fromProps({
-          description: '点号分隔的变量路径，例如 A.B.C 或 A.0.name',
+          description: '变量路径，例如 A.B.C 或 A[0].name 或 A["0"].name',
           typeList: [ARGUMENT_TYPE.STRING],
           isRequired: true,
           acceptsMultiple: false,
