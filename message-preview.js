@@ -302,6 +302,12 @@ const findRec = (id) => {
   return cs.length ? cs.sort((a, b) => b.messageId - a.messageId)[0] : S.history[0];
 };
 
+/**
+ * 修改后的清理策略：
+ * - 触发时机保持不变（GENERATION_ENDED 或 1.5s 兜底）。
+ * - 仅当最后一条 AI 回复为空时，删除该 AI 与其上一个 USER。
+ * - 否则不删除任何消息。
+ */
 function purgePreviewArtifacts() {
   try {
     const ctx = getContext();
@@ -310,29 +316,87 @@ function purgePreviewArtifacts() {
     if (start >= chat.length) return;
 
     const end = chat.length - 1;
-    for (let i = end; i >= start; i--) {
-      chat.splice(i, 1);
+    const last = chat[end];
+    const prev = chat[end - 1];
+
+    // 判断角色字段
+    const isAssistant = (m) => {
+      if (!m) return false;
+      if (typeof m.role === 'string') return m.role === 'assistant';
+      if (typeof m.is_user !== 'undefined') return m.is_user === false;
+      return false;
+    };
+    const isUser = (m) => {
+      if (!m) return false;
+      if (typeof m.role === 'string') return m.role === 'user';
+      if (typeof m.is_user !== 'undefined') return m.is_user === true;
+      return false;
+    };
+
+    // 提取文本内容
+    const getText = (m) => {
+      if (!m) return '';
+      const cand = [m.mes, m.text, m.content, m.reply, m.data]?.find(v => typeof v === 'string');
+      if (typeof cand === 'string') return cand;
+      if (Array.isArray(m.content)) {
+        return m.content.map(p => {
+          if (p?.type === 'text') return String(p.text || '');
+          if (p?.type === 'image_url') return '';
+          if (p?.type === 'video_url') return '';
+          if (typeof p === 'string') return p;
+          if (typeof p?.content === 'string') return p.content;
+          return '';
+        }).filter(Boolean).join('\n\n');
+      }
+      return '';
+    };
+
+    const lastIsAI = isAssistant(last);
+    const lastContent = getText(last).trim();
+    const isEmptyAI = lastIsAI && lastContent === '';
+
+    if (!isEmptyAI) {
+      // 不为空则不清理任何消息
+      return;
     }
 
-    try {
-      const $chat = $('#chat');
-      for (let i = end; i >= start; i--) {
-        $chat.find(`.mes[mesid="${i}"]`).remove();
-      }
-      const $messages = $chat.find('.mes');
-      $messages.each(function (index) {
-        $(this).attr('mesid', index);
-        $(this).find('.mesIDDisplay').text(`#${index}`);
-      });
-      $('#chat .mes').removeClass('last_mes');
-      $('#chat .mes').last().addClass('last_mes');
-    } catch {}
+    // 记录需要删除的索引（先 AI，再可能 USER）
+    const toDelete = [end];
+    if (isUser(prev)) toDelete.push(end - 1);
+    toDelete.sort((a, b) => b - a); // 从大到小删除，避免索引移位
 
+    // DOM 删除前，先定位对应 mesid 的元素
+    const $chat = $('#chat');
+    const $targets = [];
+    toDelete.forEach(idx => {
+      const $el = $chat.find(`.mes[mesid="${idx}"]`);
+      if ($el.length) $targets.push($el);
+    });
+
+    // 从数据中删除
+    toDelete.forEach(idx => {
+      if (idx >= 0 && idx < chat.length) chat.splice(idx, 1);
+    });
+
+    // 从 DOM 中删除
+    $targets.forEach($el => $el.remove());
+
+    // 重新索引 DOM mesid
+    const $messages = $chat.find('.mes');
+    $messages.each(function (index) {
+      $(this).attr('mesid', index);
+      $(this).find('.mesIDDisplay').text(`#${index}`);
+    });
+    $('#chat .mes').removeClass('last_mes');
+    $('#chat .mes').last().addClass('last_mes');
+
+    // 保存与事件
     ctx.saveChat?.();
     try {
       const { eventSource, event_types } = ctx || {};
       if (eventSource?.emit && event_types?.MESSAGE_DELETED) {
-        eventSource.emit(event_types.MESSAGE_DELETED, start);
+        const minIdx = Math.min(...toDelete);
+        eventSource.emit(event_types.MESSAGE_DELETED, minIdx);
       }
     } catch {}
   } catch {}
