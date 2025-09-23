@@ -47,6 +47,39 @@ function deleteDeepKey(root, path){ const segs=splitPathSegments(path); if(segs.
 const getRootAndPath=(name)=>{ const segs=String(name||'').split('.').map(s=>s.trim()).filter(Boolean); if(segs.length<=1) return {root:String(name||'').trim(), subPath:''}; return {root:segs[0], subPath: segs.slice(1).join('.')}; };
 const joinPath=(base, more)=> base ? (more ? base + '.' + more : base) : more;
 
+function stripYamlInlineComment(s){
+  const text = String(s ?? '');
+  if (!text) return '';
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inSingle) {
+      if (ch === "'") {
+        if (text[i + 1] === "'") { i++; continue; }
+        inSingle = false;
+      }
+      continue;
+    }
+    if (inDouble) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === '"') { inDouble = false; }
+      continue;
+    }
+    if (ch === "'") { inSingle = true; continue; }
+    if (ch === '"') { inDouble = true; continue; }
+    if (ch === '#') {
+      const prev = i > 0 ? text[i - 1] : '';
+      if (i === 0 || /\s/.test(prev)) {
+        return text.slice(0, i);
+      }
+    }
+  }
+  return text;
+}
+
 /* ============= 第一区：聊天消息变量处理 ============= */
 function getActiveCharacter() {
   try {
@@ -177,7 +210,7 @@ function preprocessBumpAliases(innerText) {
     const mKV = t.match(/^([^:]+):\s*(.*)$/);
     if (mKV) {
       const key = mKV[1].trim();
-      const val = mKV[2].trim();
+      const val = String(stripYamlInlineComment(mKV[2])).trim();
       const parentPath = stack.length ? stack[stack.length - 1].path : '';
       const curPath = parentPath ? `${parentPath}.${key}` : key;
       if (val === '') {
@@ -186,7 +219,7 @@ function preprocessBumpAliases(innerText) {
         out.push(raw);
         continue;
       }
-      let rhs = val.replace(/^['"]|['"]$/g, '');
+      let rhs = val.replace(/^["']|["']$/g, '');
       const leafKey = key;
       const num = matchAlias(leafKey, rhs) ?? matchAlias(currentVarRoot, rhs) ?? matchAlias('', rhs);
       if (num !== null && Number.isFinite(num)) {
@@ -196,9 +229,9 @@ function preprocessBumpAliases(innerText) {
       }
       continue;
     }
-    const mArr = t.match(/^-\s*(.+)$/);
+    const mArr = t.match(/^\-\s*(.+)$/);
     if (mArr) {
-      let rhs = mArr[1].trim().replace(/^['"]|['"]$/g, '');
+      let rhs = String(stripYamlInlineComment(mArr[1])).trim().replace(/^["']|["']$/g, '');
       const leafKey = stack.length ? stack[stack.length - 1].path.split('.').pop() : '';
       const num = matchAlias(leafKey || currentVarRoot, rhs) ?? matchAlias(currentVarRoot, rhs) ?? matchAlias('', rhs);
       if (num !== null && Number.isFinite(num)) {
@@ -346,10 +379,13 @@ function parseBlock(innerText) {
         const kv = line.match(/^([^=]+)=(.*)$/);
         if (!kv) continue;
         const keyRaw = kv[1].trim();
-        let rhs = kv[2];
-        if (!rhs.includes('"""') && !rhs.includes("'''")) {
+        const rhsRaw = kv[2];
+        const hasTriple = rhsRaw.includes('"""') || rhsRaw.includes("'''");
+        const rhs = hasTriple ? rhsRaw : stripYamlInlineComment(rhsRaw);
+        if (!hasTriple) {
           const value = parseScalar(rhs);
-          const segs = keyRaw.split('.').map(s => s.trim()).filter(Boolean);
+          const keyClean = stripQ(String(keyRaw).trim());
+          const segs = keyClean.split('.').map(s => stripQ(String(s).trim())).filter(Boolean);
           if (!segs.length) continue;
           const top = segs[0];
           const path = norm(segs.slice(1).join('.'));
@@ -409,7 +445,7 @@ function parseBlock(innerText) {
       const ind = indentOf(raw);
       if (ind <= parentIndent) break;
       const m = t.match(/^-+\s*(.+)$/);
-      if (m) out.push(stripQ(m[1])); else break;
+      if (m) out.push(stripQ(stripYamlInlineComment(m[1]))); else break;
     }
     return { arr: out, next: i - 1 };
   };
@@ -448,7 +484,7 @@ function parseBlock(innerText) {
     const mKV = t.match(/^([^:]+):\s*(.*)$/);
     if (mKV) {
       const key = mKV[1].trim();
-      const rhs = mKV[2].trim();
+      const rhs = String(stripYamlInlineComment(mKV[2])).trim();
       const parentPath = stack.length ? stack[stack.length - 1].path : '';
       const curPath0 = parentPath ? `${parentPath}.${key}` : key;
       const curPath = norm(curPath0);
@@ -496,7 +532,7 @@ function parseBlock(innerText) {
       const curPath = stack[stack.length - 1].path;
       const [top, ...rest] = curPath.split('.');
       const rel = rest.join('.');
-      const val = stripQ(mArr[1]);
+      const val = stripQ(stripYamlInlineComment(mArr[1]));
       if (curOp === 'set') {
         const bucket = (ops.set[top] ||= {});
         const prev = bucket[rel];
