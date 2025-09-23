@@ -304,20 +304,29 @@ function buildResourceHints(html){
 
 function iframeClientScript(){return `
 (function(){
-  function measureVisibleHeight(){
+function measureVisibleHeight(){
     try{
-      var root = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
-      var h1 = root.scrollHeight || 0;
-      var h2 = root.offsetHeight || 0;
-      var h3 = 0;
-      try{ h3 = root.getBoundingClientRect ? Math.round(root.getBoundingClientRect().height) : 0 }catch(e){}
-      var h = Math.max(h1, h2, h3);
-      return Math.max(0, Math.round(h));
+        var body = document.body;
+        var html = document.documentElement;
+        
+        body.offsetHeight;
+        
+        var bodyScrollHeight = body.scrollHeight || 0;
+        var htmlScrollHeight = html.scrollHeight || 0;
+        
+        var achievementScroll = document.querySelector('.achievement-scroll');
+        if(achievementScroll){
+            var rect = achievementScroll.getBoundingClientRect();
+            var computedHeight = rect.height + 40;
+            return Math.max(0, Math.round(computedHeight));
+        }
+        
+        var h = Math.max(bodyScrollHeight, htmlScrollHeight, body.offsetHeight || 0);
+        return Math.max(0, Math.round(h));
     }catch(e){
-      var b=document.body;
-      return (b && (b.scrollHeight||b.offsetHeight)) || 0;
+        return 200;
     }
-  }
+}
 
   function post(m){ try{ parent.postMessage(m,'*') }catch(e){} }
 
