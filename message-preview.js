@@ -3,7 +3,7 @@ import { saveSettingsDebounced, eventSource, event_types } from "../../../../scr
 
 const EXT_ID = "LittleWhiteBox";
 const C = { MAX_HISTORY: 10, CHECK: 200, DEBOUNCE: 300, CLEAN: 300000, TARGET: "/api/backends/chat-completions/generate", TIMEOUT: 30, ASSOC_DELAY: 1000, REQ_WINDOW: 30000 };
-const S = { active: false, isPreview: false, isLong: false, isHistoryUiBound: false, previewData: null, previewIds: new Set(), interceptedIds: [], history: [], listeners: [], resolve: null, reject: null, sendBtnWasDisabled: false, longPressTimer: null, longPressDelay: 1000, chatLenBefore: 0, restoreLong: null, cleanTimer: null, previewAbort: null, tailAPI: null, genEndedOff: null, cleanupFallback: null };
+const S = { active: false, isPreview: false, isLong: false, isHistoryUiBound: false, previewData: null, previewIds: new Set(), interceptedIds: [], history: [], listeners: [], resolve: null, reject: null, sendBtnWasDisabled: false, longPressTimer: null, longPressDelay: 1000, chatLenBefore: 0, restoreLong: null, cleanTimer: null, previewAbort: null, tailAPI: null };
 
 const $q = (sel) => $(sel);
 const ON = (e, c) => eventSource.on(e, c);
@@ -29,23 +29,9 @@ function injectPreviewModalStyles() {
   style.id = 'message-preview-modal-styles';
   style.textContent = `
     .mp-overlay{position:fixed;inset:0;background:none;z-index:9999;display:flex;align-items:center;justify-content:center;pointer-events:none}
-    .mp-modal{
-      width:clamp(360px,55vw,860px);
-      max-width:95vw;
-      background:var(--SmartThemeBlurTintColor);
-      border:2px solid var(--SmartThemeBorderColor);
-      border-radius:10px;
-      box-shadow:0 8px 16px var(--SmartThemeShadowColor);
-      pointer-events:auto;
-      display:flex;
-      flex-direction:column;
-      height:80vh;
-      max-height:calc(100vh - 60px);
-      resize:both;
-      overflow:hidden;
-    }
+    .mp-modal{width:900px;background:var(--SmartThemeBlurTintColor);border:2px solid var(--SmartThemeBorderColor);border-radius:10px;box-shadow:0 8px 16px var(--SmartThemeShadowColor);pointer-events:auto;display:flex;flex-direction:column;height:80vh;max-height:calc(100vh - 40px)}
     .mp-header{display:flex;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--SmartThemeBorderColor);font-weight:600;cursor:move;flex-shrink:0}
-    .mp-body{height:60vh;overflow:auto;padding:10px;flex:1;min-height:160px}
+    .mp-body{height:60vh;overflow:auto;padding:10px;flex:1}
     .mp-footer{display:flex;gap:8px;justify-content:flex-end;padding:12px 14px;border-top:1px solid var(--SmartThemeBorderColor);flex-shrink:0}
     .mp-close{cursor:pointer}
     .mp-btn{cursor:pointer;border:1px solid var(--SmartThemeBorderColor);background:var(--SmartThemeBlurTintColor);padding:6px 10px;border-radius:6px}
@@ -58,7 +44,7 @@ function injectPreviewModalStyles() {
     .mp-highlight.current{background-color:orange;font-weight:bold}
     @media (max-width:999px){
       .mp-overlay{position:absolute;inset:0;align-items:flex-start}
-      .mp-modal{width:100%;max-width:100%;max-height:100%;margin:0;border-radius:10px 10px 0 0;height:100vh;resize:none}
+      .mp-modal{width:100%;max-height:100%;margin:0;border-radius:10px 10px 0 0;height:100vh}
       .mp-header{padding:8px 14px}
       .mp-body{padding:8px}
       .mp-footer{padding:8px 14px;flex-wrap:wrap;gap:6px}
@@ -302,124 +288,6 @@ const findRec = (id) => {
   return cs.length ? cs.sort((a, b) => b.messageId - a.messageId)[0] : S.history[0];
 };
 
-/**
- * 修改后的清理策略：
- * - 触发时机保持不变（GENERATION_ENDED 或 1.5s 兜底）。
- * - 仅当最后一条 AI 回复为空时，删除该 AI 与其上一个 USER。
- * - 否则不删除任何消息。
- */
-function purgePreviewArtifacts() {
-  try {
-    const ctx = getContext();
-    const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
-    const start = Math.max(0, Number(S.chatLenBefore) || 0);
-    if (start >= chat.length) return;
-
-    const end = chat.length - 1;
-    const last = chat[end];
-    const prev = chat[end - 1];
-
-    // 判断角色字段
-    const isAssistant = (m) => {
-      if (!m) return false;
-      if (typeof m.role === 'string') return m.role === 'assistant';
-      if (typeof m.is_user !== 'undefined') return m.is_user === false;
-      return false;
-    };
-    const isUser = (m) => {
-      if (!m) return false;
-      if (typeof m.role === 'string') return m.role === 'user';
-      if (typeof m.is_user !== 'undefined') return m.is_user === true;
-      return false;
-    };
-
-    // 提取文本内容
-    const getText = (m) => {
-      if (!m) return '';
-      const cand = [m.mes, m.text, m.content, m.reply, m.data]?.find(v => typeof v === 'string');
-      if (typeof cand === 'string') return cand;
-      if (Array.isArray(m.content)) {
-        return m.content.map(p => {
-          if (p?.type === 'text') return String(p.text || '');
-          if (p?.type === 'image_url') return '';
-          if (p?.type === 'video_url') return '';
-          if (typeof p === 'string') return p;
-          if (typeof p?.content === 'string') return p.content;
-          return '';
-        }).filter(Boolean).join('\n\n');
-      }
-      return '';
-    };
-
-    const lastIsAI = isAssistant(last);
-    const lastContent = getText(last).trim();
-    const isEmptyAI = lastIsAI && lastContent === '';
-
-    if (!isEmptyAI) {
-      // 不为空则不清理任何消息
-      return;
-    }
-
-    // 记录需要删除的索引（先 AI，再可能 USER）
-    const toDelete = [end];
-    if (isUser(prev)) toDelete.push(end - 1);
-    toDelete.sort((a, b) => b - a); // 从大到小删除，避免索引移位
-
-    // DOM 删除前，先定位对应 mesid 的元素
-    const $chat = $('#chat');
-    const $targets = [];
-    toDelete.forEach(idx => {
-      const $el = $chat.find(`.mes[mesid="${idx}"]`);
-      if ($el.length) $targets.push($el);
-    });
-
-    // 从数据中删除
-    toDelete.forEach(idx => {
-      if (idx >= 0 && idx < chat.length) chat.splice(idx, 1);
-    });
-
-    // 从 DOM 中删除
-    $targets.forEach($el => $el.remove());
-
-    // 重新索引 DOM mesid
-    const $messages = $chat.find('.mes');
-    $messages.each(function (index) {
-      $(this).attr('mesid', index);
-      $(this).find('.mesIDDisplay').text(`#${index}`);
-    });
-    $('#chat .mes').removeClass('last_mes');
-    $('#chat .mes').last().addClass('last_mes');
-
-    // 保存与事件
-    ctx.saveChat?.();
-    try {
-      const { eventSource, event_types } = ctx || {};
-      if (eventSource?.emit && event_types?.MESSAGE_DELETED) {
-        const minIdx = Math.min(...toDelete);
-        eventSource.emit(event_types.MESSAGE_DELETED, minIdx);
-      }
-    } catch {}
-  } catch {}
-}
-
-function oneShotOnLast(ev, handler) {
-  const wrapped = (...args) => {
-    try { handler(...args); } finally { off(); }
-  };
-  let off = () => {};
-  if (typeof eventSource.makeLast === "function") {
-    eventSource.makeLast(ev, wrapped);
-    off = () => {};
-  } else if (S.tailAPI?.onLast) {
-    const disposer = S.tailAPI.onLast(ev, wrapped);
-    off = () => { try { disposer?.(); } catch {} };
-  } else {
-    eventSource.on(ev, wrapped);
-    off = () => { try { eventSource.removeListener?.(ev, wrapped); } catch {} };
-  }
-  return off;
-}
-
 function installEventSourceTail(es) {
   if (!es || es.__lw_tailInstalled) return es?.__lw_tailAPI || null;
   const SYM = { MW_STACK: Symbol.for("lwbox.es.emitMiddlewareStack"), BASE: Symbol.for("lwbox.es.emitBase"), ORIG_DESC: Symbol.for("lwbox.es.emit.origDesc"), COMPOSED: Symbol.for("lwbox.es.emit.composed"), ID: Symbol.for("lwbox.middleware.identity") };
@@ -515,13 +383,6 @@ async function interceptPreview(url, options) {
   const body = await safeReadBodyFromInput(url, options);
   const data = safeJson(body) || {};
   const userInput = extractUser(data?.messages || []);
-  const ctx = getContext();
-
-  if (S.isLong) {
-    S.chatLenBefore = Array.isArray(ctx.chat) ? ctx.chat.length : 0;
-    oneShotOnLast(event_types.GENERATION_ENDED, () => setTimeout(() => purgePreviewArtifacts(), 0));
-  }
-
   S.previewData = { url, method: options?.method || "POST", requestData: data, messages: data?.messages || [], model: data?.model || "Unknown", timestamp: now(), userInput, isPreview: true };
   if (S.isLong) { setTimeout(() => { displayPreview(S.previewData); }, 100); } else if (S.resolve) { S.resolve({ success: true, data: S.previewData }); S.resolve = S.reject = null; }
   const payload = S.isLong ? { choices: [{ message: { content: "【小白X】已拦截消息" }, finish_reason: "stop" }], intercepted: true } : { choices: [{ message: { content: "" }, finish_reason: "stop" }] };
@@ -540,6 +401,39 @@ const addHistoryButtonsDebounced = debounce(() => {
   });
 }, C.DEBOUNCE);
 
+async function cleanupEmptyAssistantPairLast3() {
+  try {
+    const ctx = getContext();
+    const ch = Array.isArray(ctx.chat) ? ctx.chat : [];
+    const n = ch.length;
+    if (!n) return;
+    const start = Math.max(0, n - 3);
+    let idx = -1;
+    for (let i = n - 1; i >= start; i--) {
+      const m = ch[i];
+      const isAssistant = m && m.is_user !== true;
+      const txt = typeof m?.mes === "string" ? m.mes.trim() : "";
+      if (isAssistant && txt.length === 0) { idx = i; break; }
+    }
+    if (idx === -1) return;
+    const toRemove = [idx];
+    if (idx - 1 >= 0 && ch[idx - 1]?.is_user === true) toRemove.push(idx - 1);
+    toRemove.sort((a, b) => b - a).forEach(i => ch.splice(i, 1));
+    try {
+      const $chat = $q('#chat');
+      for (const i of toRemove) { $chat.find(`.mes[mesid="${i}"]`).remove(); }
+      const $messages = $chat.find('.mes');
+      const ids = $messages.map((_, el) => Number(el.getAttribute('mesid'))).get().filter(x => !isNaN(x));
+      const minId = ids.length ? Math.min(...ids) : 0;
+      $messages.each(function (index) { const newId = minId + index; $(this).attr('mesid', newId); $(this).find('.mesIDDisplay').text(`#${newId}`); });
+      $('#chat .mes').removeClass('last_mes');
+      $('#chat .mes').last().addClass('last_mes');
+    } catch {}
+    await ctx.saveChat();
+    try { await ctx.eventSource.emit(ctx.eventTypes.MESSAGE_DELETED, ch.length); } catch {}
+  } catch {}
+}
+
 const disableSend = (dis = true) => {
   const $b = $q("#send_but");
   if (dis) { S.sendBtnWasDisabled = $b.prop("disabled"); $b.prop("disabled", true).off("click.preview-block").on("click.preview-block", (e) => { e.preventDefault(); e.stopImmediatePropagation(); return false; }); }
@@ -555,28 +449,10 @@ async function showPreview() {
   try {
     const set = getSettings(); if (!set.preview.enabled || !geEnabled()) return toastr.warning("消息拦截功能未启用");
     const text = String($q("#send_textarea").val() || "").trim(); if (!text) return toastr.error("请先输入消息内容");
-    
     backup = text; disableSend(true);
-    const ctx = getContext();
-    S.chatLenBefore = Array.isArray(ctx.chat) ? ctx.chat.length : 0;
     S.isPreview = true; S.previewData = null; S.previewIds.clear(); S.previewAbort = new AbortController();
-
-    const endHandler = () => {
-      try { if (S.genEndedOff) { S.genEndedOff(); S.genEndedOff = null; } } catch {}
-      setTimeout(() => purgePreviewArtifacts(), 0);
-    };
-
-    S.genEndedOff = oneShotOnLast(event_types.GENERATION_ENDED, endHandler);
-    clearTimeout(S.cleanupFallback);
-    S.cleanupFallback = setTimeout(() => {
-      try { if (S.genEndedOff) { S.genEndedOff(); S.genEndedOff = null; } } catch {}
-      purgePreviewArtifacts();
-    }, 1500);
-
     toast = toastr.info(`正在拦截请求...（${set.preview.timeoutSeconds}秒超时）`, "消息拦截", { timeOut: 0, tapToDismiss: false });
-
     if (!triggerSend()) throw new Error("无法触发发送事件");
-
     const res = await waitIntercept().catch((e) => ({ success: false, error: e?.message || e }));
     if (toast) { toastr.clear(toast); toast = null; }
     if (res.success) { await displayPreview(res.data); toastr.success("拦截成功！", "", { timeOut: 3000 }); }
@@ -586,9 +462,8 @@ async function showPreview() {
   } finally {
     try { S.previewAbort?.abort("拦截结束"); } catch {} S.previewAbort = null;
     if (S.resolve) S.resolve({ success: false, error: "拦截已取消" }); S.resolve = S.reject = null;
-    clearTimeout(S.cleanupFallback); S.cleanupFallback = null;
-    S.isPreview = false; S.previewData = null;
-    disableSend(false); if (backup) $q("#send_textarea").val(backup);
+    S.isPreview = false; S.previewData = null; disableSend(false); if (backup) $q("#send_textarea").val(backup);
+    await cleanupEmptyAssistantPairLast3();
   }
 }
 
@@ -600,12 +475,6 @@ async function showHistoryPreview(messageId) {
     else toastr.warning(`未找到第 ${messageId + 1} 条消息的API请求记录`);
   } catch { toastr.error("查看历史消息失败"); }
 }
-
-const cleanupMemory = () => {
-  if (S.history.length > C.MAX_HISTORY) S.history = S.history.slice(0, C.MAX_HISTORY);
-  S.previewIds.clear(); S.previewData = null; $(".mes_history_preview").each(function () { if (!$(this).closest(".mes").length) $(this).remove(); });
-  if (!S.isLong) S.interceptedIds = [];
-};
 
 function onLast(ev, handler) {
   if (typeof eventSource.makeLast === "function") { eventSource.makeLast(ev, handler); S.listeners.push({ e: ev, h: handler, off: () => {} }); return; }
@@ -627,11 +496,7 @@ const addEvents = () => {
   const late = (payload) => {
     try {
       const ctx = getContext();
-      pushHistory({
-        url: C.TARGET, method: "POST", requestData: payload, messages: payload?.messages || [], model: payload?.model || "Unknown",
-        timestamp: now(), messageId: ctx.chat?.length || 0, characterName: ctx.characters?.[ctx.characterId]?.name || "Unknown",
-        userInput: extractUser(payload?.messages || []), isRealRequest: true, source: "settings_ready",
-      });
+      pushHistory({ url: C.TARGET, method: "POST", requestData: payload, messages: payload?.messages || [], model: payload?.model || "Unknown", timestamp: now(), messageId: ctx.chat?.length || 0, characterName: ctx.characters?.[ctx.characterId]?.name || "Unknown", userInput: extractUser(payload?.messages || []), isRealRequest: true, source: "settings_ready" });
     } catch {}
     queueMicrotask(() => updateFetchState());
   };
@@ -639,19 +504,16 @@ const addEvents = () => {
   else if (S.tailAPI?.onLast) { const off = S.tailAPI.onLast(event_types.CHAT_COMPLETION_SETTINGS_READY, late); S.listeners.push({ e: event_types.CHAT_COMPLETION_SETTINGS_READY, h: late, off }); }
   else { ON(event_types.CHAT_COMPLETION_SETTINGS_READY, late); S.listeners.push({ e: event_types.CHAT_COMPLETION_SETTINGS_READY, h: late, off: () => OFF(event_types.CHAT_COMPLETION_SETTINGS_READY, late) }); queueMicrotask(() => { try { OFF(event_types.CHAT_COMPLETION_SETTINGS_READY, late); } catch {} try { ON(event_types.CHAT_COMPLETION_SETTINGS_READY, late); } catch {} }); }
 };
+
 const removeEvents = () => { S.listeners.forEach(({ e, h, off }) => { if (typeof off === "function") { try { off(); } catch {} } else { try { OFF(e, h); } catch {} } }); S.listeners = []; };
 
 const toggleLong = () => {
   S.isLong = !S.isLong;
   const $b = $q("#message_preview_btn");
-  if (S.isLong) {
-    $b.css("color", "red");
-    toastr.info("持续拦截已开启", "", { timeOut: 2000 });
-  } else {
-    $b.css("color", "");
-    toastr.info("持续拦截已关闭", "", { timeOut: 2000 });
-  }
+  if (S.isLong) { $b.css("color", "red"); toastr.info("持续拦截已开启", "", { timeOut: 2000 }); }
+  else { $b.css("color", ""); toastr.info("持续拦截已关闭", "", { timeOut: 2000 }); }
 };
+
 const bindBtn = () => {
   const $b = $q("#message_preview_btn");
   $b.on("mousedown touchstart", () => { S.longPressTimer = setTimeout(() => toggleLong(), S.longPressDelay); });
@@ -665,25 +527,34 @@ const waitIntercept = () => new Promise((resolve, reject) => {
 });
 
 function cleanup() {
-  removeEvents(); restoreFetch(); disableSend(false);
-  $(".mes_history_preview").remove(); $("#message_preview_btn").remove(); cleanupMemory();
+  removeEvents();
+  restoreFetch();
+  disableSend(false);
+  $(".mes_history_preview").remove();
+  $("#message_preview_btn").remove();
+  if (S.cleanTimer) { clearInterval(S.cleanTimer); S.cleanTimer = null; }
+  document.querySelectorAll('.mp-overlay').forEach(el => el.remove());
+  document.getElementById('message-preview-modal-styles')?.remove();
+  S.history = S.history.slice(0, C.MAX_HISTORY);
+  S.previewIds.clear();
+  S.previewData = null;
   Object.assign(S, { resolve: null, reject: null, isPreview: false, isLong: false, interceptedIds: [], chatLenBefore: 0, sendBtnWasDisabled: false });
   if (S.longPressTimer) { clearTimeout(S.longPressTimer); S.longPressTimer = null; }
   if (S.restoreLong) { try { S.restoreLong(); } catch {} S.restoreLong = null; }
-  if (S.genEndedOff) { try { S.genEndedOff(); } catch {} S.genEndedOff = null; }
-  if (S.cleanupFallback) { clearTimeout(S.cleanupFallback); S.cleanupFallback = null; }
 }
 
 function initMessagePreview() {
   try {
-    cleanup(); S.tailAPI = installEventSourceTail(eventSource);
+    cleanup();
+    S.tailAPI = installEventSourceTail(eventSource);
     const set = getSettings();
     const btn = $(`<div id="message_preview_btn" class="fa-regular fa-note-sticky interactable" title="预览消息"></div>`);
-    $("#send_but").before(btn); bindBtn();
+    $("#send_but").before(btn);
+    bindBtn();
     $("#xiaobaix_preview_enabled").prop("checked", set.preview.enabled).on("change", function () {
       if (!geEnabled()) return; set.preview.enabled = $(this).prop("checked"); saveSettingsDebounced();
       $("#message_preview_btn").toggle(set.preview.enabled);
-      if (set.preview.enabled) { if (!S.cleanTimer) S.cleanTimer = setInterval(cleanupMemory, C.CLEAN); }
+      if (set.preview.enabled) { if (!S.cleanTimer) S.cleanTimer = setInterval(() => { S.history = S.history.slice(0, C.MAX_HISTORY); S.previewIds.clear(); S.previewData = null; $(".mes_history_preview").each(function () { if (!$(this).closest(".mes").length) $(this).remove(); }); }, C.CLEAN); }
       else { if (S.cleanTimer) { clearInterval(S.cleanTimer); S.cleanTimer = null; } }
       updateFetchState();
       if (!set.preview.enabled && set.recorded.enabled) { addEvents(); addHistoryButtonsDebounced(); }
@@ -695,10 +566,11 @@ function initMessagePreview() {
       updateFetchState();
     });
     if (!set.preview.enabled) $("#message_preview_btn").hide();
-    updateFetchState(); if (set.recorded.enabled) addHistoryButtonsDebounced();
+    updateFetchState();
+    if (set.recorded.enabled) addHistoryButtonsDebounced();
     if (set.preview.enabled || set.recorded.enabled) addEvents();
     if (window.registerModuleCleanup) window.registerModuleCleanup("messagePreview", cleanup);
-    if (set.preview.enabled) S.cleanTimer = setInterval(cleanupMemory, C.CLEAN);
+    if (set.preview.enabled) S.cleanTimer = setInterval(() => { S.history = S.history.slice(0, C.MAX_HISTORY); S.previewIds.clear(); S.previewData = null; $(".mes_history_preview").each(function () { if (!$(this).closest(".mes").length) $(this).remove(); }); }, C.CLEAN);
   } catch { toastr.error("模块初始化失败"); }
 }
 
