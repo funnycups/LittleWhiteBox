@@ -47,6 +47,11 @@ function deleteDeepKey(root, path){ const segs=splitPathSegments(path); if(segs.
 const getRootAndPath=(name)=>{ const segs=String(name||'').split('.').map(s=>s.trim()).filter(Boolean); if(segs.length<=1) return {root:String(name||'').trim(), subPath:''}; return {root:segs[0], subPath: segs.slice(1).join('.')}; };
 const joinPath=(base, more)=> base ? (more ? base + '.' + more : base) : more;
 
+function q(root, selector){ try{ return (root||document).querySelector(selector); }catch{ return null; } }
+function qa(root, selector){ try{ return Array.from((root||document).querySelectorAll(selector)); }catch{ return []; } }
+function makeEl(tag, className){ const el=document.createElement(tag); if(className) el.className=className; return el; }
+function setActive(elements, index){ try{ elements.forEach((el,i)=>el.classList.toggle('active', i===index)); }catch{} }
+
 function stripYamlInlineComment(s){
   const text = String(s ?? '');
   if (!text) return '';
@@ -1173,7 +1178,6 @@ async function runJS(code) {
   } catch (jsError) {}
 }
 
-/* 旧版：按需依旧保留 */
 const runImmediateVarEventsDebounced = debounce(runImmediateVarEvents, 30);
 let _lwbScanRunning = false;
 
@@ -1230,152 +1234,299 @@ async function runImmediateVarEvents() {
 }
 
 /* ============= 第三区：条件规则编辑器UI ============= */
-let LWB_VAREDITOR_INSTALLED=false; let LWB_EDITOR_OBSERVER=null;
-function installVarEventEditorUI(){
-  if(LWB_VAREDITOR_INSTALLED) return; LWB_VAREDITOR_INSTALLED=true;
-  try{ injectVarEditorStyles(); }catch{}
-  try{ observeWIEntriesForEditorButton(); }catch{}
-  try{ setTimeout(()=>tryInjectButtons(document.body),600); }catch{}
-}
-function injectVarEditorStyles(){
-  if(document.getElementById('lwb-varevent-editor-styles')) return;
-  const style=document.createElement('style'); style.id='lwb-varevent-editor-styles';
-  style.textContent=`.lwb-ve-overlay{position:fixed;inset:0;background:none;z-index:9999;display:flex;align-items:center;justify-content:center;pointer-events:none}
-.lwb-ve-modal{width:650px;background:var(--SmartThemeBlurTintColor);border:2px solid var(--SmartThemeBorderColor);border-radius:10px;box-shadow:0 8px 16px var(--SmartThemeShadowColor);pointer-events:auto}
-.lwb-ve-header{display:flex;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--SmartThemeBorderColor);font-weight:600;cursor:move}
-.lwb-ve-tabs{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid var(--SmartThemeBorderColor)}
-.lwb-ve-tab{cursor:pointer;border:1px solid var(--SmartThemeBorderColor);background:var(--SmartThemeBlurTintColor);padding:4px 8px;border-radius:6px;opacity:.8}
-.lwb-ve-tab.active{opacity:1;border-color:var(--crimson70a)}
-.lwb-ve-page{display:none}
-.lwb-ve-page.active{display:block}
-.lwb-ve-body{height:60vh;overflow:auto;padding:10px}
-.lwb-ve-footer{display:flex;gap:8px;justify-content:flex-end;padding:12px 14px;border-top:1px solid var(--SmartThemeBorderColor)}
-.lwb-ve-section{margin:12px 0}
-.lwb-ve-label{font-size:13px;opacity:.7;margin:6px 0}
-.lwb-ve-row{gap:8px;align-items:center;margin:4px 0;padding-bottom:10px;border-bottom:1px dashed var(--SmartThemeBorderColor)}
-.lwb-ve-input,.lwb-ve-text{box-sizing:border-box;background:var(--SmartThemeShadowColor);color:inherit;border:1px solid var(--SmartThemeUserMesBlurTintColor);border-radius:6px;padding:6px 8px}
-.lwb-ve-text{min-height:64px;resize:vertical}
-.lwb-ve-input{width:260px}
-.lwb-ve-mini{width:70px!important;margin:0}
-.lwb-ve-op,.lwb-ve-ctype option{text-align:center}
-.lwb-ve-lop{width:70px!important;text-align:center}
-.lwb-ve-btn{cursor:pointer;border:1px solid var(--SmartThemeBorderColor);background:var(--SmartThemeBlurTintColor);padding:6px 10px;border-radius:6px}
-.lwb-ve-btn.primary{background:var(--crimson70a)}
-.lwb-ve-event{border:1px dashed var(--SmartThemeBorderColor);border-radius:8px;padding:10px;margin:10px 0}
-.lwb-ve-event-title{font-weight:600;display:flex;align-items:center;gap:8px}
-.lwb-ve-close{cursor:pointer}
-.lwb-var-editor-button.right_menu_button{display:inline-flex;align-items:center;margin-left:10px;transform:scale(1.5)}
-.lwb-ve-vals,.lwb-ve-varrhs{align-items:center}
-.lwb-ve-delval{transform:scale(.5)}
-.lwb-act-type{width:200px!important}
-@media (max-width:999px){.lwb-ve-overlay{position:absolute;inset:0;align-items:flex-start}.lwb-ve-modal{width:100%;max-height:100%;margin:0;border-radius:10px 10px 0 0}}`;
-  document.head.appendChild(style);
-}
-function observeWIEntriesForEditorButton(){
-  try{ if(LWB_EDITOR_OBSERVER){ LWB_EDITOR_OBSERVER.disconnect(); LWB_EDITOR_OBSERVER=null; } }catch{}
-  const root = document.getElementById('WorldInfo') || document.body;
-  const cb = (()=>{
-    let t=null; return ()=>{ clearTimeout(t); t=setTimeout(()=>{ try{ tryInjectButtons(root); }catch{} },100); };
-  })();
-  const obs=new MutationObserver(()=>cb());
-  try{ obs.observe(root,{childList:true,subtree:true}); }catch{}
-  LWB_EDITOR_OBSERVER=obs;
-}
-function tryInjectButtons(root){
-  const scope = root.closest?.('#WorldInfo') || document.getElementById('WorldInfo') || root;
-  scope.querySelectorAll?.('.world_entry .alignitemscenter.flex-container .editor_maximize')?.forEach((maxBtn)=>{
-    const container=maxBtn.parentElement; if(!container || container.querySelector('.lwb-var-editor-button')) return;
-    const entry=container.closest('.world_entry'); const uid=entry?.getAttribute('data-uid')||entry?.dataset?.uid|| (window?.jQuery?window.jQuery(entry).data('uid'):undefined);
-    const btn=document.createElement('div'); btn.className='right_menu_button interactable lwb-var-editor-button'; btn.title='条件规则编辑器'; btn.innerHTML='<i class="fa-solid fa-pen-ruler"></i>';
-    btn.addEventListener('click',()=>openVarEditor(entry||undefined,uid));
-    container.insertBefore(btn,maxBtn.nextSibling);
-  });
-}
-function openVarEditor(entryEl, uid) {
-    const textarea = (uid ? document.getElementById(`world_entry_content_${uid}`) : null) || entryEl?.querySelector?.('textarea[name="content"]');
-    if (!textarea) { window?.toastr?.warning?.('未找到内容输入框，请先展开该条目的编辑抽屉'); return; }
-    const overlay = document.createElement('div'); overlay.className = 'lwb-ve-overlay';
-    const modal = document.createElement('div'); modal.className = 'lwb-ve-modal'; overlay.appendChild(modal);
-    modal.style.pointerEvents = 'auto'; modal.style.zIndex = '10010';
-    const header = document.createElement('div'); header.className = 'lwb-ve-header'; header.innerHTML = '<span>条件规则编辑器</span><span class="lwb-ve-close">✕</span>'; modal.appendChild(header);
-    const tabs = document.createElement('div'); tabs.className = 'lwb-ve-tabs'; modal.appendChild(tabs);
-    const tabsCtrl = document.createElement('div'); tabsCtrl.style.marginLeft = 'auto'; tabsCtrl.style.display = 'inline-flex'; tabsCtrl.style.gap = '6px';
-    const btnAddTab = document.createElement('button'); btnAddTab.className = 'lwb-ve-btn'; btnAddTab.textContent = '+组';
-    const btnDelTab = document.createElement('button'); btnDelTab.className = 'lwb-ve-btn ghost'; btnDelTab.textContent = '-组';
-    tabs.appendChild(tabsCtrl); tabsCtrl.append(btnAddTab, btnDelTab);
-    const body = document.createElement('div'); body.className = 'lwb-ve-body'; modal.appendChild(body);
-    const footer = document.createElement('div'); footer.className = 'lwb-ve-footer'; modal.appendChild(footer);
-    const wi = document.getElementById('WorldInfo'); const wiIcon = document.getElementById('WIDrawerIcon'); const wasPinned = !!wi?.classList.contains('pinnedOpen'); let tempPinned = false;
-    if (wi && !wasPinned) { wi.classList.add('pinnedOpen'); tempPinned = true; } if (wiIcon && !wiIcon.classList.contains('drawerPinnedOpen')) wiIcon.classList.add('drawerPinnedOpen');
-    setupModalDrag(modal, overlay, header);
-    const pagesWrap = document.createElement('div'); body.appendChild(pagesWrap);
-    const makePage = () => { const page = document.createElement('div'); page.className = 'lwb-ve-page'; const eventsWrap = document.createElement('div'); page.appendChild(eventsWrap); return { page, eventsWrap }; };
-    const ensureTabActive = (idx) => {
-      Array.from(tabs.querySelectorAll('.lwb-ve-tab')).forEach((el, i) => { el.classList.toggle('active', i === idx); });
-      Array.from(pagesWrap.querySelectorAll('.lwb-ve-page')).forEach((el, i) => { el.classList.toggle('active', i === idx); });
+(() => {
+    const LWBVE = { installed: false, obs: null, cssId: 'lwb-varevent-editor-styles' };
+
+    const U = {
+      qa: (root, sel) => Array.from((root || document).querySelectorAll(sel)),
+      el: (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; },
+      setActive(listLike, idx) { const arr = Array.isArray(listLike) ? listLike : U.qa(document, listLike); arr.forEach((el, i) => el.classList.toggle('active', i === idx)); },
+      toast: { ok: (m) => window?.toastr?.success?.(m), warn: (m) => window?.toastr?.warning?.(m), err: (m) => window?.toastr?.error?.(m) },
+      getTagRE(){ return { varevent: /<varevent>([\s\S]*?)<\/varevent>/gi }; },
+      drag(modal, overlay, header) {
+        try { modal.style.position='absolute'; modal.style.left='50%'; modal.style.top='50%'; modal.style.transform='translate(-50%,-50%)'; } catch {}
+        let dragging=false,sx=0,sy=0,sl=0,st=0;
+        function onDown(e){ if(!(e instanceof PointerEvent)||e.button!==0) return;
+          dragging=true;
+          const r=modal.getBoundingClientRect(), ro=overlay.getBoundingClientRect();
+          modal.style.left=(r.left-ro.left)+'px'; modal.style.top=(r.top-ro.top)+'px'; modal.style.transform='';
+          sx=e.clientX; sy=e.clientY; sl=parseFloat(modal.style.left)||0; st=parseFloat(modal.style.top)||0;
+          window.addEventListener('pointermove',onMove,{passive:true}); window.addEventListener('pointerup',onUp,{once:true}); e.preventDefault();
+        }
+        function onMove(e){ if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy;
+          let nl=sl+dx, nt=st+dy; const maxLeft=(overlay.clientWidth||overlay.getBoundingClientRect().width)-modal.offsetWidth;
+          const maxTop=(overlay.clientHeight||overlay.getBoundingClientRect().height)-modal.offsetHeight;
+          nl=Math.max(0,Math.min(maxLeft,nl)); nt=Math.max(0,Math.min(maxTop,nt)); modal.style.left=nl+'px'; modal.style.top=nt+'px';
+        }
+        function onUp(){ dragging=false; window.removeEventListener('pointermove',onMove); }
+        header.addEventListener('pointerdown',onDown);
+      },
+      mini(innerHTML, title='编辑器') {
+        const wrap = U.el('div','lwb-ve-overlay');
+        const modal = U.el('div','lwb-ve-modal'); modal.style.maxWidth='720px'; modal.style.pointerEvents='auto'; modal.style.zIndex='10010';
+        wrap.appendChild(modal);
+        const header = U.el('div','lwb-ve-header',`<span>${title}</span><span class="lwb-ve-close">✕</span>`);
+        const body = U.el('div','lwb-ve-body',innerHTML);
+        const footer = U.el('div','lwb-ve-footer');
+        const btnCancel = U.el('button','lwb-ve-btn','取消');
+        const btnOk = U.el('button','lwb-ve-btn primary','生成');
+        footer.append(btnCancel,btnOk); modal.append(header,body,footer); U.drag(modal,wrap,header);
+        btnCancel.addEventListener('click',()=>wrap.remove()); header.querySelector('.lwb-ve-close')?.addEventListener('click',()=>wrap.remove());
+        document.body.appendChild(wrap);
+        return { wrap, modal, body, btnOk, btnCancel };
+      },
     };
-    const footerCancel = document.createElement('button'); footerCancel.className = 'lwb-ve-btn'; footerCancel.textContent = '取消';
-    const footerOk = document.createElement('button'); footerOk.className = 'lwb-ve-btn primary'; footerOk.textContent = '确认';
-    footer.append(footerCancel, footerOk);
-    function closeVarEditor() {
-      try {
-        const pinChecked = !!(document.getElementById('WI_panel_pin'))?.checked;
-        if (tempPinned && !pinChecked) { wi?.classList.remove('pinnedOpen'); wiIcon?.classList.remove('drawerPinnedOpen'); }
-      } catch { }
-      overlay.remove();
+
+    function injectStyles(){
+      if(document.getElementById(LWBVE.cssId)) return;
+      const style=document.createElement('style'); style.id=LWBVE.cssId;
+      style.textContent=`
+  .lwb-ve-overlay{position:fixed;inset:0;background:none;z-index:9999;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .lwb-ve-modal{width:650px;background:var(--SmartThemeBlurTintColor);border:2px solid var(--SmartThemeBorderColor);border-radius:10px;box-shadow:0 8px 16px var(--SmartThemeShadowColor);pointer-events:auto}
+  .lwb-ve-header{display:flex;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--SmartThemeBorderColor);font-weight:600;cursor:move}
+  .lwb-ve-tabs{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid var(--SmartThemeBorderColor)}
+  .lwb-ve-tab{cursor:pointer;border:1px solid var(--SmartThemeBorderColor);background:var(--SmartThemeBlurTintColor);padding:4px 8px;border-radius:6px;opacity:.8}
+  .lwb-ve-tab.active{opacity:1;border-color:var(--crimson70a)}
+  .lwb-ve-page{display:none}
+  .lwb-ve-page.active{display:block}
+  .lwb-ve-body{height:60vh;overflow:auto;padding:10px}
+  .lwb-ve-footer{display:flex;gap:8px;justify-content:flex-end;padding:12px 14px;border-top:1px solid var(--SmartThemeBorderColor)}
+  .lwb-ve-section{margin:12px 0}
+  .lwb-ve-label{font-size:13px;opacity:.7;margin:6px 0}
+  .lwb-ve-row{gap:8px;align-items:center;margin:4px 0;padding-bottom:10px;border-bottom:1px dashed var(--SmartThemeBorderColor);display:flex;flex-wrap:wrap}
+  .lwb-ve-input,.lwb-ve-text{box-sizing:border-box;background:var(--SmartThemeShadowColor);color:inherit;border:1px solid var(--SmartThemeUserMesBlurTintColor);border-radius:6px;padding:6px 8px}
+  .lwb-ve-text{min-height:64px;resize:vertical;width:100%}
+  .lwb-ve-input{width:260px}
+  .lwb-ve-mini{width:70px!important;margin:0}
+  .lwb-ve-op,.lwb-ve-ctype option{text-align:center}
+  .lwb-ve-lop{width:70px!important;text-align:center}
+  .lwb-ve-btn{cursor:pointer;border:1px solid var(--SmartThemeBorderColor);background:var(--SmartThemeBlurTintColor);padding:6px 10px;border-radius:6px}
+  .lwb-ve-btn.primary{background:var(--crimson70a)}
+  .lwb-ve-event{border:1px dashed var(--SmartThemeBorderColor);border-radius:8px;padding:10px;margin:10px 0}
+  .lwb-ve-event-title{font-weight:600;display:flex;align-items:center;gap:8px}
+  .lwb-ve-close{cursor:pointer}
+  .lwb-var-editor-button.right_menu_button{display:inline-flex;align-items:center;margin-left:10px;transform:scale(1.5)}
+  .lwb-ve-vals,.lwb-ve-varrhs{align-items:center;display:inline-flex;gap:6px}
+  .lwb-ve-delval{transform:scale(.5)}
+  .lwb-act-type{width:200px!important}
+  .lwb-ve-condgroups{display:flex;flex-direction:column;gap:10px}
+  .lwb-ve-condgroup{border:1px solid var(--SmartThemeBorderColor);border-radius:8px;padding:8px}
+  .lwb-ve-group-title{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .lwb-ve-group-name{font-weight:600}
+  .lwb-ve-group-lop{width:70px!important;text-align:center}
+  .lwb-ve-add-group{margin-top:6px}
+  @media (max-width:999px){.lwb-ve-overlay{position:absolute;inset:0;align-items:flex-start}.lwb-ve-modal{width:100%;max-height:100%;margin:0;border-radius:10px 10px 0 0}}`;
+      document.head.appendChild(style);
     }
-    overlay.addEventListener('click', (e) => { e.stopPropagation(); });
-    header.querySelector('.lwb-ve-close').addEventListener('click', closeVarEditor);
-    footerCancel.addEventListener('click', closeVarEditor);
-    const addEventBtn = document.createElement('button');
-    addEventBtn.className = 'lwb-ve-btn';
-    addEventBtn.style = 'background: var(--SmartThemeBlurTintColor); border: 1px solid var(--SmartThemeBorderColor); cursor: pointer; margin-right: 5px;';
-    addEventBtn.type = 'button';
-    addEventBtn.innerHTML = '<i class="fa-solid fa-plus"></i> 添加事件';
-    const tools = document.createElement('div');
-    tools.className = 'lwb-ve-toolbar';
-    const bumpBtn = document.createElement('button');
-    bumpBtn.type = 'button';
-    bumpBtn.className = 'lwb-ve-btn lwb-ve-gen-bump';
-    bumpBtn.textContent = 'bump数值映射设置';
-    bumpBtn.addEventListener('click', () => openBumpAliasBuilder(null));
-    tools.appendChild(addEventBtn);
-    tools.appendChild(bumpBtn);
-    body.appendChild(tools);
-    addEventBtn.addEventListener('click', () => {
-      const activePage = pagesWrap.querySelector('.lwb-ve-page.active');
-      const eventsWrap = activePage?.querySelector(':scope > div');
-      if (!eventsWrap) return;
-      eventsWrap.appendChild(createEventBlock(eventsWrap.children.length + 1));
-      eventsWrap.dispatchEvent(new CustomEvent('lwb-refresh-idx', { bubbles: true }));
-    });
-    const originalText = String(textarea.value || ''); const vareventBlocks = [];
-    TAG_RE.varevent.lastIndex = 0; let m;
-    while ((m = TAG_RE.varevent.exec(originalText)) !== null) { const full = m[0]; const inner = m[1] ?? ''; const start = m.index; const end = TAG_RE.varevent.lastIndex; vareventBlocks.push({ full, inner, start, end }); }
-    const parsedIdsPerBlock = vareventBlocks.map(b => { try { return parseVareventEvents(b.inner).map(ev => ev.id).filter(Boolean); } catch { return []; } });
-    const pageInitialized = new Set();
-    function getEventBlockHTML(index) {
-      return `
+
+    const P = {
+      stripOuter(s){ let t=String(s||'').trim(); if(!t.startsWith('(')||!t.endsWith(')')) return t;
+        let i=0,d=0,q=null; while(i<t.length){ const c=t[i];
+          if(q){ if(c===q&&t[i-1]!=='\\') q=null; i++; continue; }
+          if(c==='"'||c==="'"||c==='`'){ q=c; i++; continue; }
+          if(c==='(') d++; else if(c===')') d--; i++;
+        } return d===0? t.slice(1,-1).trim(): t;
+      },
+      stripOuterWithFlag(s){ let t=String(s||'').trim(); if(!t.startsWith('(')||!t.endsWith(')')) return {text:t,wrapped:false};
+        let i=0,d=0,q=null; while(i<t.length){ const c=t[i];
+          if(q){ if(c===q&&t[i-1]!=='\\') q=null; i++; continue; }
+          if(c==='"'||c==="'"||c==='`'){ q=c; i++; continue; }
+          if(c==='(') d++; else if(c===')') d--; i++;
+        } return d===0? {text:t.slice(1,-1).trim(),wrapped:true}: {text:t,wrapped:false};
+      },
+      splitTopWithOps(s){ const out=[]; let i=0,start=0,d=0,q=null,pendingOp=null;
+        while(i<s.length){ const c=s[i];
+          if(q){ if(c===q&&s[i-1]!=='\\') q=null; i++; continue; }
+          if(c==='"'||c==="'"||c==='`'){ q=c; i++; continue; }
+          if(c==='('){ d++; i++; continue; }
+          if(c===')'){ d--; i++; continue; }
+          if(d===0&&(s.slice(i,i+2)==='&&'||s.slice(i,i+2)==='||')){ const seg=s.slice(start,i).trim(); if(seg) out.push({op:pendingOp,expr:seg}); pendingOp=s.slice(i,i+2); i+=2; start=i; continue; }
+          i++;
+        }
+        const tail=s.slice(start).trim(); if(tail) out.push({op:pendingOp,expr:tail}); return out;
+      },
+      parseComp(s){ const t=P.stripOuter(s);
+        const m=t.match(/^var\(\s*([`'"])([\s\S]*?)\1\s*\)\s*(==|!=|>=|<=|>|<)\s*(val|var)\(\s*([`'"])([\s\S]*?)\5\s*\)$/);
+        if(!m) return null; return { lhs:m[2], op:m[3], rhsIsVar:m[4]==='var', rhs:m[6] };
+      },
+      hasBinary:(s)=>/\|\||&&/.test(s),
+      paren:(s)=>(s.startsWith('(')&&s.endsWith(')'))?s:`(${s})`,
+      wrapBack(s){ const t=String(s||'').trim(); return /^([`'"]).*\1$/.test(t)? t: '`'+t.replace(/`/g,'\\`')+'`'; },
+      buildVar:(name)=>`var(${P.wrapBack(name)})`,
+      buildVal(v){ const t=String(v||'').trim(); return /^([`'"]).*\1$/.test(t)? `val(${t})`: `val(${P.wrapBack(t)})`; },
+    };
+
+    function parseVareventEvents(inner) {
+      const text = String(inner || '');
+      const headerRe = /^\s*\[\s*event\.([^\]\s]+)\s*\]\s*$/gim;
+      const events = [];
+      let m, lastIdx = 0, cur = null;
+
+      const pushCur = () => { if (cur) { events.push(cur); cur = null; } };
+
+      const sections = [];
+      while ((m = headerRe.exec(text)) !== null) {
+        const id = m[1];
+        const start = m.index;
+        if (sections.length) sections[sections.length - 1].end = start;
+        sections.push({ id, start: m.index, bodyStart: headerRe.lastIndex, end: text.length });
+      }
+      if (!sections.length) return events;
+      for (const sec of sections) {
+        const chunk = text.slice(sec.bodyStart, sec.end);
+        cur = { id: sec.id, condition: '', display: '', js: '' };
+
+        let i = 0;
+        const len = chunk.length;
+        const ws = () => { while (i < len && /[ \t]/.test(chunk[i])) i++; };
+        const readLine = () => {
+          const p = chunk.indexOf('\n', i);
+          if (p === -1) { const s = chunk.slice(i); i = len; return s; }
+          const s = chunk.slice(i, p); i = p + 1; return s;
+        };
+        const peekKey = () => {
+          const save = i;
+          ws();
+          const mm = chunk.slice(i).match(/^(condition|display|js_execute)\s*:/i);
+          i = save;
+          return mm ? mm[1].toLowerCase() : '';
+        };
+        const readAfterColon = () => {
+          const mm = chunk.slice(i).match(/^(condition|display|js_execute)\s*:/i);
+          if (!mm) return null;
+          i += mm[0].length;
+          return mm[1].toLowerCase();
+        };
+        const readQuoted = () => {
+          ws();
+          const q = chunk[i];
+          if (q !== '"' && q !== "'") return null;
+          i++;
+          let out = '';
+          while (i < len) {
+            const c = chunk[i++];
+            if (c === '\\') {
+              const n = chunk[i++];
+              if (n === undefined) break;
+              if (n === 'n') out += '\n';
+              else if (n === 'r') out += '\r';
+              else if (n === 't') out += '\t';
+              else out += n;
+              continue;
+            }
+            if (c === q) break;
+            out += c;
+          }
+          return out;
+        };
+
+        while (i < len) {
+          ws();
+          if (chunk[i] === '#' || chunk[i] === ';') { readLine(); continue; }
+          if (chunk[i] === '\n' || chunk[i] === '\r') { i++; continue; }
+          const key = peekKey();
+          if (!key) { readLine(); continue; }
+          const realKey = readAfterColon();
+          if (realKey === 'condition') {
+            const line = readLine();
+            cur.condition = String(line || '').trim();
+          } else if (realKey === 'display') {
+            const val = readQuoted();
+            if (val != null) cur.display = String(val || '');
+            else {
+              const line = readLine();
+              cur.display = String(line || '').trim();
+            }
+          } else if (realKey === 'js_execute') {
+            ws();
+            if (chunk[i] === '"' || chunk[i] === "'") {
+              const val = readQuoted();
+              cur.js = String(val || '');
+            } else {
+              const line = readLine();
+              const raw = String(line || '').trim();
+              try {
+                if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+                  cur.js = JSON.parse(raw.replace(/^'/, '"').replace(/'$/, '"').replace(/([^\\])'/g, '$1"'));
+                } else cur.js = raw;
+              } catch { cur.js = raw; }
+            }
+          } else {
+            readLine();
+          }
+        }
+        pushCur();
+      }
+      return events;
+    }
+
+    function buildSTscriptFromActions(actionList) {
+      const parts = [];
+      const jsEsc = (s)=>String(s??'').replace(/\\/g,'\\\\').replace(/`/g,'\\`').replace(/\$\{/g,'\\${');
+      const plain = (s)=>String(s??'').trim();
+      for (const a of actionList||[]) {
+        switch(a.type){
+          case 'var.set': parts.push(`/setvar key=${plain(a.key)} ${plain(a.value)}`); break;
+          case 'var.bump': parts.push(`/addvar key=${plain(a.key)} ${Number(a.delta)||0}`); break;
+          case 'var.del': parts.push(`/flushvar ${plain(a.key)}`); break;
+          case 'wi.enableUID': parts.push(`/setentryfield file=${plain(a.file)} uid=${plain(a.uid)} field=disable 0`); break;
+          case 'wi.disableUID': parts.push(`/setentryfield file=${plain(a.file)} uid=${plain(a.uid)} field=disable 1`); break;
+          case 'wi.setContentUID': parts.push(`/setentryfield file=${plain(a.file)} uid=${plain(a.uid)} field=content ${plain(a.content)}`); break;
+          case 'wi.createContent':
+            if (plain(a.content)) parts.push(`/createentry file=${plain(a.file)} key=${plain(a.key)} ${plain(a.content)}`);
+            else parts.push(`/createentry file=${plain(a.file)} key=${plain(a.key)}`);
+            parts.push(`/setentryfield file=${plain(a.file)} uid={{pipe}} field=constant 1`);
+            break;
+          case 'qr.run': parts.push(`/run ${a.preset ? `${plain(a.preset)}.` : ''}${plain(a.label)}`); break;
+          case 'custom.st':
+            if (a.script) {
+              const cmds = a.script.split('\n').map(s=>s.trim()).filter(Boolean).map(c=>c.startsWith('/')?c:'/'+c);
+              parts.push(...cmds);
+            } break;
+        }
+      }
+      const st = parts.join(' | ');
+      return 'STscript(`'+jsEsc(st)+'`)';
+    }
+
+    const UI = {
+      makeOverlayModal(title='条件规则编辑器'){
+        const overlay=U.el('div','lwb-ve-overlay');
+        const modal=U.el('div','lwb-ve-modal'); overlay.appendChild(modal);
+        modal.style.pointerEvents='auto'; modal.style.zIndex='10010';
+        const header=U.el('div','lwb-ve-header',`<span>${title}</span><span class="lwb-ve-close">✕</span>`);
+        const tabs=U.el('div','lwb-ve-tabs');
+        const tabsCtrl=U.el('div',null); tabsCtrl.style.cssText='margin-left:auto;display:inline-flex;gap:6px;';
+        const btnAddTab=U.el('button','lwb-ve-btn','+组'); const btnDelTab=U.el('button','lwb-ve-btn ghost','-组');
+        tabs.appendChild(tabsCtrl); tabsCtrl.append(btnAddTab,btnDelTab);
+        const body=U.el('div','lwb-ve-body'); const footer=U.el('div','lwb-ve-footer');
+        const btnCancel=U.el('button','lwb-ve-btn','取消'); const btnOk=U.el('button','lwb-ve-btn primary','确认');
+        footer.append(btnCancel,btnOk); modal.append(header,tabs,body,footer); U.drag(modal,overlay,header);
+        header.querySelector('.lwb-ve-close').addEventListener('click',()=>overlay.remove()); btnCancel.addEventListener('click',()=>overlay.remove());
+        document.body.appendChild(overlay);
+        return { overlay, modal, header, tabs, tabsCtrl, btnAddTab, btnDelTab, body, footer, btnCancel, btnOk };
+      },
+      getEventBlockHTML(index){
+        return `
         <div class="lwb-ve-event-title">事件 #<span class="lwb-ve-idx">${index}</span><span class="lwb-ve-close" title="删除事件" style="margin-left:auto;">✕</span></div>
         <div class="lwb-ve-section">
           <div class="lwb-ve-label">执行条件</div>
-          <div class="lwb-ve-conds"></div>
-          <button type="button" class="lwb-ve-btn lwb-ve-add-cond"><i class="fa-solid fa-plus"></i>添加条件</button>
+          <div class="lwb-ve-condgroups"></div>
+          <button type="button" class="lwb-ve-btn lwb-ve-add-group"><i class="fa-solid fa-plus"></i>添加条件小组</button>
         </div>
         <div class="lwb-ve-section">
           <div class="lwb-ve-label">将显示世界书内容（可选）</div>
-          <textarea class="lwb-ve-text lwb-ve-display" placeholder="例如：<Info>……</Info>"></textarea>
+          <textarea class="lwb-ve-text lwb-ve-display" placeholder="例如：&lt;Info&gt;……&lt;/Info&gt;"></textarea>
         </div>
         <div class="lwb-ve-section">
           <div class="lwb-ve-label">将执行stscript命令或JS代码（可选）</div>
-          <textarea class="lwb-ve-text lwb-ve-js" placeholder="stscript:/setvar key=foo 1 | /run SomeQR（多条命令用 | 连接）或直接编写JS代码"></textarea>
+          <textarea class="lwb-ve-text lwb-ve-js" placeholder="stscript:/setvar key=foo 1 | /run SomeQR 或 直接JS"></textarea>
           <div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="lwb-ve-btn lwb-ve-gen-st">常用st控制</button>
           </div>
         </div>`;
-    }
-    function getConditionRowHTML() {
-      return `
+      },
+      getConditionRowHTML(){ return `
         <select class="lwb-ve-input lwb-ve-mini lwb-ve-lop" style="display:none;">
           <option value="||">或</option><option value="&&" selected>和</option>
         </select>
@@ -1388,655 +1539,495 @@ function openVarEditor(entryEl, uid) {
           <option value=">=">大于或等于</option><option value="<=">小于或等于</option>
           <option value=">">大于</option><option value="<">小于</option>
         </select>
-        <span class="lwb-ve-vals">
-          <span class="lwb-ve-valwrap"><input class="lwb-ve-input lwb-ve-val" placeholder="值"/></span>
-        </span>
-        <span class="lwb-ve-varrhs" style="display:none;">
-          <span class="lwb-ve-valvarwrap"><input class="lwb-ve-input lwb-ve-valvar" placeholder="变量B名称"/></span>
-        </span>
-        <button type="button" class="lwb-ve-btn ghost lwb-ve-del">删除</button>`;
-    }
-    function setupConditionRow(row, onRowsChanged) {
-      row.querySelector('.lwb-ve-del').addEventListener('click', () => { row.remove(); onRowsChanged?.(); });
-      const ctype = row.querySelector('.lwb-ve-ctype'); const valsWrap = row.querySelector('.lwb-ve-vals'); const varRhsWrap = row.querySelector('.lwb-ve-varrhs');
-      ctype.addEventListener('change', () => { const mode = ctype.value; if (mode === 'vv') { valsWrap.style.display = 'inline-flex'; varRhsWrap.style.display = 'none'; } else { valsWrap.style.display = 'none'; varRhsWrap.style.display = 'inline-flex'; } });
-    }
-    function setupEventBlock(block) {
-      block.querySelector('.lwb-ve-event-title .lwb-ve-close')?.addEventListener('click', () => {
-        block.remove(); try { block.dispatchEvent(new CustomEvent('lwb-refresh-idx', { bubbles: true })); } catch { }
-      });
-      const conds = block.querySelector('.lwb-ve-conds'); const addRowBtn = block.querySelector('.lwb-ve-add-cond');
-      const refreshRowOperators = () => {
-        const rows = Array.from(conds.querySelectorAll('.lwb-ve-row'));
-        rows.forEach((r, idx) => { const lop = r.querySelector('.lwb-ve-lop'); if (!lop) return; lop.style.display = idx === 0 ? 'none' : ''; if (idx > 0 && !lop.value) lop.value = '&&'; });
-      };
-      const makeRow = () => { const row = document.createElement('div'); row.className = 'lwb-ve-row'; row.innerHTML = getConditionRowHTML(); setupConditionRow(row, refreshRowOperators); conds.appendChild(row); refreshRowOperators(); };
-      addRowBtn.addEventListener('click', makeRow); makeRow();
-      const btnGenSt = block.querySelector('.lwb-ve-gen-st');
-      if (btnGenSt) btnGenSt.addEventListener('click', () => openActionBuilder(block));
-      const btnGenBump = block.querySelector('.lwb-ve-gen-bump');
-      if (btnGenBump) btnGenBump.addEventListener('click', () => openBumpAliasBuilder(block));
-    }
-    function createEventBlock(index) { const block = document.createElement('div'); block.className = 'lwb-ve-event'; block.innerHTML = getEventBlockHTML(index); setupEventBlock(block); return block; }
-    function refreshIndices() {
-      const activePage = pagesWrap.querySelector('.lwb-ve-page.active'); const eventsWrap = activePage?.querySelector(':scope > div'); if (!eventsWrap) return;
-      eventsWrap.querySelectorAll('.lwb-ve-event').forEach((el, i) => {
-        const idxEl = el.querySelector('.lwb-ve-idx');
-        if (idxEl) {
-          idxEl.textContent = String(i + 1); idxEl.style.cursor = 'pointer'; idxEl.title = '点击修改显示名称'; const ds = idxEl.dataset || {};
-          if (!ds.clickbound) { ds.clickbound = '1'; idxEl.addEventListener('click', () => { const cur = idxEl.textContent || ''; const name = prompt('输入事件显示名称：', cur) ?? ''; if (name) idxEl.textContent = name; }); }
-        }
-      });
-    }
-    function processEventBlock(block, idx) {
-      const displayName = String(block.querySelector('.lwb-ve-idx')?.textContent || '').trim();
-      const id = (displayName && /^\w[\w.-]*$/.test(displayName)) ? displayName : String(idx + 1).padStart(4, '0');
-      const lines = [`[event.${id}]`];
-      let condStr = ''; let hasAny = false;
-      const rows = Array.from(block.querySelectorAll('.lwb-ve-row'));
-      const wrapBack = (s) => { const t = String(s || '').trim(); return /^([`'"]).*\1$/.test(t) ? t : '`' + t.replace(/`/g, '\\`') + '`'; };
-      const buildVar = (name) => `var(${wrapBack(name)})`;
-      const buildVal = (v) => { const t = String(v || '').trim(); return /^([`'"]).*\1$/.test(t) ? `val(${t})` : `val(${wrapBack(t)})`; };
-      const hasOr = (s) => /\|\|/.test(s);
-      const parenIf = (need, s) => need ? (s.startsWith('(') && s.endsWith(')') ? s : `(${s})`) : s;
-      for (const r of rows) {
-        const v = r.querySelector('.lwb-ve-var')?.value?.trim?.() || '';
-        const op = r.querySelector('.lwb-ve-op')?.value || '==';
-        const ctype = r.querySelector('.lwb-ve-ctype')?.value || 'vv';
-        if (!v) continue;
-        let rowExpr = '';
-        if (ctype === 'vv') {
-          const valInputs = Array.from(r.querySelectorAll('.lwb-ve-vals .lwb-ve-val'));
-          const exprs = [];
-          for (const inp of valInputs) {
-            const _inp = inp; let val = (_inp?.value || '').trim();
-            if (!val) continue;
-            exprs.push(`${buildVar(v)} ${op} ${buildVal(val)}`);
+        <span class="lwb-ve-vals"><span class="lwb-ve-valwrap"><input class="lwb-ve-input lwb-ve-val" placeholder="值"/></span></span>
+        <span class="lwb-ve-varrhs" style="display:none;"><span class="lwb-ve-valvarwrap"><input class="lwb-ve-input lwb-ve-valvar" placeholder="变量B名称"/></span></span>
+        <button type="button" class="lwb-ve-btn ghost lwb-ve-del">删除</button>`; },
+      makeConditionGroup(){
+        const g=U.el('div','lwb-ve-condgroup',`
+          <div class="lwb-ve-group-title">
+            <select class="lwb-ve-input lwb-ve-mini lwb-ve-group-lop" style="display:none;"><option value="&&">和</option><option value="||">或</option></select>
+            <span class="lwb-ve-group-name">小组</span>
+            <span style="flex:1 1 auto;"></span>
+            <button type="button" class="lwb-ve-btn ghost lwb-ve-del-group">删除小组</button>
+          </div>
+          <div class="lwb-ve-conds"></div>
+          <button type="button" class="lwb-ve-btn lwb-ve-add-cond"><i class="fa-solid fa-plus"></i>添加条件</button>`);
+        const conds=g.querySelector('.lwb-ve-conds');
+        g.querySelector('.lwb-ve-add-cond')?.addEventListener('click',()=>{ try{ UI.addConditionRow(conds,{});}catch{} });
+        g.querySelector('.lwb-ve-del-group')?.addEventListener('click',()=>g.remove());
+        return g;
+      },
+      refreshLopDisplay(container){
+        U.qa(container,'.lwb-ve-row').forEach((r,idx)=>{ const lop=r.querySelector('.lwb-ve-lop'); if(!lop) return;
+          lop.style.display = idx===0 ? 'none' : ''; if(idx>0 && !lop.value) lop.value='&&';
+        });
+      },
+      setupConditionRow(row,onRowsChanged){
+        row.querySelector('.lwb-ve-del')?.addEventListener('click',()=>{ row.remove(); onRowsChanged?.(); });
+        const ctype=row.querySelector('.lwb-ve-ctype'), vals=row.querySelector('.lwb-ve-vals'), rhs=row.querySelector('.lwb-ve-varrhs');
+        ctype?.addEventListener('change',()=>{ const m=ctype.value; if(m==='vv'){ vals.style.display='inline-flex'; rhs.style.display='none'; } else { vals.style.display='none'; rhs.style.display='inline-flex'; } });
+      },
+      createConditionRow(params,onRowsChanged){
+        const { lop,lhs,op,rhsIsVar,rhs }=params||{};
+        const row=U.el('div','lwb-ve-row',UI.getConditionRowHTML());
+        const lopSel=row.querySelector('.lwb-ve-lop'); if(lopSel){ if(lop==null){ lopSel.style.display='none'; lopSel.value='&&'; } else { lopSel.style.display=''; lopSel.value=String(lop||'&&'); } }
+        const varInp=row.querySelector('.lwb-ve-var'); if (varInp && lhs!=null) varInp.value=String(lhs);
+        const opSel=row.querySelector('.lwb-ve-op'); if (opSel && op!=null) opSel.value=String(op);
+        const ctypeSel=row.querySelector('.lwb-ve-ctype'); const valsWrap=row.querySelector('.lwb-ve-vals'); const varRhsWrap=row.querySelector('.lwb-ve-varrhs');
+        if(ctypeSel && valsWrap && varRhsWrap && (rhsIsVar!=null || rhs!=null)){
+          if(rhsIsVar){ ctypeSel.value='vvv'; valsWrap.style.display='none'; varRhsWrap.style.display='inline-flex';
+            const rhsInp=row.querySelector('.lwb-ve-varrhs .lwb-ve-valvar'); if(rhsInp && rhs!=null) rhsInp.value=String(rhs);
+          }else{ ctypeSel.value='vv'; valsWrap.style.display='inline-flex'; varRhsWrap.style.display='none';
+            const rhsInp=row.querySelector('.lwb-ve-vals .lwb-ve-val'); if(rhsInp && rhs!=null) rhsInp.value=String(rhs);
           }
-          if (exprs.length === 1) rowExpr = exprs[0]; else if (exprs.length > 1) rowExpr = '(' + exprs.join(' || ') + ')';
-        } else {
-          const varInputs = Array.from(r.querySelectorAll('.lwb-ve-varrhs .lwb-ve-valvar'));
-          const exprs = [];
-          for (const inp of varInputs) {
-            const _inp = inp; const rhs = (_inp?.value || '').trim(); if (!rhs) continue;
-            exprs.push(`${buildVar(v)} ${op} ${buildVar(rhs)}`);
+        }
+        UI.setupConditionRow(row,onRowsChanged||null);
+        return row;
+      },
+      addConditionRow(container,params){ const row=UI.createConditionRow(params,()=>UI.refreshLopDisplay(container)); container.appendChild(row); UI.refreshLopDisplay(container); return row; },
+      parseConditionIntoUI(block,condStr){
+        try{
+          const groupWrap=block.querySelector('.lwb-ve-condgroups'); if(!groupWrap) return;
+          groupWrap.innerHTML='';
+          const top=P.splitTopWithOps(condStr);
+          top.forEach((seg,idxSeg)=>{
+            const { text }=P.stripOuterWithFlag(seg.expr);
+            const g=UI.makeConditionGroup(); groupWrap.appendChild(g);
+            const glopSel=g.querySelector('.lwb-ve-group-lop'); if(glopSel){ glopSel.style.display=idxSeg===0?'none':''; if(idxSeg>0) glopSel.value=seg.op||'&&'; }
+            const name=g.querySelector('.lwb-ve-group-name'); if(name) name.textContent=( 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[idxSeg] || (idxSeg+1) )+' 小组';
+            const rows=P.splitTopWithOps(P.stripOuter(text)); let first=true;
+            const cw=g.querySelector('.lwb-ve-conds');
+            rows.forEach(r=>{ const comp=P.parseComp(r.expr); if(!comp) return;
+              UI.addConditionRow(cw,{ lop:first?null:(r.op||'&&'), lhs:comp.lhs, op:comp.op, rhsIsVar:comp.rhsIsVar, rhs:comp.rhs }); first=false;
+            });
+          });
+        }catch{}
+      },
+      createEventBlock(index){
+        const block=U.el('div','lwb-ve-event',UI.getEventBlockHTML(index));
+        block.querySelector('.lwb-ve-event-title .lwb-ve-close')?.addEventListener('click',()=>{ block.remove(); block.dispatchEvent(new CustomEvent('lwb-refresh-idx',{bubbles:true})); });
+        const groupWrap=block.querySelector('.lwb-ve-condgroups'); const addGroupBtn=block.querySelector('.lwb-ve-add-group');
+        const refreshGroupOpsAndNames=()=>{ U.qa(groupWrap,'.lwb-ve-condgroup').forEach((g,i)=>{ const glop=g.querySelector('.lwb-ve-group-lop');
+          if(glop){ glop.style.display=i===0?'none':''; if(i>0 && !glop.value) glop.value='&&'; }
+          const name=g.querySelector('.lwb-ve-group-name'); if(name) name.textContent=( 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i] || (i+1) )+' 小组';
+        }); };
+        const createGroup=()=>{ const g=UI.makeConditionGroup(); const conds=g.querySelector('.lwb-ve-conds'); UI.addConditionRow(conds,{});
+          g.querySelector('.lwb-ve-del-group')?.addEventListener('click',()=>{ g.remove(); refreshGroupOpsAndNames(); }); return g; };
+        addGroupBtn.addEventListener('click',()=>{ groupWrap.appendChild(createGroup()); refreshGroupOpsAndNames(); });
+        groupWrap.appendChild(createGroup()); refreshGroupOpsAndNames();
+        block.querySelector('.lwb-ve-gen-st')?.addEventListener('click',()=>LWBVE.openActionBuilder(block));
+        return block;
+      },
+      refreshEventIndices(eventsWrap){
+        U.qa(eventsWrap,'.lwb-ve-event').forEach((el,i)=>{ const idxEl=el.querySelector('.lwb-ve-idx'); if(!idxEl) return;
+          idxEl.textContent=String(i+1); idxEl.style.cursor='pointer'; idxEl.title='点击修改显示名称';
+          if(!idxEl.dataset.clickbound){ idxEl.dataset.clickbound='1'; idxEl.addEventListener('click',()=>{ const cur=idxEl.textContent||''; const name=prompt('输入事件显示名称：',cur)??''; if(name) idxEl.textContent=name; }); }
+        });
+      },
+      processEventBlock(block,idx){
+        const displayName=String(block.querySelector('.lwb-ve-idx')?.textContent||'').trim();
+        const id=(displayName&&/^\w[\w.-]*$/.test(displayName))?displayName:String(idx+1).padStart(4,'0');
+        const lines=[`[event.${id}]`];
+        let condStr=''; let hasAny=false;
+        const groups=U.qa(block,'.lwb-ve-condgroup');
+        for(let gi=0; gi<groups.length; gi++){
+          const g=groups[gi]; const rows=U.qa(g,'.lwb-ve-conds .lwb-ve-row'); let groupExpr=''; let groupHas=false;
+          for(const r of rows){
+            const v=r.querySelector('.lwb-ve-var')?.value?.trim?.()||''; const op=r.querySelector('.lwb-ve-op')?.value||'=='; const ctype=r.querySelector('.lwb-ve-ctype')?.value||'vv'; if(!v) continue;
+            let rowExpr='';
+            if(ctype==='vv'){ const ins=U.qa(r,'.lwb-ve-vals .lwb-ve-val'); const exprs=[];
+              for(const inp of ins){ const val=(inp?.value||'').trim(); if(!val) continue; exprs.push(`${P.buildVar(v)} ${op} ${P.buildVal(val)}`); }
+              if(exprs.length===1) rowExpr=exprs[0]; else if(exprs.length>1) rowExpr='('+exprs.join(' || ')+')';
+            }else{ const ins=U.qa(r,'.lwb-ve-varrhs .lwb-ve-valvar'); const exprs=[];
+              for(const inp of ins){ const rhs=(inp?.value||'').trim(); if(!rhs) continue; exprs.push(`${P.buildVar(v)} ${op} ${P.buildVar(rhs)}`); }
+              if(exprs.length===1) rowExpr=exprs[0]; else if(exprs.length>1) rowExpr='('+exprs.join(' || ')+')';
+            }
+            if(!rowExpr) continue;
+            const lop=r.querySelector('.lwb-ve-lop')?.value||'&&';
+            if(!groupHas){ groupExpr=rowExpr; groupHas=true; }
+            else{
+              if(lop==='&&'){ const left=P.hasBinary(groupExpr)?P.paren(groupExpr):groupExpr; const right=P.hasBinary(rowExpr)?P.paren(rowExpr):rowExpr; groupExpr=`${left} && ${right}`; }
+              else{ const right=P.hasBinary(rowExpr)?P.paren(rowExpr):rowExpr; groupExpr=`${groupExpr} || ${right}`; }
+            }
           }
-          if (exprs.length === 1) rowExpr = exprs[0]; else if (exprs.length > 1) rowExpr = '(' + exprs.join(' || ') + ')';
+          if(!groupHas) continue;
+          const glop=g.querySelector('.lwb-ve-group-lop')?.value||'&&'; const wrap=P.hasBinary(groupExpr)?P.paren(groupExpr):groupExpr;
+          if(!hasAny){ condStr=wrap; hasAny=true; } else { condStr = glop==='&&' ? `${condStr} && ${wrap}` : `${condStr} || ${wrap}`; }
         }
-        if (!rowExpr) continue;
-        const lop = r.querySelector('.lwb-ve-lop')?.value || '&&';
-        if (!hasAny) { condStr = rowExpr; hasAny = true; }
-        else {
-          if (lop === '&&') { condStr = `${parenIf(hasOr(condStr), condStr)} && ${parenIf(hasOr(rowExpr), rowExpr)}`; }
-          else condStr = `${condStr} || ${rowExpr}`;
-        }
-      }
-      const disp = block.querySelector('.lwb-ve-display')?.value ?? '';
-      const js = block.querySelector('.lwb-ve-js')?.value ?? '';
-      const dispCore = String(disp).replace(/^\n+|\n+$/g, '');
-      if (dispCore && !condStr) { window?.toastr?.error?.('填写了"将显示世界书内容"时，必须提供执行条件'); return { lines: [] }; }
-      if (!dispCore && !js && !condStr) return { lines: [] };
-      if (condStr) lines.push(`condition: ${condStr}`);
-      if (dispCore !== '') {
-        const dispStored = '\n' + dispCore + '\n';
-        lines.push('display: "' + dispStored.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"');
-      }
-      if (js !== '') lines.push(`js_execute: ${JSON.stringify(js)}`);
-      return { lines };
-    }
-    if (vareventBlocks.length === 0) {
-      const tab = document.createElement('div'); tab.className = 'lwb-ve-tab active'; tab.textContent = '组 1'; tabs.insertBefore(tab, tabsCtrl);
-      const { page, eventsWrap } = makePage(); pagesWrap.appendChild(page); page.classList.add('active');
-      eventsWrap.appendChild(createEventBlock(eventsWrap.children.length + 1));
-      refreshIndices();
-      tab.addEventListener('click', () => {
-        document.querySelectorAll('.lwb-ve-tab').forEach(el => el.classList.remove('active')); tab.classList.add('active');
-        pagesWrap.querySelectorAll('.lwb-ve-page').forEach(el => el.classList.remove('active')); page.classList.add('active');
+        const disp=block.querySelector('.lwb-ve-display')?.value??''; const js=block.querySelector('.lwb-ve-js')?.value??'';
+        const dispCore=String(disp).replace(/^\n+|\n+$/g,'');
+        if(dispCore && !condStr){ U.toast.err('填写了"将显示世界书内容"时，必须提供执行条件'); return { lines:[] }; }
+        if(!dispCore && !js && !condStr) return { lines:[] };
+        if(condStr) lines.push(`condition: ${condStr}`);
+        if(dispCore!==''){ const stored='\n'+dispCore+'\n'; lines.push('display: "'+stored.replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"'); }
+        if(js!=='') lines.push(`js_execute: ${JSON.stringify(js)}`);
+        return { lines };
+      },
+    };
+
+    function openVarEditor(entryEl, uid){
+      const textarea=(uid?document.getElementById(`world_entry_content_${uid}`):null) || entryEl?.querySelector?.('textarea[name="content"]');
+      if(!textarea){ U.toast.warn('未找到内容输入框，请先展开该条目的编辑抽屉'); return; }
+
+      const ui=UI.makeOverlayModal('条件规则编辑器');
+      const pagesWrap=U.el('div'); ui.body.appendChild(pagesWrap);
+
+      const addEventBtn=U.el('button','lwb-ve-btn','<i class="fa-solid fa-plus"></i> 添加事件'); addEventBtn.type='button';
+      addEventBtn.style.cssText='background: var(--SmartThemeBlurTintColor); border: 1px solid var(--SmartThemeBorderColor); cursor: pointer; margin-right: 5px;';
+      const bumpBtn=U.el('button','lwb-ve-btn lwb-ve-gen-bump','bump数值映射设置');
+      const tools=U.el('div','lwb-ve-toolbar'); tools.append(addEventBtn,bumpBtn); ui.body.appendChild(tools);
+      bumpBtn.addEventListener('click',()=>LWBVE.openBumpAliasBuilder(null));
+      const makePage=()=>{ const page=U.el('div','lwb-ve-page'); const eventsWrap=U.el('div'); page.appendChild(eventsWrap); return { page, eventsWrap }; };
+      addEventBtn.addEventListener('click',()=>{ const active=pagesWrap.querySelector('.lwb-ve-page.active'); const eventsWrap=active?.querySelector(':scope > div'); if(!eventsWrap) return;
+        eventsWrap.appendChild(UI.createEventBlock(eventsWrap.children.length+1)); eventsWrap.dispatchEvent(new CustomEvent('lwb-refresh-idx',{bubbles:true}));
       });
-    } else {
-      let activeIndex = 0;
-      const renderPage = (pageIdx) => {
-        activeIndex = pageIdx;
-        document.querySelectorAll('.lwb-ve-tab').forEach((el, i) => el.classList.toggle('active', i === pageIdx));
-        const current = vareventBlocks[pageIdx]; const events = (current && typeof current.inner === 'string') ? parseVareventEvents(current.inner) : [];
-        let page = pagesWrap.querySelectorAll('.lwb-ve-page')[pageIdx];
-        if (!page) { const created = makePage(); page = created.page; pagesWrap.appendChild(page); }
-        pagesWrap.querySelectorAll('.lwb-ve-page').forEach((el) => el.classList.remove('active'));
-        page.classList.add('active');
-        let eventsWrap = page.querySelector(':scope > div');
-        if (!eventsWrap) { const d = document.createElement('div'); page.appendChild(d); eventsWrap = d; }
-        const initContent = () => {
-          eventsWrap.innerHTML = '';
-          if (!events.length) eventsWrap.appendChild(createEventBlock(1));
+
+      const wi=document.getElementById('WorldInfo'); const wiIcon=document.getElementById('WIDrawerIcon');
+      const wasPinned=!!wi?.classList.contains('pinnedOpen'); let tempPinned=false;
+      if(wi && !wasPinned){ wi.classList.add('pinnedOpen'); tempPinned=true; } if(wiIcon && !wiIcon.classList.contains('drawerPinnedOpen')) wiIcon.classList.add('drawerPinnedOpen');
+      const closeVarEditor=()=>{ try{ const pinChecked=!!(document.getElementById('WI_panel_pin'))?.checked; if(tempPinned && !pinChecked){ wi?.classList.remove('pinnedOpen'); wiIcon?.classList.remove('drawerPinnedOpen'); } }catch{} ui.overlay.remove(); };
+      ui.btnCancel.addEventListener('click',closeVarEditor);
+      ui.header.querySelector('.lwb-ve-close')?.addEventListener('click',closeVarEditor);
+
+      const TAG_RE=U.getTagRE(); const originalText=String(textarea.value||''); const vareventBlocks=[];
+      TAG_RE.varevent.lastIndex=0; let mm;
+      while((mm=TAG_RE.varevent.exec(originalText))!==null){ const inner=mm[1]??''; vareventBlocks.push({ inner }); }
+
+      const parseFn = typeof window.parseVareventEvents === 'function' ? window.parseVareventEvents : parseVareventEvents;
+      if (typeof window.parseVareventEvents !== 'function') window.parseVareventEvents = parseFn; // 兼容旧调用
+
+      const pageInitialized=new Set();
+      const renderPage=(pageIdx)=>{
+        const tabs=U.qa(ui.tabs,'.lwb-ve-tab'); U.setActive(tabs,pageIdx);
+        const current=vareventBlocks[pageIdx]; const events=(current && typeof current.inner==='string')? (parseFn(current.inner)||[]): [];
+        let page=U.qa(pagesWrap,'.lwb-ve-page')[pageIdx];
+        if(!page){ page=makePage().page; pagesWrap.appendChild(page); }
+        U.qa(pagesWrap,'.lwb-ve-page').forEach(el=>el.classList.remove('active')); page.classList.add('active');
+        let eventsWrap=page.querySelector(':scope > div'); if(!eventsWrap){ eventsWrap=U.el('div'); page.appendChild(eventsWrap); }
+
+        const init=()=>{
+          eventsWrap.innerHTML='';
+          if(!events.length) eventsWrap.appendChild(UI.createEventBlock(1));
           else {
-            events.forEach((_ev, i) => {
-              const block = createEventBlock(i + 1);
-              try {
-                const condStr = String(_ev.condition || '').trim();
-                if (condStr) {
-                  const firstRow = block.querySelector('.lwb-ve-row');
-                  const condsWrap = block.querySelector('.lwb-ve-conds');
-                  const addParsedRow = (lop, lhs, op, rhsIsVar, rhsVal) => {
-                    const row = document.createElement('div'); row.className = 'lwb-ve-row'; row.innerHTML = getConditionRowHTML();
-                    const lopSel = row.querySelector('.lwb-ve-lop'); if (lopSel) { if (!lop) { lopSel.style.display = 'none'; lopSel.value = '&&'; } else { lopSel.style.display = ''; lopSel.value = lop; } }
-                    const varInp = row.querySelector('.lwb-ve-var'); if (varInp) varInp.value = lhs;
-                    const opSel = row.querySelector('.lwb-ve-op'); if (opSel) opSel.value = op;
-                    const ctypeSel = row.querySelector('.lwb-ve-ctype'); const valsWrap = row.querySelector('.lwb-ve-vals'); const varRhsWrap = row.querySelector('.lwb-ve-varrhs');
-                    if (ctypeSel && valsWrap && varRhsWrap) {
-                      if (rhsIsVar) {
-                        ctypeSel.value = 'vvv'; valsWrap.style.display = 'none'; varRhsWrap.style.display = 'inline-flex';
-                        const rhsInp = row.querySelector('.lwb-ve-varrhs .lwb-ve-valvar'); if (rhsInp) rhsInp.value = rhsVal;
-                      } else {
-                        ctypeSel.value = 'vv'; valsWrap.style.display = 'inline-flex'; varRhsWrap.style.display = 'none';
-                        const rhsInp = row.querySelector('.lwb-ve-vals .lwb-ve-val'); if (rhsInp) rhsInp.value = rhsVal;
-                      }
-                    }
-                    setupConditionRow(row, null); condsWrap?.appendChild(row);
-                  };
-                  const stripOuter = (s) => {
-                    let t = String(s || '').trim(); if (!t.startsWith('(') || !t.endsWith(')')) return t; let i = 0, d = 0, q = null;
-                    while (i < t.length) { const c = t[i]; if (q) { if (c === q && t[i - 1] !== '\\') q = null; }
-                      else if (c === '"' || c === "'" || c === '`') q = c; else if (c === '(') d++; else if (c === ')') { d--; if (d === 0 && i !== t.length - 1) return t; } i++; }
-                    if (d === 0) return t.slice(1, -1).trim(); return t;
-                  };
-                  const splitTop = (s, sep) => {
-                    const parts = []; let i = 0, start = 0, d = 0, q = null;
-                    while (i < s.length) {
-                      const c = s[i];
-                      if (q) { if (c === q && s[i - 1] !== '\\') q = null; i++; continue; }
-                      if (c === '"' || c === "'" || c === '`') { q = c; i++; continue; }
-                      if (c === '(') { d++; i++; continue; }
-                      if (c === ')') { d--; i++; continue; }
-                      if (d === 0 && s.slice(i, i + sep.length) === sep) { parts.push(s.slice(start, i)); i += sep.length; start = i; continue; }
-                      i++;
-                    }
-                    parts.push(s.slice(start)); return parts.map(p => p.trim()).filter(Boolean);
-                  };
-                  const parseComp = (s) => {
-                    const t = stripOuter(s);
-                    const m = t.match(/^var\(\s*([`'\"])([\s\S]*?)\1\s*\)\s*(==|!=|>=|<=|>|<)\s*(val|var)\(\s*([`'\"])([\s\S]*?)\5\s*\)$/);
-                    if (!m) return null; return { lhs: m[2], op: m[3], rhsIsVar: m[4] === 'var', rhs: m[6] };
-                  };
-                  let ok = false;
-                  try {
-                    if (condsWrap) condsWrap.innerHTML = '';
-                    const andChunks = splitTop(condStr, '&&'); let first = true;
-                    for (const chunk of andChunks) {
-                      const inner = stripOuter(chunk);
-                      const orParts = splitTop(inner, '||');
-                      let firstInChunk = true;
-                      for (const part of orParts) {
-                        const comp = parseComp(part); if (!comp) throw new Error('unparsable');
-                        const lop = first ? null : (firstInChunk ? '&&' : '||');
-                        addParsedRow(lop, comp.lhs, comp.op, comp.rhsIsVar, comp.rhs);
-                        first = false; firstInChunk = false;
-                      }
-                    }
-                    ok = true;
-                  } catch { }
-                  if (!ok) {
-                    const firstRow2 = firstRow;
-                    const varInp2 = firstRow2?.querySelector('.lwb-ve-var');
-                    const opSel2 = firstRow2?.querySelector('.lwb-ve-op');
-                    const vals2 = firstRow2?.querySelector('.lwb-ve-vals .lwb-ve-val');
-                    if (varInp2 && opSel2 && vals2) { varInp2.value = condStr; opSel2.value = '=='; vals2.value = 'true'; }
-                  }
-                }
-                const disp = String(_ev.display || '');
-                const dispEl = block.querySelector('.lwb-ve-display');
-                if (dispEl) {
-                  const shown = disp.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
-                  dispEl.value = shown;
-                }
-                const js = String(_ev.js || ''); const jsEl = block.querySelector('.lwb-ve-js'); if (jsEl) jsEl.value = js;
-              } catch { }
+            events.forEach((_ev,i)=>{
+              const block=UI.createEventBlock(i+1);
+              try{
+                const condStr=String(_ev.condition||'').trim(); if(condStr) UI.parseConditionIntoUI(block,condStr);
+                const disp=String(_ev.display||''); const dispEl=block.querySelector('.lwb-ve-display'); if(dispEl) dispEl.value=disp.replace(/^\r?\n/,'').replace(/\r?\n$/,'');
+                const js=String(_ev.js||''); const jsEl=block.querySelector('.lwb-ve-js'); if(jsEl) jsEl.value=js;
+              }catch{}
               eventsWrap.appendChild(block);
             });
           }
-          refreshIndices();
-          eventsWrap.addEventListener('lwb-refresh-idx', () => { try { refreshIndices(); } catch { } });
+          UI.refreshEventIndices(eventsWrap);
+          eventsWrap.addEventListener('lwb-refresh-idx',()=>UI.refreshEventIndices(eventsWrap));
         };
-        if (!pageInitialized.has(pageIdx)) { initContent(); pageInitialized.add(pageIdx); }
-        else if (!eventsWrap.querySelector('.lwb-ve-event')) { initContent(); }
+        if(!pageInitialized.has(pageIdx)){ init(); pageInitialized.add(pageIdx); }
+        else if(!eventsWrap.querySelector('.lwb-ve-event')){ init(); }
       };
-      try { pagesWrap._lwbRenderPage = renderPage; } catch { }
-      vareventBlocks.forEach((_b, i) => {
-        const tab = document.createElement('div'); tab.className = 'lwb-ve-tab' + (i === 0 ? ' active' : ''); tab.textContent = `组 ${i + 1}`;
-        tab.addEventListener('click', () => renderPage(i)); tabs.insertBefore(tab, tabsCtrl);
+      pagesWrap._lwbRenderPage=renderPage;
+
+      if(vareventBlocks.length===0){
+        const tab=U.el('div','lwb-ve-tab active','组 1'); ui.tabs.insertBefore(tab,ui.tabsCtrl);
+        const { page, eventsWrap }=makePage(); pagesWrap.appendChild(page); page.classList.add('active'); eventsWrap.appendChild(UI.createEventBlock(1)); UI.refreshEventIndices(eventsWrap);
+        tab.addEventListener('click',()=>{ U.qa(ui.tabs,'.lwb-ve-tab').forEach(el=>el.classList.remove('active')); tab.classList.add('active'); U.qa(pagesWrap,'.lwb-ve-page').forEach(el=>el.classList.remove('active')); page.classList.add('active'); });
+      } else {
+        vareventBlocks.forEach((_b,i)=>{ const tab=U.el('div','lwb-ve-tab'+(i===0?' active':''),`组 ${i+1}`); tab.addEventListener('click',()=>renderPage(i)); ui.tabs.insertBefore(tab,ui.tabsCtrl); });
+        renderPage(0);
+      }
+
+      ui.btnAddTab.addEventListener('click',()=>{ const newIdx=U.qa(ui.tabs,'.lwb-ve-tab').length; vareventBlocks.push({ inner:'' });
+        const tab=U.el('div','lwb-ve-tab',`组 ${newIdx+1}`); tab.addEventListener('click',()=>pagesWrap._lwbRenderPage(newIdx)); ui.tabs.insertBefore(tab,ui.tabsCtrl); pagesWrap._lwbRenderPage(newIdx);
       });
-      renderPage(0);
-    }
-    try {
-      btnAddTab.addEventListener('click', () => {
-        const tabCount = tabs.querySelectorAll('.lwb-ve-tab').length;
-        const newIdx = tabCount;
-        if (typeof pagesWrap["_lwbRenderPage"] === 'function') {
-          try { vareventBlocks.push({ inner: '' }); } catch {}
-          const tab = document.createElement('div');
-          tab.className = 'lwb-ve-tab';
-          tab.textContent = `组 ${newIdx + 1}`;
-          tab.addEventListener('click', () => pagesWrap["_lwbRenderPage"](newIdx));
-          tabs.insertBefore(tab, tabsCtrl);
-          pagesWrap["_lwbRenderPage"](newIdx);
-        } else {
-          const { page, eventsWrap } = makePage();
-          pagesWrap.appendChild(page);
-          eventsWrap.appendChild(createEventBlock(1));
-          const tab = document.createElement('div');
-          tab.className = 'lwb-ve-tab';
-          tab.textContent = `组 ${newIdx + 1}`;
-          tab.addEventListener('click', () => {
-            Array.from(tabs.querySelectorAll('.lwb-ve-tab')).forEach((el, i) => el.classList.toggle('active', i === newIdx));
-            Array.from(pagesWrap.querySelectorAll('.lwb-ve-page')).forEach((el, i) => el.classList.toggle('active', i === newIdx));
-          });
-          tabs.insertBefore(tab, tabsCtrl);
-          Array.from(tabs.querySelectorAll('.lwb-ve-tab')).forEach((el, i) => el.classList.toggle('active', i === newIdx));
-          Array.from(pagesWrap.querySelectorAll('.lwb-ve-page')).forEach((el, i) => el.classList.toggle('active', i === newIdx));
-          try { refreshIndices(); } catch {}
-        }
+      ui.btnDelTab.addEventListener('click',()=>{ const tabEls=U.qa(ui.tabs,'.lwb-ve-tab'); if(tabEls.length<=1){ U.toast.warn('至少保留一组'); return; }
+        const activeIdx=tabEls.findIndex(t=>t.classList.contains('active')); const idx=activeIdx>=0?activeIdx:0;
+        const pageEls=U.qa(pagesWrap,'.lwb-ve-page'); pageEls[idx]?.remove(); tabEls[idx]?.remove(); vareventBlocks.splice(idx,1);
+        const rebind=U.qa(ui.tabs,'.lwb-ve-tab'); rebind.forEach((t,i)=>{ const nt=t.cloneNode(true); nt.textContent=`组 ${i+1}`; nt.addEventListener('click',()=>pagesWrap._lwbRenderPage(i)); ui.tabs.replaceChild(nt,t); });
+        const nextIdx=Math.max(0,Math.min(idx,rebind.length-1)); pagesWrap._lwbRenderPage(nextIdx);
       });
-    } catch {}
-    try {
-      btnDelTab.addEventListener('click', () => {
-        const tabEls = Array.from(tabs.querySelectorAll('.lwb-ve-tab'));
-        if (tabEls.length <= 1) { try { window?.toastr?.warning?.('至少保留一组'); } catch {} return; }
-        const activeIdx = tabEls.findIndex(t => t.classList.contains('active')) >= 0 ? tabEls.findIndex(t => t.classList.contains('active')) : 0;
-        const pageEls = Array.from(pagesWrap.querySelectorAll('.lwb-ve-page'));
-        try { pageEls[activeIdx]?.remove(); } catch {}
-        try { tabEls[activeIdx]?.remove(); } catch {}
-        if (typeof pagesWrap["_lwbRenderPage"] === 'function') {
-          try { vareventBlocks.splice(activeIdx, 1); } catch {}
-          try { pageInitialized?.clear?.(); } catch {}
-          const rebind = Array.from(tabs.querySelectorAll('.lwb-ve-tab'));
-          rebind.forEach((t, i) => {
-            const nt = t.cloneNode(true);
-            nt.textContent = `组 ${i + 1}`;
-            nt.addEventListener('click', () => pagesWrap["_lwbRenderPage"](i));
-            tabs.replaceChild(nt, t);
+
+      ui.btnOk.addEventListener('click',()=>{
+        try{ const maybe=pagesWrap._lwbRenderPage; if(typeof maybe==='function'){ const tabEls=U.qa(ui.tabs,'.lwb-ve-tab'); for(let i=0;i<tabEls.length;i++){ try{ maybe(i);}catch{} } } }catch{}
+        const pageEls=U.qa(pagesWrap,'.lwb-ve-page'); if(pageEls.length===0){ closeVarEditor(); return; }
+        const builtBlocks=[]; const seenIds=new Set();
+        pageEls.forEach((p)=>{ const wrap=p.querySelector(':scope > div'); const blks=wrap?U.qa(wrap,'.lwb-ve-event'):[];
+          const lines=['<varevent>'];
+          blks.forEach((b,j)=>{ const r=UI.processEventBlock(b,j);
+            if(r.lines.length>0){ const idLine=r.lines[0]; const mm=idLine.match(/^\[\s*event\.([^\]]+)\]/i); const id=mm?mm[1]:`evt_${j+1}`;
+              let use=id, k=2; while(seenIds.has(use)) use=`${id}_${k++}`; if(use!==id) r.lines[0]=`[event.${use}]`; seenIds.add(use);
+              lines.push(...r.lines);
+            }
           });
-          const nextIdx = Math.max(0, Math.min(activeIdx, rebind.length - 1));
-          pagesWrap["_lwbRenderPage"](nextIdx);
-        } else {
-          const rebind = Array.from(tabs.querySelectorAll('.lwb-ve-tab'));
-          rebind.forEach((t, i) => {
-            const nt = t.cloneNode(true);
-            nt.textContent = `组 ${i + 1}`;
-            nt.addEventListener('click', () => {
-              rebind.forEach((el, j) => el.classList.toggle('active', j === i));
-              const pg = Array.from(pagesWrap.querySelectorAll('.lwb-ve-page'));
-              pg.forEach((el, j) => el.classList.toggle('active', j === i));
-            });
-            tabs.replaceChild(nt, t);
-          });
-          const nextIdx = Math.max(0, Math.min(activeIdx, rebind.length - 1));
-          rebind.forEach((el, i) => el.classList.toggle('active', i === nextIdx));
-          const pg = Array.from(pagesWrap.querySelectorAll('.lwb-ve-page'));
-          pg.forEach((el, i) => el.classList.toggle('active', i === nextIdx));
-          try { refreshIndices(); } catch {}
-        }
-      });
-    } catch {}
-    footerOk.addEventListener('click', () => {
-      try { const maybeRender = pagesWrap._lwbRenderPage; if (typeof maybeRender === 'function') { const tabEls = Array.from(tabs.querySelectorAll('.lwb-ve-tab')); for (let i = 0; i < tabEls.length; i++) { try { maybeRender(i); } catch { } } } } catch { }
-      const pageEls = Array.from(pagesWrap.querySelectorAll('.lwb-ve-page')); if (pageEls.length === 0) { closeVarEditor(); return; }
-      const builtBlocks = []; const seenIds = new Set();
-      pageEls.forEach((p, i) => {
-        const wrap = p.querySelector(':scope > div'); const blks = wrap ? Array.from(wrap.querySelectorAll('.lwb-ve-event')) : [];
-        const lines = ['<varevent>'];
-        blks.forEach((b, j) => {
-          const r = processEventBlock(b, j);
-          if (r.lines.length > 0) {
-            const idLine = r.lines[0]; const m = idLine.match(/^\[\s*event\.([^\]]+)\]/i); const id = m ? m[1] : `evt_${j + 1}`;
-            let use = id; let k = 2; while (seenIds.has(use)) use = `${id}_${k++}`;
-            if (use !== id) { r.lines[0] = `[event.${use}]`; }
-            seenIds.add(use);
-            lines.push(...r.lines);
-          }
+          lines.push('</varevent>'); builtBlocks.push(lines.join('\n'));
         });
-        lines.push('</varevent>');
-        builtBlocks.push(lines.join('\n'));
+
+        const oldVal=textarea.value||''; const originals=[]; const RE=U.getTagRE().varevent; RE.lastIndex=0; let m;
+        while((m=RE.exec(oldVal))!==null){ originals.push({start:m.index,end:RE.lastIndex}); }
+        let acc=''; let pos=0; const minLen=Math.min(originals.length,builtBlocks.length);
+        for(let i=0;i<originals.length;i++){ const {start,end}=originals[i]; acc+=oldVal.slice(pos,start); if(i<minLen) acc+=builtBlocks[i]; pos=end; }
+        acc+=oldVal.slice(pos);
+        if(builtBlocks.length>originals.length){ const extras=builtBlocks.slice(originals.length).join('\n\n'); acc=acc.replace(/\s*$/,''); if(acc && !/(?:\r?\n){2}$/.test(acc)){ acc+=(/\r?\n$/.test(acc)?'':'\n')+'\n'; } acc+=extras; }
+        acc=acc.replace(/(?:\r?\n){3,}/g,'\n\n');
+        textarea.value=acc; try{ window?.jQuery?.(textarea)?.trigger?.('input'); }catch{}
+        U.toast.ok('已更新条件规则到该世界书条目'); closeVarEditor();
       });
-      const oldVal = textarea.value || '';
-      const originals = []; TAG_RE.varevent.lastIndex = 0; let mm;
-      while ((mm = TAG_RE.varevent.exec(oldVal)) !== null) { originals.push({ start: mm.index, end: TAG_RE.varevent.lastIndex }); }
-      let acc = ''; let pos = 0; const minLen = Math.min(originals.length, builtBlocks.length);
-      for (let i = 0; i < originals.length; i++) {
-        const { start, end } = originals[i]; acc += oldVal.slice(pos, start); if (i < minLen) acc += builtBlocks[i]; pos = end;
-      }
-      acc += oldVal.slice(pos);
-      if (builtBlocks.length > originals.length) {
-        const extras = builtBlocks.slice(originals.length).join('\n\n');
-        acc = acc.replace(/\s*$/, '');
-        if (acc && !/(?:\r?\n){2}$/.test(acc)) { acc += (/\r?\n$/.test(acc) ? '' : '\n') + '\n'; }
-        acc += extras;
-      }
-      acc = acc.replace(/(?:\r?\n){3,}/g, '\n\n');
-      textarea.value = acc; try { const $ta = window?.jQuery ? window.jQuery(textarea) : null; $ta?.trigger?.('input'); } catch { }
-      window?.toastr?.success?.('已更新条件规则到该世界书条目');
-      closeVarEditor();
-    });
-    document.body.appendChild(overlay);
-  }
-function setupModalDrag(modal,overlay,header){
-  try{ modal.style.position='absolute'; modal.style.left='50%'; modal.style.top='50%'; modal.style.transform='translate(-50%,-50%)'; }catch{}
-  let dragging=false,sx=0,sy=0,sl=0,st=0;
-  function onDown(e){ if(!(e instanceof PointerEvent)||e.button!==0) return;
-    dragging=true;
-    const overlayRect=overlay.getBoundingClientRect(); const rect=modal.getBoundingClientRect();
-    modal.style.left=(rect.left-overlayRect.left)+'px'; modal.style.top=(rect.top-overlayRect.top)+'px'; modal.style.transform='';
-    sx=e.clientX; sy=e.clientY; sl=parseFloat(modal.style.left)||0; st=parseFloat(modal.style.top)||0;
-    window.addEventListener('pointermove',onMove,{passive:true}); window.addEventListener('pointerup',onUp,{once:true}); e.preventDefault();
-  }
-  function onMove(e){ if(!dragging) return; const dx=e.clientX-sx, dy=e.clientY-sy;
-    let nl=sl+dx, nt=st+dy; const maxLeft=(overlay.clientWidth||overlay.getBoundingClientRect().width)-modal.offsetWidth;
-    const maxTop=(overlay.clientHeight||overlay.getBoundingClientRect().height)-modal.offsetHeight;
-    nl=Math.max(0,Math.min(maxLeft,nl)); nt=Math.max(0,Math.min(maxTop,nt));
-    modal.style.left=nl+'px'; modal.style.top=nt+'px';
-  }
-  function onUp(){ dragging=false; window.removeEventListener('pointermove',onMove); }
-  header.addEventListener('pointerdown',onDown);
-}
-function buildSTscriptFromActions(actionList) {
-  const parts = [];
-  const jsEsc = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
-  const plain = (s) => String(s ?? '').trim();
-
-  for (const a of actionList || []) {
-    switch (a.type) {
-      case 'var.set':
-        parts.push(`/setvar key=${plain(a.key)} ${plain(a.value)}`);
-        break;
-      case 'var.bump':
-        parts.push(`/addvar key=${plain(a.key)} ${Number(a.delta) || 0}`);
-        break;
-      case 'var.del':
-        parts.push(`/flushvar ${plain(a.key)}`);
-        break;
-      case 'wi.enableUID':
-        parts.push(`/setentryfield file=${plain(a.file)} uid=${plain(a.uid)} field=disable 0`);
-        break;
-      case 'wi.disableUID':
-        parts.push(`/setentryfield file=${plain(a.file)} uid=${plain(a.uid)} field=disable 1`);
-        break;
-      case 'wi.setContentUID':
-        parts.push(`/setentryfield file=${plain(a.file)} uid=${plain(a.uid)} field=content ${plain(a.content)}`);
-        break;
-      case 'wi.createContent':
-        if (plain(a.content)) {
-          parts.push(`/createentry file=${plain(a.file)} key=${plain(a.key)} ${plain(a.content)}`);
-        } else {
-          parts.push(`/createentry file=${plain(a.file)} key=${plain(a.key)}`);
-        }
-        parts.push(`/setentryfield file=${plain(a.file)} uid={{pipe}} field=constant 1`);
-        break;
-      case 'qr.run':
-        parts.push(`/run ${a.preset ? `${plain(a.preset)}.` : ''}${plain(a.label)}`);
-        break;
-      case 'custom.st':
-        if (a.script) {
-          const cmds = a.script.split('\n').map(s => s.trim()).filter(Boolean).map(c => (c.startsWith('/') ? c : '/' + c));
-          parts.push(...cmds);
-        }
-        break;
-      default:
-        break;
     }
-  }
 
-  const st = parts.join(' | ');
-  return 'STscript(`' + jsEsc(st) + '`)';
-}
-function makeMiniModal(innerHTML) {
-  const wrap = document.createElement('div');
-  wrap.className = 'lwb-ve-overlay';
-  const modal = document.createElement('div');
-  modal.className = 'lwb-ve-modal';
-  modal.style.maxWidth = '720px';
-  modal.style.pointerEvents = 'auto';
-  modal.style.zIndex = '10010';
-  wrap.appendChild(modal);
-  const header = document.createElement('div');
-  header.className = 'lwb-ve-header';
-  header.innerHTML = '<span>编辑器</span><span class="lwb-ve-close">✕</span>';
-  modal.appendChild(header);
-  const body = document.createElement('div');
-  body.className = 'lwb-ve-body';
-  body.innerHTML = innerHTML;
-  modal.appendChild(body);
-  const footer = document.createElement('div');
-  footer.className = 'lwb-ve-footer';
-  const btnCancel = document.createElement('button');
-  btnCancel.className = 'lwb-ve-btn';
-  btnCancel.textContent = '取消';
-  const btnOk = document.createElement('button');
-  btnOk.className = 'lwb-ve-btn primary';
-  btnOk.textContent = '生成';
-  footer.append(btnCancel, btnOk);
-  modal.appendChild(footer);
-  setupModalDrag(modal, wrap, header);
-  btnCancel.addEventListener('click', () => wrap.remove());
-  header.querySelector('.lwb-ve-close')?.addEventListener('click', () => wrap.remove());
-  document.body.appendChild(wrap);
-  return { wrap, modal, body, btnOk, btnCancel };
-}
-function openActionBuilder(block) {
-  const html = `
-    <div class="lwb-ve-section">
-      <div class="lwb-ve-label">添加动作</div>
-      <div id="lwb-action-list"></div>
-      <button type="button" class="lwb-ve-btn" id="lwb-add-action">+动作</button>
-    </div>
-  `;
-  const ui = makeMiniModal(html);
-  const list = ui.body.querySelector('#lwb-action-list');
-  const addBtn = ui.body.querySelector('#lwb-add-action');
-  const addRow = (presetType) => {
-    const row = document.createElement('div');
-    row.className = 'lwb-ve-row';
-    row.style.alignItems = 'flex-start';
-    row.innerHTML = `
-      <select class="lwb-ve-input lwb-ve-mini lwb-act-type">
-        <option value="var.set">变量: set</option>
-        <option value="var.bump">变量: bump(+/-)</option>
-        <option value="var.del">变量: del</option>
-        <option value="wi.enableUID">世界书: 启用条目(UID)</option>
-        <option value="wi.disableUID">世界书: 禁用条目(UID)</option>
-        <option value="wi.setContentUID">世界书: 设置内容(UID)</option>
-        <option value="wi.createContent">世界书: 新建条目(仅内容)</option>
-        <option value="qr.run">快速回复（/run）</option>
-        <option value="custom.st">自定义ST命令</option>
-      </select>
-      <div class="lwb-ve-fields" style="flex:1; display:grid; grid-template-columns: 1fr 1fr; gap:6px;"></div>
-      <button type="button" class="lwb-ve-btn ghost lwb-ve-del">删除</button>
-    `;
-    const typeSel = row.querySelector('.lwb-act-type');
-    const fields = row.querySelector('.lwb-ve-fields');
-    const del = row.querySelector('.lwb-ve-del');
-    del.addEventListener('click', () => row.remove());
-    const renderFields = () => {
-      const t = typeSel.value;
-      if (t === 'var.set') {
-        fields.innerHTML = `
-          <input class="lwb-ve-input" placeholder="变量名 key"/>
-          <input class="lwb-ve-input" placeholder="值 value"/>
-        `;
-      } else if (t === 'var.bump') {
-        fields.innerHTML = `
-          <input class="lwb-ve-input" placeholder="变量名 key"/>
-          <input class="lwb-ve-input" placeholder="增量(整数，可负) delta"/>
-        `;
-      } else if (t === 'var.del') {
-        fields.innerHTML = `
-          <input class="lwb-ve-input" placeholder="变量名 key"/>
-        `;
-      } else if (t === 'wi.enableUID' || t === 'wi.disableUID') {
-        fields.innerHTML = `
-          <input class="lwb-ve-input" placeholder="世界书文件名 file（必填）"/>
-          <input class="lwb-ve-input" placeholder="条目UID（必填）"/>
-        `;
-      } else if (t === 'wi.setContentUID') {
-        fields.innerHTML = `
-          <input class="lwb-ve-input" placeholder="世界书文件名 file（必填）"/>
-          <input class="lwb-ve-input" placeholder="条目UID（必填）"/>
-          <textarea class="lwb-ve-text" rows="3" placeholder="内容 content（可多行）"></textarea>
-        `;
-      } else if (t === 'wi.createContent') {
-        fields.innerHTML = `
-          <input class="lwb-ve-input" placeholder="世界书文件名 file（必填）"/>
-          <input class="lwb-ve-input" placeholder="条目 key（建议填写）"/>
-          <textarea class="lwb-ve-text" rows="4" placeholder="新条目内容 content（可留空）"></textarea>
-        `;
-      } else if (t === 'qr.run') {
-        fields.innerHTML = `
-          <input class="lwb-ve-input" placeholder="预设名（可空） preset"/>
-          <input class="lwb-ve-input" placeholder="标签（label，必填）"/>
-        `;
-      } else if (t === 'custom.st') {
-        fields.innerHTML = `
-          <textarea class="lwb-ve-text" rows="4" placeholder="每行一条斜杠命令，例如：/echo 123（支持多行）"></textarea>
-        `;
-      }
-    };
-    typeSel.addEventListener('change', renderFields);
-    renderFields();
-    if (presetType) typeSel.value = presetType, renderFields();
-    list.appendChild(row);
-  };
-  addBtn.addEventListener('click', () => addRow());
-  addRow();
-  ui.btnOk.addEventListener('click', () => {
-    const rows = Array.from(list.querySelectorAll('.lwb-ve-row'));
-    const actions = [];
-    for (const r of rows) {
-      const type = r.querySelector('.lwb-act-type')?.value;
-      const inputs = Array.from(r.querySelectorAll('.lwb-ve-fields .lwb-ve-input, .lwb-ve-fields .lwb-ve-text')).map(i=>i.value);
-      if (type === 'var.set' && inputs[0]) actions.push({ type, key: inputs[0], value: inputs[1]||'' });
-      if (type === 'var.bump' && inputs[0]) actions.push({ type, key: inputs[0], delta: inputs[1]||'0' });
-      if (type === 'var.del' && inputs[0]) actions.push({ type, key: inputs[0] });
-      if ((type === 'wi.enableUID' || type==='wi.disableUID') && inputs[0] && inputs[1]) actions.push({ type, file: inputs[0], uid: inputs[1] });
-      if (type === 'wi.setContentUID' && inputs[0] && inputs[1]) actions.push({ type, file: inputs[0], uid: inputs[1], content: inputs[2]||'' });
-      if (type === 'wi.createContent' && inputs[0]) actions.push({ type, file: inputs[0], key: inputs[1]||'', content: inputs[2]||'' });
-      if (type === 'qr.run' && inputs[1]) actions.push({ type, preset: inputs[0]||'', label: inputs[1] });
-      if (type === 'custom.st' && inputs[0]) {
-        const cmds = inputs[0].split('\n').map(s=>s.trim()).filter(Boolean).map(c => c.startsWith('/') ? c : ('/' + c)).join(' | ');
-        if (cmds) actions.push({ type, script: cmds });
-      }
-    }
-    const jsCode = buildSTscriptFromActions(actions);
-    const jsBox = block.querySelector('.lwb-ve-js');
-    if (jsCode && jsBox) jsBox.value = jsCode;
-    ui.wrap.remove();
-  });
-}
-function openBumpAliasBuilder(block) {
-    const html = `
-      <div class="lwb-ve-section">
-        <div class="lwb-ve-label">bump数值映射（每行一条：变量名(可空) | 短语或 /regex/flags | 数值）</div>
-        <div id="lwb-bump-list"></div>
-        <button type="button" class="lwb-ve-btn" id="lwb-add-bump">+映射</button>
-      </div>
-    `;
-    const ui = makeMiniModal(html);
-    const list = ui.body.querySelector('#lwb-bump-list');
-    const addBtn = ui.body.querySelector('#lwb-add-bump');
-    const addRow = (scope='', phrase='', val='1') => {
-      const row = document.createElement('div');
-      row.className = 'lwb-ve-row';
-      row.innerHTML = `
-        <input class="lwb-ve-input" placeholder="变量名(可空=全局)" value="${scope}"/>
-        <input class="lwb-ve-input" placeholder="短语 或 /regex(例：/她(很)?开心/i)" value="${phrase}"/>
-        <input class="lwb-ve-input" placeholder="数值(整数，可负)" value="${val}"/>
-        <button type="button" class="lwb-ve-btn ghost lwb-ve-del">删除</button>
-      `;
-      row.querySelector('.lwb-ve-del').addEventListener('click', ()=>row.remove());
-      list.appendChild(row);
-    };
-    addBtn.addEventListener('click', () => addRow());
-    try {
-      const store = getBumpAliasStore();
-      const addFromBucket = (scope, bucket) => {
-        let n = 0;
-        for (const [phrase, val] of Object.entries(bucket || {})) {
-          addRow(scope, phrase, String(val));
-          n++;
-        }
-        return n;
+    function openActionBuilder(block){
+      const html=`<div class="lwb-ve-section"><div class="lwb-ve-label">添加动作</div><div id="lwb-action-list"></div><button type="button" class="lwb-ve-btn" id="lwb-add-action">+动作</button></div>`;
+      const ui=U.mini(html,'常用st控制'); const list=ui.body.querySelector('#lwb-action-list'); const addBtn=ui.body.querySelector('#lwb-add-action');
+      const TYPES=[
+        { value:'var.set',label:'变量: set',template:`<input class="lwb-ve-input" placeholder="变量名 key"/><input class="lwb-ve-input" placeholder="值 value"/>` },
+        { value:'var.bump',label:'变量: bump(+/-)',template:`<input class="lwb-ve-input" placeholder="变量名 key"/><input class="lwb-ve-input" placeholder="增量(整数，可负) delta"/>` },
+        { value:'var.del',label:'变量: del',template:`<input class="lwb-ve-input" placeholder="变量名 key"/>` },
+        { value:'wi.enableUID',label:'世界书: 启用条目(UID)',template:`<input class="lwb-ve-input" placeholder="世界书文件名 file（必填）"/><input class="lwb-ve-input" placeholder="条目UID（必填）"/>` },
+        { value:'wi.disableUID',label:'世界书: 禁用条目(UID)',template:`<input class="lwb-ve-input" placeholder="世界书文件名 file（必填）"/><input class="lwb-ve-input" placeholder="条目UID（必填）"/>` },
+        { value:'wi.setContentUID',label:'世界书: 设置内容(UID)',template:`<input class="lwb-ve-input" placeholder="世界书文件名 file（必填）"/><input class="lwb-ve-input" placeholder="条目UID（必填）"/><textarea class="lwb-ve-text" rows="3" placeholder="内容 content（可多行）"></textarea>` },
+        { value:'wi.createContent',label:'世界书: 新建条目(仅内容)',template:`<input class="lwb-ve-input" placeholder="世界书文件名 file（必填）"/><input class="lwb-ve-input" placeholder="条目 key（建议填写）"/><textarea class="lwb-ve-text" rows="4" placeholder="新条目内容 content（可留空）"></textarea>` },
+        { value:'qr.run',label:'快速回复（/run）',template:`<input class="lwb-ve-input" placeholder="预设名（可空） preset"/><input class="lwb-ve-input" placeholder="标签（label，必填）"/>` },
+        { value:'custom.st',label:'自定义ST命令',template:`<textarea class="lwb-ve-text" rows="4" placeholder="每行一条斜杠命令"></textarea>` },
+      ];
+      const addRow=(presetType)=>{
+        const row=U.el('div','lwb-ve-row'); row.style.alignItems='flex-start';
+        row.innerHTML=`<select class="lwb-ve-input lwb-ve-mini lwb-act-type"></select><div class="lwb-ve-fields" style="flex:1; display:grid; grid-template-columns: 1fr 1fr; gap:6px;"></div><button type="button" class="lwb-ve-btn ghost lwb-ve-del">删除</button>`;
+        const typeSel=row.querySelector('.lwb-act-type'); const fields=row.querySelector('.lwb-ve-fields'); row.querySelector('.lwb-ve-del').addEventListener('click',()=>row.remove());
+        typeSel.innerHTML=TYPES.map(a=>`<option value="${a.value}">${a.label}</option>`).join('');
+        const renderFields=()=>{ const t=typeSel.value; const def=TYPES.find(a=>a.value===t); fields.innerHTML=def?def.template:''; };
+        typeSel.addEventListener('change',renderFields); if(presetType) typeSel.value=presetType; renderFields(); list.appendChild(row);
       };
-      let prefilled = 0;
-      if (store._global) prefilled += addFromBucket('', store._global);
-      for (const [scope, bucket] of Object.entries(store || {})) {
-        if (scope === '_global') continue;
-        prefilled += addFromBucket(scope, bucket);
-      }
-      if (prefilled === 0) addRow();
-    } catch {
-      addRow();
-    }
-    ui.btnOk.addEventListener('click', async () => {
-      try {
-        const rows = Array.from(list.querySelectorAll('.lwb-ve-row'));
-        const items = rows.map(r => {
-          const ins = Array.from(r.querySelectorAll('.lwb-ve-input')).map(i => i.value);
-          return { scope: (ins[0] || '').trim(), phrase: (ins[1] || '').trim(), val: Number(ins[2] || 0) };
-        }).filter(x => x.phrase);
-        const next = {};
-        for (const it of items) {
-          const bucket = it.scope ? (next[it.scope] ||= {}) : (next._global ||= {});
-          bucket[it.phrase] = Number.isFinite(it.val) ? it.val : 0;
+      addBtn.addEventListener('click',()=>addRow()); addRow();
+      ui.btnOk.addEventListener('click',()=>{ const rows=U.qa(list,'.lwb-ve-row'); const actions=[];
+        for(const r of rows){ const type=r.querySelector('.lwb-act-type')?.value; const inputs=U.qa(r,'.lwb-ve-fields .lwb-ve-input, .lwb-ve-fields .lwb-ve-text').map(i=>i.value);
+          if(type==='var.set'&&inputs[0]) actions.push({type,key:inputs[0],value:inputs[1]||''});
+          if(type==='var.bump'&&inputs[0]) actions.push({type,key:inputs[0],delta:inputs[1]||'0'});
+          if(type==='var.del'&&inputs[0]) actions.push({type,key:inputs[0]});
+          if((type==='wi.enableUID'||type==='wi.disableUID')&&inputs[0]&&inputs[1]) actions.push({type,file:inputs[0],uid:inputs[1]});
+          if(type==='wi.setContentUID'&&inputs[0]&&inputs[1]) actions.push({type,file:inputs[0],uid:inputs[1],content:inputs[2]||''});
+          if(type==='wi.createContent'&&inputs[0]) actions.push({type,file:inputs[0],key:inputs[1]||'',content:inputs[2]||''});
+          if(type==='qr.run'&&inputs[1]) actions.push({type,preset:inputs[0]||'',label:inputs[1]});
+          if(type==='custom.st'&&inputs[0]){ const cmds=inputs[0].split('\n').map(s=>s.trim()).filter(Boolean).map(c=>c.startsWith('/')?c:'/'+c).join(' | '); if(cmds) actions.push({type,script:cmds}); }
         }
-        await setBumpAliasStore(next);
-        window?.toastr?.success?.('Bump 映射已保存到角色卡');
-        ui.wrap.remove();
-      } catch (e) {}
-    });
+        const jsCode=buildSTscriptFromActions(actions); const jsBox=block?.querySelector?.('.lwb-ve-js'); if(jsCode && jsBox) jsBox.value=jsCode; ui.wrap.remove();
+      });
+    }
+
+    function openBumpAliasBuilder(block){
+      const html=`<div class="lwb-ve-section"><div class="lwb-ve-label">bump数值映射（每行一条：变量名(可空) | 短语或 /regex/flags | 数值）</div><div id="lwb-bump-list"></div><button type="button" class="lwb-ve-btn" id="lwb-add-bump">+映射</button></div>`;
+      const ui=U.mini(html,'bump数值映射设置'); const list=ui.body.querySelector('#lwb-bump-list'); const addBtn=ui.body.querySelector('#lwb-add-bump');
+      const addRow=(scope='',phrase='',val='1')=>{
+        const row=U.el('div','lwb-ve-row',`<input class="lwb-ve-input" placeholder="变量名(可空=全局)" value="${scope}"/><input class="lwb-ve-input" placeholder="短语 或 /regex(例：/她(很)?开心/i)" value="${phrase}"/><input class="lwb-ve-input" placeholder="数值(整数，可负)" value="${val}"/><button type="button" class="lwb-ve-btn ghost lwb-ve-del">删除</button>`);
+        row.querySelector('.lwb-ve-del').addEventListener('click',()=>row.remove()); list.appendChild(row);
+      };
+      addBtn.addEventListener('click',()=>addRow());
+      try{
+        const store=typeof window.getBumpAliasStore==='function' ? (window.getBumpAliasStore()||{}) : {};
+        const addFromBucket=(scope,bucket)=>{ let n=0; for(const [phrase,val] of Object.entries(bucket||{})){ addRow(scope,phrase,String(val)); n++; } return n; };
+        let prefilled=0; if(store._global) prefilled+=addFromBucket('',store._global);
+        for(const [scope,bucket] of Object.entries(store||{})){ if(scope==='_global') continue; prefilled+=addFromBucket(scope,bucket); }
+        if(prefilled===0) addRow();
+      }catch{ addRow(); }
+      ui.btnOk.addEventListener('click',async ()=>{
+        try{
+          const rows=U.qa(list,'.lwb-ve-row'); const items=rows.map(r=>{ const ins=U.qa(r,'.lwb-ve-input').map(i=>i.value); return { scope:(ins[0]||'').trim(), phrase:(ins[1]||'').trim(), val:Number(ins[2]||0) }; }).filter(x=>x.phrase);
+          const next={}; for(const it of items){ const bucket= it.scope ? (next[it.scope] ||= {}) : (next._global ||= {}); bucket[it.phrase] = Number.isFinite(it.val) ? it.val : 0; }
+          if(typeof window.setBumpAliasStore==='function'){ await window.setBumpAliasStore(next); }
+          U.toast.ok('Bump 映射已保存到角色卡'); ui.wrap.remove();
+        }catch{}
+      });
+    }
+
+    function tryInjectButtons(root){
+      const scope=root.closest?.('#WorldInfo') || document.getElementById('WorldInfo') || root;
+      scope.querySelectorAll?.('.world_entry .alignitemscenter.flex-container .editor_maximize')?.forEach((maxBtn)=>{
+        const container=maxBtn.parentElement; if(!container || container.querySelector('.lwb-var-editor-button')) return;
+        const entry=container.closest('.world_entry'); const uid=entry?.getAttribute('data-uid')||entry?.dataset?.uid||(window?.jQuery?window.jQuery(entry).data('uid'):undefined);
+        const btn=U.el('div','right_menu_button interactable lwb-var-editor-button'); btn.title='条件规则编辑器'; btn.innerHTML='<i class="fa-solid fa-pen-ruler"></i>';
+        btn.addEventListener('click',()=>LWBVE.openVarEditor(entry||undefined,uid)); container.insertBefore(btn,maxBtn.nextSibling);
+      });
+    }
+    function observeWIEntriesForEditorButton(){
+      try{ LWBVE.obs?.disconnect(); LWBVE.obs=null; }catch{}
+      const root=document.getElementById('WorldInfo')||document.body;
+      const cb=(()=>{ let t=null; return ()=>{ clearTimeout(t); t=setTimeout(()=>{ tryInjectButtons(root); },100); }; })();
+      const obs=new MutationObserver(()=>cb()); try{ obs.observe(root,{childList:true,subtree:true}); }catch{} LWBVE.obs=obs;
+    }
+    function installVarEventEditorUI(){
+      if(LWBVE.installed) return; LWBVE.installed=true;
+      try{ injectStyles(); }catch{}
+      try{ observeWIEntriesForEditorButton(); }catch{}
+      try{ setTimeout(()=>tryInjectButtons(document.body),600); }catch{}
+      if (typeof window.parseVareventEvents !== 'function') window.parseVareventEvents = parseVareventEvents;
+    }
+
+    LWBVE.install=installVarEventEditorUI;
+    LWBVE.openVarEditor=openVarEditor;
+    LWBVE.openActionBuilder=openActionBuilder;
+    LWBVE.openBumpAliasBuilder=openBumpAliasBuilder;
+    LWBVE.parseVareventEvents=parseVareventEvents;
+    window.LWBVE=LWBVE;
+    window.installVarEventEditorUI=installVarEventEditorUI;
+    window.openVarEditor=openVarEditor;
+    window.openActionBuilder=openActionBuilder;
+    window.openBumpAliasBuilder=openBumpAliasBuilder;
+    if (typeof window.parseVareventEvents !== 'function') window.parseVareventEvents = parseVareventEvents;
+  })();
+
+/* ============= 提取公共工具 ============= */
+function _getMsgKey(msg){ return (typeof msg?.content==='string') ? 'content' : (typeof msg?.mes==='string' ? 'mes' : null); }
+function _safeJSONStringify(v){ try{ return JSON.stringify(v); }catch{ return ''; } }
+function _maybeParseRootObject(rootRaw){
+  if (typeof rootRaw === 'string') {
+    try{
+      const s = rootRaw.trim();
+      return (s && (s[0]==='{' || s[0]==='[')) ? JSON.parse(s) : null;
+    }catch{ return null; }
   }
+  return (rootRaw && typeof rootRaw==='object') ? rootRaw : null;
+}
+function _valToOutString(v){
+  if (v == null) return '';
+  if (typeof v === 'object') return _safeJSONStringify(v) || '';
+  return String(v);
+}
+function _parseValueForSet(value){
+  let vParsed = value;
+  try{
+    const t = String(value ?? '').trim();
+    if (t === 'true' || t === 'false' || t === 'null' || t === '[]' || t === '{}' || /^[\-\d\[\{\"']/.test(t)) {
+      vParsed = JSON.parse(t.replace(/'/g,'"'));
+    }
+  }catch{ vParsed = value; }
+  return vParsed;
+}
+function _extractPathFromArgs(namedArgs, unnamedArgs){
+  try{
+    if (namedArgs && typeof namedArgs.key === 'string' && namedArgs.key.trim()) {
+      return String(namedArgs.key).trim();
+    }
+    const arr = Array.isArray(unnamedArgs) ? unnamedArgs : [unnamedArgs];
+    const first = String(arr[0] ?? '').trim();
+    const m = /^key\s*=\s*(.+)$/i.exec(first);
+    return m ? m[1].trim() : first;
+  }catch{ return ''; }
+}
+function _extractPathAndRestForSet(namedArgs, unnamedArgs){
+  const arr = Array.isArray(unnamedArgs) ? unnamedArgs.filter(v=>v!=null).map(v=>String(v)) : [String(unnamedArgs ?? '')];
+  let path = '';
+  let rest = '';
+  if (namedArgs && typeof namedArgs.key === 'string' && namedArgs.key.trim()) {
+    path = namedArgs.key.trim();
+    rest = arr.slice(0).join(' ').trim();
+  } else {
+    const first = (arr[0] || '').trim();
+    const m = /^key\s*=\s*(.+)$/i.exec(first);
+    if (m) {
+      path = m[1].trim();
+      rest = arr.slice(1).join(' ').trim();
+    } else {
+      const raw = arr.join(' ').trim();
+      const sp = lwbSplitPathAndValue(raw);
+      path = sp.path; rest = sp.value;
+    }
+  }
+  return { path, rest };
+}
 
 /* ============= 第四区：xbgetvar 宏与命令 ============= */
+function lwbSplitPathWithBrackets(path){
+  const s = String(path || '');
+  const segs = [];
+  let i = 0, buf = '';
+  const flushBuf = ()=>{ if(buf.length){ const pushed = /^\d+$/.test(buf) ? Number(buf) : buf; segs.push(pushed); buf=''; } };
+  while(i < s.length){
+    const ch = s[i];
+    if (ch === '.') { flushBuf(); i++; continue; }
+    if (ch === '[') {
+      i++;
+      while(i < s.length && /\s/.test(s[i])) i++;
+      let val;
+      if (s[i] === '"' || s[i] === "'") {
+        const quote = s[i++]; let str = '', esc = false;
+        while(i < s.length){
+          const c = s[i++];
+          if (esc) { str += c; esc = false; continue; }
+          if (c === '\\') { esc = true; continue; }
+          if (c === quote) break;
+          str += c;
+        }
+        val = str;
+        while(i < s.length && /\s/.test(s[i])) i++;
+        if (s[i] === ']') i++;
+      } else {
+        let raw = '';
+        while(i < s.length && s[i] !== ']') raw += s[i++];
+        if (s[i] === ']') i++;
+        const trimmed = String(raw).trim();
+        val = (/^-?\d+$/.test(trimmed)) ? Number(trimmed) : trimmed;
+      }
+      flushBuf();
+      segs.push(val);
+      continue;
+    }
+    buf += ch; i++;
+  }
+  flushBuf();
+  return segs;
+}
+
+function lwbSplitPathAndValue(raw){
+  const s = String(raw || '');
+  let i = 0, depth = 0, inQ = false, qch = '';
+  for (; i < s.length; i++) {
+    const ch = s[i];
+    if (inQ) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === qch) { inQ = false; qch = ''; }
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inQ = true; qch = ch; continue; }
+    if (ch === '[') { depth++; continue; }
+    if (ch === ']') { depth = Math.max(0, depth - 1); continue; }
+    if (depth === 0 && /\s/.test(ch)) {
+      const path = s.slice(0, i).trim();
+      const val = s.slice(i + 1).trim();
+      return { path, value: val };
+    }
+  }
+  return { path: s.trim(), value: '' };
+}
+
 function lwbResolveVarPath(path){
   try{
-    const segs = splitPathSegments(path);
+    const segs = lwbSplitPathWithBrackets(path);
     if(!segs.length) return '';
     const rootName = String(segs[0]);
     const rootRaw = getLocalVariable(rootName);
-    if(segs.length===1){
-      if(rootRaw==null) return '';
-      if(typeof rootRaw==='object'){
-        try{ return JSON.stringify(rootRaw); }catch{ return ''; }
-      }
-      return String(rootRaw);
-    }
-    let obj;
-    if (typeof rootRaw === 'string') {
-      try {
-        const s = rootRaw.trim();
-        obj = (s && (s[0] === '{' || s[0] === '[')) ? JSON.parse(s) : null;
-      } catch { obj = null; }
-    } else if (rootRaw && typeof rootRaw === 'object') {
-      obj = rootRaw;
-    } else {
-      obj = null;
-    }
+
+    if (segs.length===1) return _valToOutString(rootRaw);
+
+    const obj = _maybeParseRootObject(rootRaw);
     if (!obj) return '';
+
     let cur = obj;
     for (let i = 1; i < segs.length; i++) {
       const k = segs[i];
       cur = cur?.[k];
       if (cur === undefined) return '';
     }
-    if (cur == null) return '';
-    if (typeof cur === 'object') {
-      try { return JSON.stringify(cur); } catch { return ''; }
-    }
-    return String(cur);
+    return _valToOutString(cur);
   }catch{ return ''; }
 }
-function replaceXbGetVarInString(s){ s=String(s??''); if(!s || s.indexOf('{{xbgetvar::')===-1) return s; return s.replace(TAG_RE.xbgetvar,(_,p)=>lwbResolveVarPath(p)); }
+
+function replaceXbGetVarInString(s){
+  s = String(s ?? '');
+  if(!s || s.indexOf('{{xbgetvar::')===-1) return s;
+  return s.replace(TAG_RE.xbgetvar,(_,p)=>lwbResolveVarPath(p));
+}
 function replaceXbGetVarInChat(chat){
   if(!Array.isArray(chat)) return;
   for(const msg of chat){
     try{
-      const key=(typeof msg?.content==='string')?'content':(typeof msg?.mes==='string'?'mes':null);
-      if(!key) continue;
+      const key=_getMsgKey(msg); if(!key) continue;
       const old=String(msg[key]??''); if(old.indexOf('{{xbgetvar::')===-1) continue;
       msg[key]=replaceXbGetVarInString(old);
     }catch{}
@@ -2045,11 +2036,12 @@ function replaceXbGetVarInChat(chat){
 function applyXbGetVarForMessage(messageId,writeback=true){
   try{
     const ctx=getContext(); const msg=ctx?.chat?.[messageId]; if(!msg) return;
-    const key=(typeof msg?.content==='string')?'content':(typeof msg?.mes==='string'?'mes':null); if(!key) return;
+    const key=_getMsgKey(msg); if(!key) return;
     const old=String(msg[key]??''); if(old.indexOf('{{xbgetvar::')===-1) return;
     const out=replaceXbGetVarInString(old); if(writeback && out!==old) msg[key]=out;
   }catch{}
 }
+
 function registerXbGetVarSlashCommand(){
   try{
     const ctx = getContext();
@@ -2058,7 +2050,7 @@ function registerXbGetVarSlashCommand(){
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
       name: 'xbgetvar',
       returns: 'string',
-      helpString: '通过点/中括号路径获取嵌套的本地变量值。支持 ["0"] 强制字符串键、[0] 数组索引。示例: /xbgetvar 人物状态.姓名["0"].时光啊 | /echo {{pipe}}',
+      helpString: '通过点/中括号路径获取嵌套的本地变量值。支持 ["0"] 强制字符串键、[0] 数组索引，也支持 key=路径 的写法。示例: /xbgetvar 人物状态.姓名["0"].时光啊 或 /xbgetvar key=人物状态.姓名["0"].时光啊 | /echo {{pipe}}',
       unnamedArgumentList: [
         SlashCommandArgument.fromProps({
           description: '变量路径，例如 A.B.C 或 A[0].name 或 A["0"].name',
@@ -2069,15 +2061,81 @@ function registerXbGetVarSlashCommand(){
       ],
       callback: (namedArgs, unnamedArgs) => {
         try {
-          const path = Array.isArray(unnamedArgs) ? unnamedArgs[0] : unnamedArgs;
-          return lwbResolveVarPath(String(path ?? ''));
-        } catch {
-          return '';
-        }
+          const path = _extractPathFromArgs(namedArgs, unnamedArgs);
+          return lwbResolveVarPath(String(path || ''));
+        } catch { return ''; }
       },
     }));
-  } catch (e) {}
+  } catch {}
 }
+
+function lwbAssignVarPath(path, value){
+  try{
+    const segs = lwbSplitPathWithBrackets(path);
+    if(!segs.length) return '';
+    const rootName = String(segs[0]);
+    const vParsed = _parseValueForSet(value);
+
+    if (segs.length === 1) {
+      if (vParsed && typeof vParsed === 'object') {
+        setLocalVariable(rootName, _safeJSONStringify(vParsed));
+      } else {
+        setLocalVariable(rootName, String(vParsed ?? ''));
+      }
+      return '';
+    }
+
+    const rootRaw = getLocalVariable(rootName);
+    let obj;
+    const parsed = _maybeParseRootObject(rootRaw);
+    if (parsed) {
+      obj = Array.isArray(parsed) ? parsed.slice() : (typeof structuredClone==='function' ? structuredClone(parsed) : JSON.parse(_safeJSONStringify(parsed)));
+    } else {
+      obj = {};
+    }
+
+    const { parent, lastKey } = ensureDeepContainer(obj, segs.slice(1));
+    parent[lastKey] = vParsed;
+
+    setLocalVariable(rootName, _safeJSONStringify(obj));
+    return '';
+  }catch{ return ''; }
+}
+
+function registerXbSetVarSlashCommand(){
+  try{
+    const ctx = getContext();
+    const { SlashCommandParser, SlashCommand, SlashCommandArgument, ARGUMENT_TYPE } = ctx || {};
+    if (!SlashCommandParser?.addCommandObject || !SlashCommand?.fromProps || !SlashCommandArgument?.fromProps) return;
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+      name: 'xbsetvar',
+      returns: 'string',
+      helpString: '设置嵌套本地变量：/xbsetvar <path> <value> 或 /xbsetvar key=<path> <value>。示例：/xbsetvar <user>.黄粱 10；支持 ["key"],[index] 路径。',
+      unnamedArgumentList: [
+        SlashCommandArgument.fromProps({
+          description: '变量路径，例如 <user>.黄粱 或 A[0].name 或 A["0"].name',
+          typeList: [ARGUMENT_TYPE.STRING],
+          isRequired: true,
+          acceptsMultiple: false,
+        }),
+        SlashCommandArgument.fromProps({
+          description: '要设置的值（可为数字、布尔、null、JSON、或字符串）',
+          typeList: [ARGUMENT_TYPE.STRING],
+          isRequired: true,
+          acceptsMultiple: false,
+        }),
+      ],
+      callback: (namedArgs, unnamedArgs) => {
+        try{
+          const { path, rest } = _extractPathAndRestForSet(namedArgs, unnamedArgs);
+          lwbAssignVarPath(path, rest);
+          return '';
+        }catch{ return ''; }
+      },
+    }));
+  } catch {}
+}
+
 
 /* ============= 第五区：快照/回滚器 ============= */
 const SNAP_STORE_KEY = 'LWB_SNAP';
@@ -2679,6 +2737,7 @@ export function initVariablesCore(){
   if(initialized) return; initialized=true;
   bindEvents();
   try{ registerXbGetVarSlashCommand(); }catch(e){}
+  try{ registerXbSetVarSlashCommand(); }catch(e){}
   try{ installWIHiddenTagStripper(); }catch(e){}
   try{ registerWIEventSystem(); }catch(e){}
   try{ installVarEventEditorUI(); }catch(e){}
@@ -2688,8 +2747,8 @@ export function initVariablesCore(){
 export function cleanupVariablesCore(){
   try{ offAll(); }catch{}
   try{ if(LWB_EDITOR_OBSERVER){ LWB_EDITOR_OBSERVER.disconnect(); LWB_EDITOR_OBSERVER=null; } }catch{}
-  try{ document.querySelectorAll('.lwb-ve-overlay').forEach(el=>el.remove()); }catch{}
-  try{ document.querySelectorAll('.lwb-var-editor-button').forEach(el=>el.remove()); }catch{}
+  try{ qa(document, '.lwb-ve-overlay').forEach(el=>el.remove()); }catch{}
+  try{ qa(document, '.lwb-var-editor-button').forEach(el=>el.remove()); }catch{}
   try{ document.getElementById('lwb-varevent-editor-styles')?.remove(); }catch{}
   try{
     const ctx=getContext(); ctx?.setExtensionPrompt?.(LWB_VAREVENT_PROMPT_KEY,'',0,0,false);
