@@ -307,7 +307,7 @@ class VariablesPanel {
       item:[
         {act:'edit',icon:'fa-edit',title:'编辑'},
         {act:'add-child',icon:'fa-plus-circle',title:'添加子变量'},
-        {act:'copy',icon:'fa-code',title:'复制（单击: 宏，长按: 斜杠命令）'},
+        {act:'copy',icon:'fa-eye-dropper',title:'复制（长按: 宏，单击: 变量路径）'},
         {act:'delete',icon:'fa-trash',title:'删除'},
       ]
     };
@@ -354,29 +354,29 @@ class VariablesPanel {
   }
 
   handleCopy(e,longPress){
-    const item=$(e.target).closest('.vm-item'), path=this.getItemPath(item), t=this.getVariableType(item), level=parseInt(item.attr('data-level'))||0;
+    const item=$(e.target).closest('.vm-item');
+    const path=this.getItemPath(item);
+    const t=this.getVariableType(item);
+    const level=parseInt(item.attr('data-level'))||0;
+
     let cmd='';
+
     if (longPress) {
-      if (t==='character') {
-        if (level===0) cmd=`/getvar ${path[0]}`;
-        else if (level===1) cmd=`/getvar index=${path.slice(1).join('.')} ${path[0]}`;
-        else cmd=`/xbgetvar ${path.join('.')}`;
-      } else {
-        const c='getglobalvar';
-        if (level===0) cmd=`/${c} ${path[0]}`;
-        else if (level===1) cmd=`/${c} index=${path.slice(1).join('.')} ${path[0]}`;
-        else { toastr.warning('全局变量三级及以上子路径暂不支持斜杠复制'); return; }
-      }
-    } else {
       if (t==='character') {
         if (level===0) cmd=`{{getvar::${path[0]}}}`;
         else cmd=`{{xbgetvar::${path.join('.')}}}`;
       } else {
         if (level===0) cmd=`{{getglobalvar::${path[0]}}}`;
-        else { cmd=`{{getglobalvar::${path[0]}}}`; toastr.info('全局变量宏暂不支持子路径，已复制顶级变量'); }
+        else {
+          cmd=`{{getglobalvar::${path[0]}}}`;
+          toastr.info('全局变量宏暂不支持子路径，已复制顶级变量');
+        }
       }
+    } else {
+      cmd = path.join('.');
     }
-    (async()=> (await this.writeClipboard(cmd)) ? toastr.success(`已复制命令: ${cmd}`) : toastr.error('复制失败'))();
+
+    (async()=> (await this.writeClipboard(cmd)) ? toastr.success(`已复制: ${cmd}`) : toastr.error('复制失败'))();
   }
 
   editAction(item, action, type, path){
