@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types, getRequestHeaders } from "../../../../script.js";
 import { statsTracker } from "./relationship-metrics.js";
@@ -304,29 +303,20 @@ function buildResourceHints(html){
 
 function iframeClientScript(){return `
 (function(){
-function measureVisibleHeight(){
+  function measureVisibleHeight(){
     try{
-        var body = document.body;
-        var html = document.documentElement;
-        
-        body.offsetHeight;
-        
-        var bodyScrollHeight = body.scrollHeight || 0;
-        var htmlScrollHeight = html.scrollHeight || 0;
-        
-        var achievementScroll = document.querySelector('.achievement-scroll');
-        if(achievementScroll){
-            var rect = achievementScroll.getBoundingClientRect();
-            var computedHeight = rect.height + 40;
-            return Math.max(0, Math.round(computedHeight));
-        }
-        
-        var h = Math.max(bodyScrollHeight, htmlScrollHeight, body.offsetHeight || 0);
-        return Math.max(0, Math.round(h));
+      var root = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+      var h1 = root.scrollHeight || 0;
+      var h2 = root.offsetHeight || 0;
+      var h3 = 0;
+      try{ h3 = root.getBoundingClientRect ? Math.round(root.getBoundingClientRect().height) : 0 }catch(e){}
+      var h = Math.max(h1, h2, h3);
+      return Math.max(0, Math.round(h));
     }catch(e){
-        return 200;
+      var b=document.body;
+      return (b && (b.scrollHeight||b.offsetHeight)) || 0;
     }
-}
+  }
 
   function post(m){ try{ parent.postMessage(m,'*') }catch(e){} }
 
@@ -502,6 +492,7 @@ function handleIframeMessage(event) {
     }
     if (rec && rec.iframe && typeof data.height === 'number') {
         const next = Math.max(0, Number(data.height) || 0);
+        if (next < 1) return;
         const prev = lastHeights.get(rec.iframe) || 0;
         if (!data.force && Math.abs(next - prev) < 1) return;
         if (data.force) {
@@ -581,7 +572,7 @@ function renderHtmlInIframe(htmlContent, container, preElement) {
         const iframe = document.createElement('iframe');
         iframe.id = generateUniqueId();
         iframe.className = 'xiaobaix-iframe';
-        iframe.style.cssText = 'width:100%;border:none;background:transparent;overflow:hidden;height:0;margin:0;padding:0;display:block;contain:layout paint style;will-change:height';
+        iframe.style.cssText = 'width:100%;border:none;background:transparent;overflow:hidden;height:100vh;margin:0;padding:0;display:block;contain:layout paint style;will-change:height';
         iframe.setAttribute('frameborder', '0');
         iframe.setAttribute('scrolling', 'no');
         iframe.loading = 'eager';
