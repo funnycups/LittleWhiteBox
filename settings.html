@@ -30,7 +30,7 @@
                             <small>公告</small>
                         </button>
                     </div>
-                    <div class="section-divider">内容隔离
+                    <div class="section-divider">渲染模式
                         <hr class="sysHR" />
                     </div>
                     <div class="flex-container">
@@ -70,8 +70,11 @@
                     <div class="section-divider">功能说明
                         <hr class="sysHR" />
                     </div>
-                    <div class="flex-container">
-                        <p>小白X说明文档⮕<a href="https://docs.littlewhitebox.qzz.io/" class="download-link" target="_blank">说明文档</a></p>
+                    <div class="flex-container alignItemsCenter" style="gap: 8px; flex-wrap: wrap;">
+                        <div><a href="https://docs.littlewhitebox.qzz.io/" class="download-link" target="_blank">点击跳转至功能说明文档</a></div>
+                        <button id="xiaobaix_reset_btn" class="menu_button menu_button_icon" type="button" title="把小白X的功能按钮重置回默认功能设定">
+                            <small>重置回默认开关</small>
+                        </button>
                     </div>
                 </div>
                 <div class="wallhaven settings-section" style="display: none;">
@@ -514,6 +517,93 @@
         }
     })();
 </script>
+<script>
+    (function () {
+        'use strict';
+        const EXT_ID = 'LittleWhiteBox';
+        const KEY_TO_CHECKBOX = {
+            recorded: 'xiaobaix_recorded_enabled',
+            immersive: 'xiaobaix_immersive_enabled',
+            preview: 'xiaobaix_preview_enabled',
+            scriptAssistant: 'xiaobaix_script_assistant',
+            tasks: 'scheduled_tasks_enabled',
+            templateEditor: 'xiaobaix_template_enabled',
+            wallhaven: 'wallhaven_enabled',
+            characterUpdater: 'character_updater_enabled',
+            dynamicPrompt: 'xiaobaix_dynamic_prompt_enabled',
+            variablesPanel: 'xiaobaix_variables_panel_enabled',
+            variablesCore: 'xiaobaix_variables_core_enabled',
+            sandboxMode: 'xiaobaix_sandbox',
+            useBlob: 'xiaobaix_use_blob',
+            wrapperIframe: 'Wrapperiframe',
+        };
+        const DEFAULTS_ON = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater'];
+        const DEFAULTS_OFF = ['recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel'];
+        const MODULE_KEYS = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel'];
+        function setModuleEnabled(key, enabled) {
+            try {
+                if (!extension_settings[EXT_ID][key]) extension_settings[EXT_ID][key] = {};
+                extension_settings[EXT_ID][key].enabled = !!enabled;
+            } catch (e) {}
+            const id = KEY_TO_CHECKBOX[key];
+            const el = id ? document.getElementById(id) : null;
+            if (el) {
+                el.checked = !!enabled;
+                try { $(el).trigger('change'); } catch (e) {}
+            }
+        }
+        function captureStates() {
+            const out = { modules:{}, sandboxMode:false, useBlob:false, wrapperIframe:false };
+            try { MODULE_KEYS.forEach(k => { out.modules[k] = !!(extension_settings[EXT_ID][k] && extension_settings[EXT_ID][k].enabled); }); } catch (e) {}
+            try { out.sandboxMode = !!extension_settings[EXT_ID].sandboxMode; } catch (e) {}
+            try { out.useBlob = !!extension_settings[EXT_ID].useBlob; } catch (e) {}
+            try { out.wrapperIframe = !!extension_settings[EXT_ID].wrapperIframe; } catch (e) {}
+            return out;
+        }
+        function applyStates(st) {
+            if (!st) return;
+            try { Object.keys(st.modules||{}).forEach(k => setModuleEnabled(k, !!st.modules[k])); } catch (e) {}
+            try {
+                extension_settings[EXT_ID].sandboxMode = !!st.sandboxMode;
+                const el = document.getElementById('xiaobaix_sandbox'); if (el) { el.checked = !!st.sandboxMode; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) {} }
+            } catch (e) {}
+            try {
+                extension_settings[EXT_ID].useBlob = !!st.useBlob;
+                const el = document.getElementById('xiaobaix_use_blob'); if (el) { el.checked = !!st.useBlob; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) {} }
+            } catch (e) {}
+            try {
+                extension_settings[EXT_ID].wrapperIframe = !!st.wrapperIframe;
+                const el = document.getElementById('Wrapperiframe'); if (el) { el.checked = !!st.wrapperIframe; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) {} }
+            } catch (e) {}
+            try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) {}
+        }
+        function applyResetDefaults() {
+            DEFAULTS_ON.forEach(k => setModuleEnabled(k, true));
+            DEFAULTS_OFF.forEach(k => setModuleEnabled(k, false));
+            // render modes default OFF
+            try {
+                extension_settings[EXT_ID].sandboxMode = false;
+                const sb = document.getElementById(KEY_TO_CHECKBOX.sandboxMode);
+                if (sb) { sb.checked = false; try { $(sb).trigger('change'); } catch (e) {} }
+            } catch (e) {}
+            try {
+                extension_settings[EXT_ID].useBlob = false;
+                const bl = document.getElementById(KEY_TO_CHECKBOX.useBlob);
+                if (bl) { bl.checked = false; try { $(bl).trigger('change'); } catch (e) {} }
+            } catch (e) {}
+            try {
+                extension_settings[EXT_ID].wrapperIframe = false;
+                const wp = document.getElementById(KEY_TO_CHECKBOX.wrapperIframe);
+                if (wp) { wp.checked = false; try { $(wp).trigger('change'); } catch (e) {} }
+            } catch (e) {}
+            try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) {}
+        }
+        // expose helpers for index.js
+        window.XB_captureAndStoreStates = function(){ try { extension_settings[EXT_ID].prevModuleStatesV2 = captureStates(); if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) {} };
+        window.XB_applyPrevStates = function(){ try { const st = extension_settings[EXT_ID].prevModuleStatesV2; if (st) applyStates(st); } catch (e) {} };
+        try{ $(document).off('click.xbreset','#xiaobaix_reset_btn').on('click.xbreset','#xiaobaix_reset_btn',function(e){ e.preventDefault(); e.stopPropagation(); applyResetDefaults(); }); }catch(e){}
+    })();
+    </script>
 <script>
 (function () {
   function go() {

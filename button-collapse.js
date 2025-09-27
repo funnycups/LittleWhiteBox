@@ -3,9 +3,7 @@ let stylesInjected = false;
 const SELECTORS = {
   chat: '#chat',
   messages: '.mes',
-  flex: '.flex-container.flex1.alignitemscenter',
-  baseline: '.flex-container.alignItemsBaseline',
-  timestamp: 'small.timestamp[title]',
+  mesButtons: '.mes_block .mes_buttons',
   buttons: '.memory-button, .dynamic-prompt-analysis-btn, .mes_history_preview',
   collapse: '.xiaobaix-collapse-btn',
 };
@@ -13,13 +11,16 @@ const SELECTORS = {
 const injectStyles = () => {
   if (stylesInjected) return;
   const css = `
-.xiaobaix-collapse-btn{
-  position:relative;display:inline-flex;width:32px;height:32px;align-items:center;justify-content:center;
-  border-radius:50%;background:var(--SmartThemeBlurTintColor);opacity:.95;cursor:pointer;z-index:1;
-  box-shadow:inset 0 0 15px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.2);
-  transition:opacity .15s ease,transform .15s ease;-webkit-tap-highlight-color:transparent;touch-action:manipulation;
+.mes_block .mes_buttons {
+   align-items: center;
 }
-.xiaobaix-collapse-btn.open{opacity:1;transform:scale(1.06);}
+
+.xiaobaix-collapse-btn{
+  position:relative;display:inline-flex;width:32px;height:32px;justify-content:center;align-items: center;
+  border-radius:50%;background:var(--SmartThemeBlurTintColor);cursor:pointer;
+  box-shadow:inset 0 0 15px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.2);
+  transition:opacity .15s ease,transform .15s ease;
+}
 .xiaobaix-xstack{position:relative;display:inline-flex;align-items:center;justify-content:center;pointer-events:none;}
 .xiaobaix-xstack span{
   position:absolute;font:italic 900 20px 'Arial Black',sans-serif;letter-spacing:-2px;transform:scaleX(.8);
@@ -29,7 +30,7 @@ const injectStyles = () => {
 .xiaobaix-xstack span:nth-child(2){color:rgba(255,255,255,.2);transform:scaleX(.8) translateX(-4px);text-shadow:none}
 .xiaobaix-xstack span:nth-child(3){color:rgba(255,255,255,.4);transform:scaleX(.8) translateX(-2px);text-shadow:none}
 .xiaobaix-sub-container{
-  display:none;position:absolute;left:38px;
+  display:none;position:absolute;right:38px;
   border-radius:8px;padding:4px;gap:8px;pointer-events:auto;
 }
 .xiaobaix-collapse-btn.open .xiaobaix-sub-container{
@@ -65,27 +66,17 @@ const createCollapseButton = () => {
   return btn;
 };
 
-const shouldPlaceAtEnd = (messageEl) => {
-  const baseline = messageEl?.querySelector(SELECTORS.baseline);
-  const ts = baseline?.querySelector(SELECTORS.timestamp);
-  return !!ts && getComputedStyle(ts).display === 'none';
-};
-
-const placeButton = (flex, btn, atEnd) => {
-  if (!flex || !btn) return;
-  if (atEnd) {
-    if (flex.lastElementChild !== btn) flex.append(btn);
-  } else {
-    if (flex.firstElementChild !== btn) flex.prepend(btn);
-  }
+const placeButton = (mesButtons, btn) => {
+  if (!mesButtons || !btn) return;
+  if (mesButtons.lastElementChild !== btn) mesButtons.append(btn);
 };
 
 const ensureCollapseForMessage = (messageEl) => {
-  const flex = messageEl?.querySelector(SELECTORS.flex);
-  if (!flex) return null;
-  let collapseBtn = flex.querySelector(SELECTORS.collapse);
+  const mesButtons = messageEl?.querySelector(SELECTORS.mesButtons);
+  if (!mesButtons) return null;
+  let collapseBtn = mesButtons.querySelector(SELECTORS.collapse);
   if (!collapseBtn) collapseBtn = createCollapseButton();
-  placeButton(flex, collapseBtn, shouldPlaceAtEnd(messageEl));
+  placeButton(mesButtons, collapseBtn);
   return collapseBtn;
 };
 
@@ -94,9 +85,9 @@ let io, mo;
 
 const processOneMessage = (message) => {
   if (!message || processed.has(message)) return;
-  const flex = message.querySelector(SELECTORS.flex);
-  if (!flex) { processed.add(message); return; }
-  const targetBtns = flex.querySelectorAll(SELECTORS.buttons);
+  const mesButtons = message.querySelector(SELECTORS.mesButtons);
+  if (!mesButtons) { processed.add(message); return; }
+  const targetBtns = mesButtons.querySelectorAll(SELECTORS.buttons);
   if (!targetBtns.length) { processed.add(message); return; }
   const collapseBtn = ensureCollapseForMessage(message);
   if (!collapseBtn) { processed.add(message); return; }
@@ -210,11 +201,11 @@ const cleanup = () => {
   const collapseBtns = document.querySelectorAll(SELECTORS.collapse);
   collapseBtns.forEach(btn => {
     const sub = btn.querySelector('.xiaobaix-sub-container');
-    const flex = btn.closest(SELECTORS.flex);
-    if (sub && flex) {
+    const mesButtons = btn.closest(SELECTORS.mesButtons) || btn.closest('.mes_buttons');
+    if (sub && mesButtons) {
       const frag = document.createDocumentFragment();
       while (sub.firstChild) frag.appendChild(sub.firstChild);
-      flex.appendChild(frag);
+      mesButtons.appendChild(frag);
     }
     btn.remove();
   });

@@ -57,6 +57,8 @@ const hashToBlobUrl = new Map();
 const blobLRU = [];
 const BLOB_CACHE_LIMIT = 32;
 
+// State helpers moved to settings.html (window.XB_*).
+
 window.isXiaobaixEnabled = isXiaobaixEnabled;
 window.testLittleWhiteBoxUpdate = async () => {
     updateCheckPerformed = false;
@@ -631,33 +633,6 @@ function toggleSettingsControls(enabled) {
     }
 }
 
-function setDefaultSettings() {
-    settings.sandboxMode = false;
-    settings.memoryEnabled = false;
-    settings.memoryInjectEnabled = false;
-    settings.memoryInjectDepth = 5;
-    const defaultModules = [
-        { module: 'templateEditor', control: 'xiaobaix_template_enabled', enabled: true },
-        { module: 'tasks', control: 'scheduled_tasks_enabled', enabled: true },
-        { module: 'recorded', control: 'xiaobaix_recorded_enabled', enabled: true },
-        { module: 'characterUpdater', control: 'character_updater_enabled', enabled: true },
-        { module: 'dynamicPrompt', control: 'xiaobaix_dynamic_prompt_enabled', enabled: true },
-        { module: 'variablesPanel', control: 'xiaobaix_variables_panel_enabled', enabled: false },
-        { module: 'variablesCore', control: 'xiaobaix_variables_core_enabled', enabled: true },
-        { module: 'preview', control: 'xiaobaix_preview_enabled', enabled: false },
-        { module: 'scriptAssistant', control: 'xiaobaix_script_assistant', enabled: false }
-    ];
-    defaultModules.forEach(({ module, control, enabled }) => {
-        if (!extension_settings[EXT_ID][module]) extension_settings[EXT_ID][module] = {};
-        extension_settings[EXT_ID][module].enabled = enabled;
-        $(`#${control}`).prop("checked", enabled);
-    });
-    $("#xiaobaix_sandbox").prop("checked", settings.sandboxMode);
-    $("#xiaobaix_memory_enabled").prop("checked", settings.memoryEnabled);
-    $("#xiaobaix_memory_inject").prop("checked", settings.memoryInjectEnabled);
-    $("#xiaobaix_memory_depth").val(settings.memoryInjectDepth);
-}
-
 function ensureHideCodeStyle(enable) {
     const id = 'xiaobaix-hide-code';
     const old = document.getElementById(id);
@@ -683,9 +658,9 @@ function toggleAllFeatures(enabled) {
     if (enabled) {
         ensureHideCodeStyle(true);
         setActiveClass(true);
-        setDefaultSettings();
-        statsTracker.init(EXT_ID, MODULE_NAME, settings, executeSlashCommand);
         toggleSettingsControls(true);
+        try { window.XB_applyPrevStates && window.XB_applyPrevStates(); } catch (e) {}
+        statsTracker.init(EXT_ID, MODULE_NAME, settings, executeSlashCommand);
         saveSettingsDebounced();
         processExistingMessages();
         setTimeout(() => processExistingMessages(), 100);
@@ -722,21 +697,14 @@ function toggleAllFeatures(enabled) {
         try{if(isXiaobaixEnabled&&!document.getElementById('xb-worldbook'))document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-worldbook',type:'module',src:`${extensionFolderPath}/worldbook-bridge.js`}))}catch(e){}
         document.dispatchEvent(new CustomEvent('xiaobaixEnabledChanged', { detail: { enabled: true } }));
     } else {
+        try { window.XB_captureAndStoreStates && window.XB_captureAndStoreStates(); } catch (e) {}
         cleanupAllResources();
         if (window.messagePreviewCleanup) try { window.messagePreviewCleanup(); } catch (e) {}
         if (window.dynamicPromptCleanup) try { window.dynamicPromptCleanup(); } catch (e) {}
         if (window.buttonCollapseCleanup) try { window.buttonCollapseCleanup(); } catch (e) {}
         try { cleanupVariablesPanel(); } catch (e) {}
-        Object.assign(settings, { sandboxMode: false, memoryEnabled: false, memoryInjectEnabled: false });
-        ['recorded', 'preview', 'scriptAssistant', 'tasks', 'immersive', 'templateEditor', 'wallhaven', 'characterUpdater', 'dynamicPrompt', 'variablesPanel', 'variablesCore'].forEach(module => {
-            if (!extension_settings[EXT_ID][module]) extension_settings[EXT_ID][module] = {};
-            extension_settings[EXT_ID][module].enabled = false;
-        });
-        ["xiaobaix_sandbox", "xiaobaix_memory_enabled", "xiaobaix_memory_inject",
-            "xiaobaix_recorded_enabled", "xiaobaix_preview_enabled", "xiaobaix_script_assistant",
-            "scheduled_tasks_enabled", "xiaobaix_template_enabled", "wallhaven_enabled",
-            "xiaobaix_immersive_enabled", "character_updater_enabled", "xiaobaix_dynamic_prompt_enabled",
-            "xiaobaix_use_blob", "xiaobaix_variables_core_enabled", "Wrapperiframe"].forEach(id => $(`#${id}`).prop("checked", false));
+        try { cleanupVariablesCore(); } catch (e) {}
+        try { clearBlobCaches(); } catch (e) {}
         toggleSettingsControls(false);
         document.getElementById('xiaobaix-hide-code')?.remove();
         setActiveClass(false);
@@ -750,6 +718,7 @@ function toggleAllFeatures(enabled) {
         moduleInstances.statsTracker?.removeMemoryPrompt?.();
         window.removeScriptDocs?.();
         try { window.cleanupWorldbookHostBridge && window.cleanupWorldbookHostBridge(); document.getElementById('xb-worldbook')?.remove(); } catch (e) {}
+        try { window.cleanupCallGenerateHostBridge && window.cleanupCallGenerateHostBridge(); document.getElementById('xb-callgen')?.remove(); } catch (e) {}
         document.dispatchEvent(new CustomEvent('xiaobaixEnabledChanged', { detail: { enabled: false } }));
     }
 }
@@ -941,6 +910,20 @@ async function setupSettings() {
             settings.wrapperIframe = $(this).prop("checked");
             saveSettingsDebounced();
             try{settings.wrapperIframe?(!document.getElementById('xb-callgen')&&document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-callgen',type:'module',src:`${extensionFolderPath}/call-generate-service.js`}))):(window.cleanupCallGenerateHostBridge&&window.cleanupCallGenerateHostBridge(),document.getElementById('xb-callgen')?.remove())}catch(e){}
+        });
+        // Reset to defaults: minimal, UI-driven (default ON/OFF + render modes OFF)
+        $(document).off('click.xbreset', '#xiaobaix_reset_btn').on('click.xbreset', '#xiaobaix_reset_btn', function(e){
+            e.preventDefault(); e.stopPropagation();
+            const MAP={recorded:'xiaobaix_recorded_enabled',immersive:'xiaobaix_immersive_enabled',preview:'xiaobaix_preview_enabled',scriptAssistant:'xiaobaix_script_assistant',tasks:'scheduled_tasks_enabled',templateEditor:'xiaobaix_template_enabled',wallhaven:'wallhaven_enabled',characterUpdater:'character_updater_enabled',dynamicPrompt:'xiaobaix_dynamic_prompt_enabled',variablesPanel:'xiaobaix_variables_panel_enabled',variablesCore:'xiaobaix_variables_core_enabled'};
+            const ON=['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater'];
+            const OFF=['recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel'];
+            function setChecked(id,val){ const el=document.getElementById(id); if(el){ el.checked=!!val; try{ $(el).trigger('change') }catch{}} }
+            ON.forEach(k=>setChecked(MAP[k],true));
+            OFF.forEach(k=>setChecked(MAP[k],false));
+            setChecked('xiaobaix_sandbox',false);
+            setChecked('xiaobaix_use_blob',false);
+            setChecked('Wrapperiframe',false);
+            try{ saveSettingsDebounced() }catch(e){}
         });
     } catch (err) {}
 }
