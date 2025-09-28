@@ -43,7 +43,7 @@ const splitPathSegments=(path)=> String(path||'').split('.').map(s=>s.trim()).fi
 function ensureDeepContainer(root,segs){ let cur=root; for(let i=0;i<segs.length-1;i++){ const key=segs[i]; const nextKey=segs[i+1]; const shouldBeArray= typeof nextKey==='number'; let val=cur?.[key]; if(val===undefined || val===null || typeof val!=='object'){ cur[key]= shouldBeArray ? [] : {}; } cur=cur[key]; } return { parent:cur, lastKey: segs[segs.length-1] }; }
 function setDeepValue(root, path, value){ const segs=splitPathSegments(path); if(segs.length===0) return false; const {parent,lastKey}=ensureDeepContainer(root,segs); const prev=parent[lastKey]; if(prev!==value){ parent[lastKey]=value; return true; } return false; }
 function pushDeepValue(root, path, values){ const segs=splitPathSegments(path); if(segs.length===0) return false; const {parent,lastKey}=ensureDeepContainer(root,segs); let arr=parent[lastKey]; let changed=false; if(!Array.isArray(arr)) arr = arr===undefined?[]:[arr]; const incoming=Array.isArray(values)?values:[values]; for(const v of incoming){ if(!arr.includes(v)){ arr.push(v); changed=true; } } if(changed){ parent[lastKey]=arr; } return changed; }
-function deleteDeepKey(root, path){ const segs=splitPathSegments(path); if(segs.length===0) return false; const {parent,lastKey}=ensureDeepContainer(root,segs); if(Object.prototype.hasOwnProperty.call(parent,lastKey)){ delete parent[lastKey]; return true; } return false; }
+function deleteDeepKey(root, path){ const segs=splitPathSegments(path); if(segs.length===0) return false; const {parent,lastKey}=ensureDeepContainer(root,segs); if(Object.prototype.hasOwnProperty.call(parent,lastKey)){ if(Array.isArray(parent) && typeof lastKey==='number' && lastKey>=0 && lastKey<parent.length){ parent.splice(lastKey,1); return true; } delete parent[lastKey]; return true; } return false; }
 const getRootAndPath=(name)=>{ const segs=String(name||'').split('.').map(s=>s.trim()).filter(Boolean); if(segs.length<=1) return {root:String(name||'').trim(), subPath:''}; return {root:segs[0], subPath: segs.slice(1).join('.')}; };
 const joinPath=(base, more)=> base ? (more ? base + '.' + more : base) : more;
 
@@ -83,6 +83,45 @@ function stripYamlInlineComment(s){
     }
   }
   return text;
+}
+
+const LWB_PLOT_APPLIED_KEY = 'LWB_PLOT_APPLIED_KEY';
+function getAppliedMap() {
+  const meta = getContext()?.chatMetadata || {};
+  const m = meta[LWB_PLOT_APPLIED_KEY];
+  if (m && typeof m === 'object') return m;
+  meta[LWB_PLOT_APPLIED_KEY] = {};
+  return meta[LWB_PLOT_APPLIED_KEY];
+}
+function setAppliedSignature(messageId, sig) {
+  const meta = getContext()?.chatMetadata || {};
+  const map = getAppliedMap();
+  if (sig) map[messageId] = sig; else delete map[messageId];
+  getContext()?.saveMetadataDebounced?.();
+}
+function clearAppliedFrom(messageIdInclusive) {
+  const map = getAppliedMap();
+  for (const k of Object.keys(map)) {
+    const id = Number(k);
+    if (!Number.isNaN(id) && id >= messageIdInclusive) delete map[k];
+  }
+  getContext()?.saveMetadataDebounced?.();
+}
+function clearAppliedFor(messageId) {
+  const map = getAppliedMap();
+  delete map[messageId];
+  getContext()?.saveMetadataDebounced?.();
+}
+function computePlotSignatureFromText(text) {
+  if (!text || typeof text !== 'string') return '';
+  TAG_RE.scenario.lastIndex = 0;
+  const chunks = [];
+  let m;
+  while ((m = TAG_RE.scenario.exec(text)) !== null) {
+    chunks.push((m[0] || '').trim());
+  }
+  if (!chunks.length) return '';
+  return chunks.join('\n---\n');
 }
 
 /* ============= 第一区：聊天消息变量处理 ============= */
@@ -393,7 +432,7 @@ function parseBlock(innerText) {
           const segs = keyClean.split('.').map(s => stripQ(String(s).trim())).filter(Boolean);
           if (!segs.length) continue;
           const top = segs[0];
-          const path = norm(segs.slice(1).join('.'));
+          const path = (String(segs.slice(1).join('.')) || '').replace(/\[(\d+)\]/g, '.$1');
           if (currentOp === 'set') putSet(top, path, value);
           else if (currentOp === 'push') putPush(top, path, value);
           else if (currentOp === 'bump') putBump(top, path, value);
@@ -429,7 +468,7 @@ function parseBlock(innerText) {
         const segs = keyRaw.split('.').map(s => s.trim()).filter(Boolean);
         if (!segs.length) continue;
         const top = segs[0];
-        const path = norm(segs.slice(1).join('.'));
+        const path = (String(segs.slice(1).join('.')) || '').replace(/\[(\d+)\]/g, '.$1');
         if (currentOp === 'set') putSet(top, path, value);
         else if (currentOp === 'push') putPush(top, path, value);
         else if (currentOp === 'bump') putBump(top, path, value);
@@ -474,6 +513,7 @@ function parseBlock(innerText) {
       out.push(raw.slice(parentIndent + 2));
     }
     let text = out.join('\n');
+    if (text.startsWith('\n')) text = text.slice(1);
     if (ch === '>') text = text.replace(/\n(?!\n)/g, ' ');
     return { text, next: i - 1 };
   };
@@ -492,7 +532,7 @@ function parseBlock(innerText) {
       const rhs = String(stripYamlInlineComment(mKV[2])).trim();
       const parentPath = stack.length ? stack[stack.length - 1].path : '';
       const curPath0 = parentPath ? `${parentPath}.${key}` : key;
-      const curPath = norm(curPath0);
+      const curPath = (String(curPath0) || '').replace(/\[(\d+)\]/g, '.$1');
       if (rhs && (rhs[0] === '|' || rhs[0] === '>')) {
         const { text, next } = readBlockScalar(i + 1, ind, rhs[0]);
         i = next;
@@ -507,6 +547,7 @@ function parseBlock(innerText) {
         stack.push({ indent: ind, path: curPath });
         let j = i + 1;
         while (j < lines.length && !lines[j].trim()) j++;
+        let handledList = false;
         if (j < lines.length) {
           const t2 = lines[j].trim();
           const ind2 = indentOf(lines[j]);
@@ -520,7 +561,14 @@ function parseBlock(innerText) {
             else if (curOp === 'del') for (const item of arr) putDel(top, rel ? `${rel}.${item}` : item);
             else if (curOp === 'bump') for (const item of arr) putBump(top, rel, Number(item));
             stack.pop();
+            handledList = true;
           }
+        }
+        if (!handledList && curOp === 'del') {
+          const [top, ...rest] = curPath.split('.');
+          const rel = rest.join('.');
+          putDel(top, rel);
+          stack.pop();
         }
         continue;
       }
@@ -533,6 +581,16 @@ function parseBlock(innerText) {
       continue;
     }
     const mArr = t.match(/^-+\s*(.+)$/);
+    if (mArr && stack.length === 0 && curOp === 'del') {
+      const rawItem = stripQ(stripYamlInlineComment(mArr[1]));
+      if (rawItem) {
+        const std = (String(rawItem) || '').replace(/\[(\d+)\]/g, '.$1');
+        const [top, ...rest] = std.split('.');
+        const rel = rest.join('.');
+        if (top) putDel(top, rel);
+      }
+      continue;
+    }
     if (mArr && stack.length) {
       const curPath = stack[stack.length - 1].path;
       const [top, ...rest] = curPath.split('.');
@@ -555,8 +613,14 @@ function parseBlock(innerText) {
 async function applyVariablesForMessage(messageId){
   try{
     const ctx=getContext(); const msg=ctx?.chat?.[messageId]; if(!msg) return;
+    const rawKey = (typeof msg?.mes==='string') ? 'mes' : (typeof msg?.content==='string' ? 'content' : null);
+    const rawTextForSig = rawKey ? String(msg[rawKey] ?? '') : '';
+    const curSig = computePlotSignatureFromText(rawTextForSig);
+    if (!curSig) { clearAppliedFor(messageId); return; }
+    const appliedMap = getAppliedMap();
+    if (appliedMap[messageId] === curSig) return;
     const raw=(typeof msg.mes==='string'?msg.mes:(typeof msg.content==='string'?msg.content:'')) ?? '';
-    const blocks=extractVareventBlocks(raw); if(blocks.length===0) return;
+    const blocks=extractVareventBlocks(raw); if(blocks.length===0) { clearAppliedFor(messageId); return; }
     const ops=[]; const delVarNames=new Set();
     blocks.forEach((b,idx)=>{
       const parts=parseBlock(b);
@@ -569,7 +633,7 @@ async function applyVariablesForMessage(messageId){
         else if(p.operation==='delVar') delVarNames.add(name);
       }
     });
-    if(ops.length===0 && delVarNames.size===0) return;
+    if(ops.length===0 && delVarNames.size===0) { setAppliedSignature(messageId, curSig); return; }
     const byName=new Map();
     for(const {name} of ops){
       const {root}=getRootAndPath(name);
@@ -578,7 +642,7 @@ async function applyVariablesForMessage(messageId){
         if(obj){
           byName.set(root,{mode:'object',base:obj,next:{...obj},changed:false});
         }else{
-          byName.set(root,{mode:'scalar',scalar:curRaw??'',changed:false});
+          byName.set(root,{mode:'scalar', scalar: (curRaw ?? ''), changed:false});
         }
       }
     }
@@ -642,28 +706,45 @@ async function applyVariablesForMessage(messageId){
       const rec=byName.get(root); if(!rec) continue;
       if(op.operation==='setObject'){
         for(const [k,v] of Object.entries(op.data)){
-          const path=joinPath(subPath,k);
-          if(!path){
-            if(v!==null && typeof v==='object'){
+          const localPath=joinPath(subPath,k);
+          const absPath = (localPath ? `${root}.${localPath}` : root);
+          const stdPath = typeof normalizePath==='function' ? normalizePath(absPath) : absPath;
+          let allow = true; let newVal = v;
+          if (typeof guardValidate==='function') {
+            const res = guardValidate('set', stdPath, v);
+            allow = !!res?.allow;
+            if (res && 'value' in res) newVal = res.value;
+          }
+          if(!allow) continue;
+          if(!localPath){
+            if(newVal!==null && typeof newVal==='object'){
               rec.mode='object';
-              rec.next=structuredClone(v);
+              rec.next=structuredClone(newVal);
               rec.changed=true;
             }else{
               rec.mode='scalar';
-              rec.scalar=String(v ?? '');
+              rec.scalar=String(newVal ?? '');
               rec.changed=true;
             }
             continue;
           }
           const obj=asObject(rec);
-          if(setDeepValue(obj,norm(path),v)) rec.changed=true;
+          if(setDeepValue(obj,norm(localPath),newVal)) rec.changed=true;
         }
       }
       else if(op.operation==='del'){
         const obj=asObject(rec);
         for(const key of op.data){
-          const path=joinPath(subPath,key);
-          if(!path){
+          const localPath=joinPath(subPath,key);
+          if(!localPath){
+            const absRoot = root;
+            const stdPath = typeof normalizePath==='function' ? normalizePath(absRoot) : absRoot;
+            let allow = true;
+            if (typeof guardValidate==='function') {
+              const res = guardValidate('delNode', stdPath);
+              allow = !!res?.allow;
+            }
+            if(!allow) continue;
             if(rec.mode==='scalar'){
               if(rec.scalar!==''){ rec.scalar=''; rec.changed=true; }
             }else{
@@ -674,13 +755,35 @@ async function applyVariablesForMessage(messageId){
             }
             continue;
           }
-          if(deleteDeepKey(obj,norm(path))) rec.changed=true;
+          const absPath = `${root}.${localPath}`;
+          const stdPath = typeof normalizePath==='function' ? normalizePath(absPath) : absPath;
+          let allow = true;
+          if (typeof guardValidate==='function') {
+            const res = guardValidate('delNode', stdPath);
+            allow = !!res?.allow;
+          }
+          if(!allow) continue;
+          if(deleteDeepKey(obj,norm(localPath))) rec.changed=true;
         }
       }
       else if(op.operation==='push'){
         for(const [k,vals] of Object.entries(op.data)){
-          const path=joinPath(subPath,k);
-          if(!path){
+          const localPath=joinPath(subPath,k);
+          const absPathBase = localPath ? `${root}.${localPath}` : root;
+          let incoming = Array.isArray(vals) ? vals : [vals];
+          const filtered = [];
+          for (const v of incoming) {
+            const stdPath = typeof normalizePath==='function' ? normalizePath(absPathBase) : absPathBase;
+            let allow = true; let newVal = v;
+            if (typeof guardValidate==='function') {
+              const res = guardValidate('push', stdPath, v);
+              allow = !!res?.allow;
+              if (res && 'value' in res) newVal = res.value;
+            }
+            if (allow) filtered.push(newVal);
+          }
+          if (filtered.length===0) continue;
+          if(!localPath){
             let arrRef=null;
             if(rec.mode==='object'){
               if(Array.isArray(rec.next)){
@@ -698,28 +801,52 @@ async function applyVariablesForMessage(messageId){
               rec.next = parsed ?? [];
               arrRef = rec.next;
             }
-            const incoming = Array.isArray(vals) ? vals : [vals];
             let changed=false;
-            for(const v of incoming){
+            for(const v of filtered){
               if(!arrRef.includes(v)){ arrRef.push(v); changed=true; }
             }
             if(changed) rec.changed=true;
             continue;
           }
           const obj=asObject(rec);
-          if(pushDeepValue(obj,norm(path),vals)) rec.changed=true;
+          if(pushDeepValue(obj,norm(localPath),filtered)) rec.changed=true;
         }
       }
       else if(op.operation==='bump'){
         for(const [k,delta] of Object.entries(op.data)){
           const num=Number(delta); if(!Number.isFinite(num)) continue;
-          const path=joinPath(subPath,k);
-          bumpAtPath(rec, norm(path), num);
+          const localPath=joinPath(subPath,k);
+          const absPath = localPath ? `${root}.${localPath}` : root;
+          const stdPath = typeof normalizePath==='function' ? normalizePath(absPath) : absPath;
+          let allow = true; let useDelta = num;
+          if (typeof guardValidate==='function') {
+            const res = guardValidate('bump', stdPath, num);
+            allow = !!res?.allow;
+            if (allow && res && 'value' in res && Number.isFinite(res.value)) {
+              let curr = undefined;
+              try {
+                const pth = (String(localPath||'')).replace(/\[(\d+)\]/g, '.$1');
+                if (!pth) {
+                  if (rec.mode === 'scalar') curr = Number(rec.scalar);
+                } else {
+                  const segs = splitPathSegments(pth);
+                  const obj = asObject(rec);
+                  const { parent, lastKey } = ensureDeepContainer(obj, segs);
+                  curr = parent?.[lastKey];
+                }
+              } catch {}
+              const baseNum = Number(curr);
+              const targetNum = Number(res.value);
+              useDelta = (Number.isFinite(targetNum) ? targetNum : num) - (Number.isFinite(baseNum) ? baseNum : 0);
+            }
+          }
+          if (!allow) continue;
+          bumpAtPath(rec, (String(localPath||'')).replace(/\[(\d+)\]/g, '.$1'), useDelta);
         }
       }
     }
     const hasChanges = Array.from(byName.values()).some(rec => rec && rec.changed === true);
-    if(!hasChanges && delVarNames.size===0) return;
+    if(!hasChanges && delVarNames.size===0) { setAppliedSignature(messageId, curSig); return; }
     for(const [name,rec] of byName.entries()){
       if(!rec.changed) continue;
       try{
@@ -732,6 +859,9 @@ async function applyVariablesForMessage(messageId){
     }
     if(delVarNames.size>0){
       try{
+        for (const v of delVarNames) {
+          try { setLocalVariable(v, ''); } catch {}
+        }
         const meta=ctx?.chatMetadata;
         if(meta && meta.variables){
           for(const v of delVarNames) delete meta.variables[v];
@@ -739,16 +869,13 @@ async function applyVariablesForMessage(messageId){
         }
       }catch(e){}
     }
+    setAppliedSignature(messageId, curSig);
   }catch(err){}
 }
-function rebuildVariablesFromScratch() {
-  try {
-    setVarDict({});
-    const chat = getContext()?.chat || [];
-    for (let i = 0; i < chat.length; i++) {
-      applyVariablesForMessage(i);
-    }
-  } catch {}
+if (typeof window !== 'undefined') {
+  window.getBumpAliasStore = getBumpAliasStore;
+  window.setBumpAliasStore = setBumpAliasStore;
+  window.clearBumpAliasStore = clearBumpAliasStore;
 }
 /* ============= 第二区：世界书条件事件系统（最终流就地替换） ============= */
 const LWB_VAREVENT_PROMPT_KEY = 'LWB_varevent_display';
@@ -1082,7 +1209,7 @@ function evaluateCondition(expr) {
 
   function VAR(path) {
     try {
-      const p = String(path ?? '');
+      const p = String(path ?? '').replace(/\[(\d+)\]/g, '.$1');
       const seg = p.split('.').map(s => s.trim()).filter(Boolean);
       if (!seg.length) return '';
       const root = ctx?.variables?.local?.get?.(seg[0]);
@@ -1872,7 +1999,7 @@ async function runImmediateVarEvents() {
     if (typeof window.parseVareventEvents !== 'function') window.parseVareventEvents = parseVareventEvents;
   })();
 
-/* ============= 提取公共工具 ============= */
+/* ============= 第四区：xbgetvar 宏与命令 ============= */
 function _getMsgKey(msg){ return (typeof msg?.content==='string') ? 'content' : (typeof msg?.mes==='string' ? 'mes' : null); }
 function _safeJSONStringify(v){ try{ return JSON.stringify(v); }catch{ return ''; } }
 function _maybeParseRootObject(rootRaw){
@@ -1893,11 +2020,20 @@ function _parseValueForSet(value){
   let vParsed = value;
   try{
     const t = String(value ?? '').trim();
-    if (t === 'true' || t === 'false' || t === 'null' || t === '[]' || t === '{}' || /^[\-\d\[\{\"']/.test(t)) {
-      vParsed = JSON.parse(t.replace(/'/g,'"'));
+    if ((t.startsWith('{') || t.startsWith('['))) {
+      try { return JSON.parse(t); } catch {}
     }
-  }catch{ vParsed = value; }
-  return vParsed;
+    const looksLikeJson = (t[0] === '{' || t[0] === '[') && /[:\],}]/.test(t);
+    if (looksLikeJson && !t.includes('"') && t.includes("'")) {
+      const safe = t.replace(/'/g, '"');
+      try { return JSON.parse(safe); } catch {}
+    }
+    if (t === 'true' || t === 'false' || t === 'null') return JSON.parse(t);
+    if (/^-?\d+(\.\d+)?$/.test(t)) return JSON.parse(t);
+    return value;
+  } catch {
+    return value;
+  }
 }
 function _extractPathFromArgs(namedArgs, unnamedArgs){
   try{
@@ -1931,8 +2067,250 @@ function _extractPathAndRestForSet(namedArgs, unnamedArgs){
   }
   return { path, rest };
 }
+function _hasTopLevelRuleKey(obj){
+  try{
+    if(!obj || typeof obj!== 'object' || Array.isArray(obj)) return false;
+    for(const k of Object.keys(obj)){
+      if (String(k).trim().startsWith('$')) return true;
+    }
+    return false;
+  }catch{ return false; }
+}
+function _setDeepBySegments(target, segs, value){
+  let cur = target;
+  for(let i=0;i<segs.length;i++){
+    const isLast = i===segs.length-1;
+    const key = segs[i];
+    if(isLast){
+      cur[key] = value;
+    }else{
+      const nxt = cur[key];
+      if (typeof nxt === 'object' && nxt && !Array.isArray(nxt)){
+        cur = nxt;
+      } else {
+        const obj = {};
+        cur[key] = obj;
+        cur = obj;
+      }
+    }
+  }
+}
+function _ensureAbsTargetPath(basePath, token){
+  try{
+    const t = String(token||'').trim();
+    if(!t) return String(basePath||'');
+    const base = String(basePath||'');
+    // 若已以 basePath 开头，则认为是绝对路径；否则前缀 basePath.
+    if (t === base || t.startsWith(base + '.')) return t;
+    return base ? (base + '.' + t) : t;
+  }catch{ return String(basePath||''); }
+}
+function _segmentsRelativeToBase(absPath, basePath){
+  try{
+    const segs = lwbSplitPathWithBrackets(absPath);
+    if(!segs.length) return [];
+    const base = String(basePath||'');
+    const baseSegs = lwbSplitPathWithBrackets(base);
+    if(baseSegs.length && String(segs[0])===String(baseSegs[0])){
+      return segs.slice(1);
+    }
+    // 若无法匹配根，则按原样（整个路径作为相对段）
+    return segs;
+  }catch{ return []; }
+}
+function expandShorthandRuleObject(basePath, valueObj){
+    try{
+      if(!valueObj || typeof valueObj!== 'object' || Array.isArray(valueObj)) return null;
+      const out = {};
+      const normalOut = {};
+      const base = String(basePath||'');
 
-/* ============= 第四区：xbgetvar 宏与命令 ============= */
+      // 深拷贝移除所有以 $ 开头的规则键（对象/数组均处理）
+      function stripRuleKeysDeep(val){
+        if (Array.isArray(val)) return val.map(item => stripRuleKeysDeep(item));
+        if (val && typeof val === 'object'){
+          const obj = {};
+          for (const [kk, vv] of Object.entries(val)){
+            if (String(kk).trim().startsWith('$')) continue;
+            obj[kk] = stripRuleKeysDeep(vv);
+          }
+          return obj;
+        }
+        return val;
+      }
+
+      // 将路径字符串格式化为带中括号的数组索引表示（如 a.b[1].c）
+      function formatPathWithBrackets(pathStr){
+        try{
+          const segs = lwbSplitPathWithBrackets(String(pathStr||''));
+          let outPath = '';
+          for (const s of segs){
+            if (typeof s === 'number') {
+              outPath += `[${s}]`;
+            } else {
+              outPath += outPath ? `.${s}` : `${s}`;
+            }
+          }
+          return outPath;
+        }catch{ return String(pathStr||''); }
+      }
+
+      // 递归处理函数
+      function processObject(obj, currentPath) {
+        for (const [k, v] of Object.entries(obj)) {
+          const keyStr = String(k);
+          const isRule = keyStr.trim().startsWith('$');
+
+          if (isRule) {
+            // 处理规则键
+            const rest = keyStr.slice(1).trim();
+            const parts = rest.split(/\s+/).filter(Boolean);
+            if (!parts.length) continue;
+
+            const ruleTarget = parts[parts.length - 1];
+            const dirTokens = parts.slice(0, parts.length - 1);
+            const dirTokensNormalized = dirTokens.map(t =>
+              String(t || '').trim().startsWith('$') ? String(t).trim() : ('$' + String(t).trim())
+            );
+
+            // 构建绝对路径
+            const fullTargetPath = currentPath ? `${currentPath}.${ruleTarget}` : ruleTarget;
+            const absTarget = _ensureAbsTargetPath(base, fullTargetPath);
+            const absTargetDisplay = formatPathWithBrackets(absTarget);
+            const ruleKey = `$ ${dirTokensNormalized.join(' ')} ${absTargetDisplay}`.trim();
+            out[ruleKey] = {};
+
+            // 将值写回普通键，并递归解析值内的规则（数组/对象）
+            if (v !== undefined) {
+              const relSegs = _segmentsRelativeToBase(absTarget, base);
+              const targetRelPath = relSegs.join('.');
+              if (relSegs.length) {
+                if (Array.isArray(v)) {
+                  const cleanedArr = [];
+                  for (let i = 0; i < v.length; i++){
+                    const el = v[i];
+                    if (el && typeof el === 'object' && !Array.isArray(el)){
+                      let hasRule = false;
+                      const cleanEl = {};
+                      for (const [ek, ev] of Object.entries(el)){
+                        const ekStr = String(ek);
+                        if (ekStr.trim().startsWith('$')){
+                          hasRule = true;
+                          const rest2 = ekStr.slice(1).trim();
+                          const parts2 = rest2.split(/\s+/).filter(Boolean);
+                          if (parts2.length){
+                            const ruleTarget2 = parts2[parts2.length - 1];
+                            if (ev !== undefined) cleanEl[ruleTarget2] = stripRuleKeysDeep(ev);
+                          }
+                        } else {
+                          cleanEl[ek] = stripRuleKeysDeep(ev);
+                        }
+                      }
+                      if (hasRule){
+                        processObject(el, `${targetRelPath}.${i}`);
+                      }
+                      cleanedArr.push(cleanEl);
+                    } else {
+                      cleanedArr.push(stripRuleKeysDeep(el));
+                    }
+                  }
+                  _setDeepBySegments(normalOut, relSegs, cleanedArr);
+                } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+                  if (_hasTopLevelRuleKey(v)){
+                    processObject(v, targetRelPath);
+                  }
+                  _setDeepBySegments(normalOut, relSegs, stripRuleKeysDeep(v));
+                } else {
+                  _setDeepBySegments(normalOut, relSegs, v);
+                }
+              }
+            }
+          } else {
+            // 处理普通键
+            if (Array.isArray(v)){
+              // 数组：遍历元素，递归处理包含规则的对象元素；同时构造“清洗且回填派生值”的数组
+              const newPath = currentPath ? `${currentPath}.${k}` : k;
+              const cleanedArr = [];
+              for (let i = 0; i < v.length; i++){
+                const el = v[i];
+                if (el && typeof el === 'object' && !Array.isArray(el)){
+                  let hasRule = false;
+                  const cleanEl = {};
+                  for (const [ek, ev] of Object.entries(el)){
+                    const ekStr = String(ek);
+                    if (ekStr.trim().startsWith('$')){
+                      hasRule = true;
+                      // 解析目标字段名（最后一个 token），用于把值回填进干净元素
+                      const rest2 = ekStr.slice(1).trim();
+                      const parts2 = rest2.split(/\s+/).filter(Boolean);
+                      if (parts2.length){
+                        const ruleTarget2 = parts2[parts2.length - 1];
+                        if (ev !== undefined) cleanEl[ruleTarget2] = stripRuleKeysDeep(ev);
+                      }
+                    } else {
+                      cleanEl[ek] = stripRuleKeysDeep(ev);
+                    }
+                  }
+                  if (hasRule){
+                    // 生成规则键展开
+                    processObject(el, `${newPath}.${i}`);
+                  }
+                  cleanedArr.push(cleanEl);
+                } else {
+                  cleanedArr.push(stripRuleKeysDeep(el));
+                }
+              }
+              const relSegs = currentPath ?
+                _segmentsRelativeToBase(`${base}.${currentPath}.${k}`, base) :
+                [k];
+              _setDeepBySegments(normalOut, relSegs, cleanedArr);
+            } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+              // 如果是对象，需要递归检查是否包含规则键
+              const newPath = currentPath ? `${currentPath}.${k}` : k;
+              const hasRules = _hasTopLevelRuleKey(v);
+
+              if (hasRules) {
+                // 递归处理包含规则的子对象
+                processObject(v, newPath);
+              } else {
+                // 普通对象，直接设置到 normalOut
+                const relSegs = currentPath ?
+                  _segmentsRelativeToBase(`${base}.${currentPath}.${k}`, base) :
+                  [k];
+                _setDeepBySegments(normalOut, relSegs, v);
+              }
+            } else {
+              // 标量值，直接设置
+              const relSegs = currentPath ?
+                _segmentsRelativeToBase(`${base}.${currentPath}.${k}`, base) :
+                [k];
+              _setDeepBySegments(normalOut, relSegs, v);
+            }
+          }
+        }
+      }
+
+      // 开始处理
+      processObject(valueObj, '');
+
+      // 将 normalOut 合并到 out 结尾，以保证显示顺序：规则在前，普通键在后
+      function assignDeep(obj, src){
+        for(const [k,v] of Object.entries(src)){
+          if (v && typeof v==='object' && !Array.isArray(v)){
+            if (!obj[k] || typeof obj[k] !== 'object' || Array.isArray(obj[k])) obj[k] = {};
+            assignDeep(obj[k], v);
+          } else {
+            obj[k] = v;
+          }
+        }
+      }
+      assignDeep(out, normalOut);
+
+      return out;
+    }catch{ return null; }
+  }
+
+
 function lwbSplitPathWithBrackets(path){
   const s = String(path || '');
   const segs = [];
@@ -1973,7 +2351,6 @@ function lwbSplitPathWithBrackets(path){
   flushBuf();
   return segs;
 }
-
 function lwbSplitPathAndValue(raw){
   const s = String(raw || '');
   let i = 0, depth = 0, inQ = false, qch = '';
@@ -1995,19 +2372,15 @@ function lwbSplitPathAndValue(raw){
   }
   return { path: s.trim(), value: '' };
 }
-
 function lwbResolveVarPath(path){
   try{
     const segs = lwbSplitPathWithBrackets(path);
     if(!segs.length) return '';
     const rootName = String(segs[0]);
     const rootRaw = getLocalVariable(rootName);
-
     if (segs.length===1) return _valToOutString(rootRaw);
-
     const obj = _maybeParseRootObject(rootRaw);
     if (!obj) return '';
-
     let cur = obj;
     for (let i = 1; i < segs.length; i++) {
       const k = segs[i];
@@ -2017,7 +2390,6 @@ function lwbResolveVarPath(path){
     return _valToOutString(cur);
   }catch{ return ''; }
 }
-
 function replaceXbGetVarInString(s){
   s = String(s ?? '');
   if(!s || s.indexOf('{{xbgetvar::')===-1) return s;
@@ -2041,7 +2413,6 @@ function applyXbGetVarForMessage(messageId,writeback=true){
     const out=replaceXbGetVarInString(old); if(writeback && out!==old) msg[key]=out;
   }catch{}
 }
-
 function registerXbGetVarSlashCommand(){
   try{
     const ctx = getContext();
@@ -2068,23 +2439,40 @@ function registerXbGetVarSlashCommand(){
     }));
   } catch {}
 }
-
 function lwbAssignVarPath(path, value){
   try{
     const segs = lwbSplitPathWithBrackets(path);
     if(!segs.length) return '';
     const rootName = String(segs[0]);
-    const vParsed = _parseValueForSet(value);
-
+    let vParsed = _parseValueForSet(value);
+    if (vParsed && typeof vParsed === 'object') {
+      try {
+        const res = typeof rulesLoadFromTree === 'function' ? rulesLoadFromTree(vParsed, rootName) : null;
+        if (res && res.cleanValue !== undefined) vParsed = res.cleanValue;
+        if (res && res.rulesDelta && typeof applyRulesDeltaToTable === 'function') {
+          applyRulesDeltaToTable(res.rulesDelta);
+          if (typeof rulesSaveToMeta === 'function') rulesSaveToMeta();
+        }
+      } catch {}
+    }
     if (segs.length === 1) {
-      if (vParsed && typeof vParsed === 'object') {
-        setLocalVariable(rootName, _safeJSONStringify(vParsed));
+      const abs = typeof normalizePath === 'function' ? normalizePath(rootName) : rootName;
+      let guardOk = true, guardVal = vParsed;
+      try {
+        if (typeof guardValidate === 'function') {
+          const g = guardValidate('set', abs, vParsed);
+          guardOk = !!g?.allow;
+          if ('value' in g) guardVal = g.value;
+        }
+      } catch {}
+      if (!guardOk) return '';
+      if (guardVal && typeof guardVal === 'object') {
+        setLocalVariable(rootName, _safeJSONStringify(guardVal));
       } else {
-        setLocalVariable(rootName, String(vParsed ?? ''));
+        setLocalVariable(rootName, String(guardVal ?? ''));
       }
       return '';
     }
-
     const rootRaw = getLocalVariable(rootName);
     let obj;
     const parsed = _maybeParseRootObject(rootRaw);
@@ -2093,15 +2481,22 @@ function lwbAssignVarPath(path, value){
     } else {
       obj = {};
     }
-
     const { parent, lastKey } = ensureDeepContainer(obj, segs.slice(1));
-    parent[lastKey] = vParsed;
-
+    const absPath = typeof normalizePath === 'function' ? normalizePath(path) : path;
+    let guardOk = true, guardVal = vParsed;
+    try {
+      if (typeof guardValidate === 'function') {
+        const g = guardValidate('set', absPath, vParsed);
+        guardOk = !!g?.allow;
+        if ('value' in g) guardVal = g.value;
+      }
+    } catch {}
+    if (!guardOk) return '';
+    parent[lastKey] = guardVal;
     setLocalVariable(rootName, _safeJSONStringify(obj));
     return '';
   }catch{ return ''; }
 }
-
 function registerXbSetVarSlashCommand(){
   try{
     const ctx = getContext();
@@ -2128,29 +2523,40 @@ function registerXbSetVarSlashCommand(){
       callback: (namedArgs, unnamedArgs) => {
         try{
           const { path, rest } = _extractPathAndRestForSet(namedArgs, unnamedArgs);
-          lwbAssignVarPath(path, rest);
+          // 1) 原始命令日志
+          try{ console.log('[LWB:/xbsetvar] 玩家输入的/xbgetvar是:', `/xbsetvar key=${String(path||'')} ${String(rest||'')}`); }catch{}
+          let toSet = rest;
+          // 2) 若是 JSON 对象且含有规则键，则进行短写展开与二次写入模拟
+          try{
+            const parsed = _parseValueForSet(rest);
+            if (parsed && typeof parsed==='object' && !Array.isArray(parsed) && _hasTopLevelRuleKey(parsed)){
+              const expanded = expandShorthandRuleObject(String(path||''), parsed);
+              if (expanded && typeof expanded==='object'){
+                const expandedStr = _safeJSONStringify(expanded) || '';
+                toSet = expandedStr;
+                try{ console.log('[LWB:/xbsetvar] 发现$规则，内部改写为:', `/xbsetvar key=${String(path||'')} ${expandedStr}`); }catch{}
+              }
+            }
+          }catch{}
+          lwbAssignVarPath(path, toSet);
           return '';
         }catch{ return ''; }
       },
     }));
-  } catch {}
-}
-
+  } catch {} }
 
 /* ============= 第五区：快照/回滚器 ============= */
 const SNAP_STORE_KEY = 'LWB_SNAP';
-
 function getMeta() {
   return getContext()?.chatMetadata || {};
 }
-
 function getVarDict() {
   const meta = getMeta();
   return structuredClone(meta.variables || {});
 }
-
 function syncMetaToLocalVariables(dict) {
   try {
+    if (typeof guardBypass === 'function') guardBypass(true);
     const ctx = getContext();
     const meta = ctx?.chatMetadata || {};
     const current = meta.variables || {};
@@ -2170,45 +2576,46 @@ function syncMetaToLocalVariables(dict) {
     }
     meta.variables = structuredClone(next);
     getContext()?.saveMetadataDebounced?.();
-  } catch {}
+  } catch {} finally {
+    if (typeof guardBypass === 'function') guardBypass(false);
+  }
 }
-
 function setVarDict(dict) {
   syncMetaToLocalVariables(dict);
 }
-
 function getSnapMap() {
   const meta = getMeta();
   if (!meta[SNAP_STORE_KEY]) meta[SNAP_STORE_KEY] = {};
   return meta[SNAP_STORE_KEY];
 }
-
 function setSnapshot(messageId, snapDict) {
   if (messageId == null || messageId < 0) return;
   const snaps = getSnapMap();
   snaps[messageId] = structuredClone(snapDict || {});
   getContext()?.saveMetadataDebounced?.();
 }
-
 function getSnapshot(messageId) {
   if (messageId == null || messageId < 0) return undefined;
   const snaps = getSnapMap();
   const snap = snaps[messageId];
   return snap ? structuredClone(snap) : undefined;
 }
-
 function clearSnapshotsFrom(startIdInclusive) {
   if (startIdInclusive == null) return;
-  const snaps = getSnapMap();
-  for (const k of Object.keys(snaps)) {
-    const id = Number(k);
-    if (!Number.isNaN(id) && id >= startIdInclusive) {
-      delete snaps[k];
+  try {
+    if (typeof guardBypass === 'function') guardBypass(true);
+    const snaps = getSnapMap();
+    for (const k of Object.keys(snaps)) {
+      const id = Number(k);
+      if (!Number.isNaN(id) && id >= startIdInclusive) {
+        delete snaps[k];
+      }
     }
+    getContext()?.saveMetadataDebounced?.();
+  } finally {
+    if (typeof guardBypass === 'function') guardBypass(false);
   }
-  getContext()?.saveMetadataDebounced?.();
 }
-
 function snapshotCurrentLastFloor() {
   try {
     const ctx = getContext();
@@ -2219,11 +2626,9 @@ function snapshotCurrentLastFloor() {
     setSnapshot(lastId, dict);
   } catch {}
 }
-
 function snapshotPreviousFloor() {
   snapshotCurrentLastFloor();
 }
-
 function snapshotForMessageId(currentId) {
   try {
     if (typeof currentId !== 'number' || currentId < 0) return;
@@ -2231,28 +2636,26 @@ function snapshotForMessageId(currentId) {
     setSnapshot(currentId, dict);
   } catch {}
 }
-
 function rollbackToPreviousOf(messageId) {
   const id = Number(messageId);
   if (Number.isNaN(id)) return;
   const prevId = id - 1;
   if (prevId < 0) return;
   const snap = getSnapshot(prevId);
-  if (snap) setVarDict(snap);
+  if (snap) {
+    try { if (typeof guardBypass === 'function') guardBypass(true); setVarDict(snap); } finally { if (typeof guardBypass === 'function') guardBypass(false); }
+  }
 }
-
 async function executeQueuedVareventJsAfterTurn() {
   const blocks = drainPendingVareventBlocks();
   if (!blocks.length) {
     return;
   }
-
   for (let i = 0; i < blocks.length; i++) {
     const item = blocks[i];
     try {
       const events = parseVareventEvents(item.inner);
       if (!events.length) continue;
-
       let chosen = null;
       for (let j = events.length - 1; j >= 0; j--) {
         const ev = events[j];
@@ -2266,11 +2669,9 @@ async function executeQueuedVareventJsAfterTurn() {
         chosen = ev;
         break;
       }
-
       if (!chosen) {
         continue;
       }
-
       const js = String(chosen.js ?? '').trim();
       try {
         await runJS(js);
@@ -2278,185 +2679,14 @@ async function executeQueuedVareventJsAfterTurn() {
     } catch (err) {}
   }
 }
-
-function bindEvents() {
-  const { eventSource, event_types } = getContext();
-  if (!eventSource || !event_types) return;
-
+function rebuildVariablesFromScratch() {
   try {
-    on(eventSource, 'prompt_template_prepare', (ctx) => {
-      try {
-        const original = ctx && typeof ctx.getvar === 'function' ? ctx.getvar : null;
-        if (!original || original.__lwb_patched) return;
-        const parsedCache = new Map();
-        const rawCache = new Map();
-        let lastModifyId = 0;
-
-        const wrapped = function (key, options = {}) {
-          const curModify = Number(this?.variables?._modify_id || 0);
-          if (curModify !== lastModifyId) { parsedCache.clear(); rawCache.clear(); lastModifyId = curModify; }
-
-          const v = original.call(this, key, options);
-          if (v !== undefined || typeof key !== 'string' || key.indexOf('.') < 0) return v;
-
-          const i = key.indexOf('.');
-          const base = key.slice(0, i);
-          const sub = key.slice(i + 1);
-          let origRaw = original.call(this, base, { ...options, defaults: undefined });
-          const prevRaw = rawCache.get(base);
-          if (prevRaw !== origRaw) {
-            let root = origRaw;
-            if (typeof root === 'string') {
-              const s = root.trim();
-              if (s && (s[0] === '{' || s[0] === '[')) { try { root = JSON.parse(s); } catch {} }
-            }
-            root = (root && typeof root === 'object') ? root : null;
-            parsedCache.set(base, root);
-            rawCache.set(base, origRaw);
-          }
-
-          const root = parsedCache.get(base);
-          if (!root || typeof root !== 'object') return options?.defaults;
-          return _.get(root, sub.replace(/\[(\d+)\]/g, '.$1'), options?.defaults);
-        };
-
-        wrapped.__lwb_patched = true;
-        ctx.getvar = wrapped;
-      } catch {}
-    });
-  } catch {}
-
-  const getMsgIdLoose = (payload) => {
-    if (payload && typeof payload === 'object') {
-      if (typeof payload.messageId === 'number') return payload.messageId;
-      if (typeof payload.id === 'number') return payload.id;
-    }
-    if (typeof payload === 'number') return payload;
+    setVarDict({});
     const chat = getContext()?.chat || [];
-    return chat.length ? chat.length - 1 : undefined;
-  };
-
-  const getMsgIdStrictForDelete = (payload) => {
-    if (payload && typeof payload === 'object') {
-      if (typeof payload.id === 'number') return payload.id;
-      if (typeof payload.messageId === 'number') return payload.messageId;
+    for (let i = 0; i < chat.length; i++) {
+      applyVariablesForMessage(i);
     }
-    if (typeof payload === 'number') return payload;
-    return undefined;
-  };
-
-  if (event_types.MESSAGE_SENT) {
-    on(eventSource, event_types.MESSAGE_SENT, async () => {
-      snapshotCurrentLastFloor();
-      const chat = getContext()?.chat || [];
-      const id = chat.length ? chat.length - 1 : undefined;
-      if (typeof id === 'number') {
-        applyVariablesForMessage(id);
-        applyXbGetVarForMessage(id, true);
-      }
-    });
-  }
-
-  if (event_types.MESSAGE_RECEIVED) {
-    on(eventSource, event_types.MESSAGE_RECEIVED, async (data) => {
-      const id = getMsgIdLoose(data);
-      if (typeof id === 'number') {
-        applyVariablesForMessage(id);
-        applyXbGetVarForMessage(id, true);
-        await executeQueuedVareventJsAfterTurn();
-      }
-    });
-  }
-
-  if (event_types.USER_MESSAGE_RENDERED) {
-    on(eventSource, event_types.USER_MESSAGE_RENDERED, (data) => {
-      const id = getMsgIdLoose(data);
-      if (typeof id === 'number') {
-        snapshotForMessageId(id);
-      }
-    });
-  }
-
-  if (event_types.CHARACTER_MESSAGE_RENDERED) {
-    on(eventSource, event_types.CHARACTER_MESSAGE_RENDERED, (data) => {
-      const id = getMsgIdLoose(data);
-      if (typeof id === 'number') {
-        snapshotForMessageId(id);
-      }
-    });
-  }
-
-  const pendingSwipeApply = new Map();
-  let lastSwipedId = undefined;
-
-  if (event_types.GENERATION_STARTED) {
-    on(eventSource, event_types.GENERATION_STARTED, (data) => {
-      const t = (typeof data === 'string' ? data : (data?.type || data?.mode || data?.reason || '')).toLowerCase();
-      if (t === 'swipe') {
-        const id = lastSwipedId;
-        const tId = id != null ? pendingSwipeApply.get(id) : undefined;
-        if (tId) {
-          clearTimeout(tId);
-          pendingSwipeApply.delete(id);
-        }
-      }
-    });
-  }
-
-  if (event_types.MESSAGE_SWIPED) {
-    on(eventSource, event_types.MESSAGE_SWIPED, (data) => {
-      const id = getMsgIdLoose(data);
-      if (typeof id === 'number') {
-        lastSwipedId = id;
-        rollbackToPreviousOf(id);
-        const tId = setTimeout(async () => {
-          pendingSwipeApply.delete(id);
-          applyVariablesForMessage(id);
-          await executeQueuedVareventJsAfterTurn();
-        }, 10);
-        pendingSwipeApply.set(id, tId);
-      }
-    });
-  }
-
-  if (event_types.MESSAGE_DELETED) {
-    on(eventSource, event_types.MESSAGE_DELETED, (data) => {
-      const id = getMsgIdStrictForDelete(data);
-      if (typeof id === 'number') {
-        rollbackToPreviousOf(id);
-        clearSnapshotsFrom(id);
-      }
-    });
-  }
-
-  if (event_types.MESSAGE_EDITED) {
-    on(eventSource, event_types.MESSAGE_EDITED, async (data) => {
-      const id = getMsgIdLoose(data);
-      if (typeof id === 'number') {
-        rollbackToPreviousOf(id);
-        setTimeout(async () => {
-          applyVariablesForMessage(id);
-          applyXbGetVarForMessage(id, true);
-          try {
-            const ctx = getContext();
-            const msg = ctx?.chat?.[id];
-            if (msg) updateMessageBlock(id, msg, { rerenderMessage: true });
-          } catch {}
-          try { if (eventSource?.emit && event_types?.MESSAGE_UPDATED) await eventSource.emit(event_types.MESSAGE_UPDATED, id); } catch {}
-          await executeQueuedVareventJsAfterTurn();
-        }, 10);
-      }
-    });
-  }
-
-  if (event_types.MESSAGE_UPDATED) {
-    on(eventSource, event_types.MESSAGE_UPDATED, async (data) => {
-      const id = getMsgIdLoose(data);
-      if (typeof id === 'number') {
-        applyXbGetVarForMessage(id, true);
-      }
-    });
-  }
+  } catch {}
 }
 /* ============= 第六区：聊天消息变量缺失补全 ============= */
 const LWB_PLOTLOG_BTN_ID = 'lwb_plotlog_top10_btn';
@@ -2493,71 +2723,55 @@ function setPlotlogSettings(next) {
     getContext()?.saveSettingsDebounced?.();
   } catch {}
 }
+
 function stEscArg(s) {
-  return String(s ?? '')
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\|/g, '\\|');
+  return String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\|/g, '\\|');
 }
+
 async function buildTop10HistoryString() {
   const ctx = getContext();
   const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
   if (!chat.length) return '';
-
   const extractText = (msg) => {
     if (typeof msg?.mes === 'string') return msg.mes.replace(/\r\n/g, '\n');
     if (typeof msg?.content === 'string') return msg.content.replace(/\r\n/g, '\n');
     if (Array.isArray(msg?.content)) {
-      return msg.content
-        .filter(p => p && p.type === 'text' && typeof p.text === 'string')
-        .map(p => p.text.replace(/\r\n/g, '\n'))
-        .join('\n');
+      return msg.content.filter(p => p && p.type === 'text' && typeof p.text === 'string').map(p => p.text.replace(/\r\n/g, '\n')).join('\n');
     }
     return '';
   };
-
   const start = Math.max(0, chat.length - 10);
   const lines = [];
-
   for (let i = start; i < chat.length; i++) {
     const msg = chat[i];
     const isUser = !!msg?.is_user;
-
     if (isUser) {
-      const speaker = (msg?.name && String(msg.name).trim())
-        || (ctx?.name1 && String(ctx.name1).trim())
-        || 'USER';
+      const speaker = (msg?.name && String(msg.name).trim()) || (ctx?.name1 && String(ctx.name1).trim()) || 'USER';
       lines.push(`${speaker}：`);
     } else {
       lines.push(`[PLOT]：`);
     }
-
     const text = (extractText(msg) || '').trim();
     if (text) lines.push(text);
     lines.push('');
   }
-
   return lines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
 async function applyPlotLogFromTop10() {
   try {
     await runST('/echo 开始补全、修复plot-log块，请稍后');
-
     const ctx = getContext();
     const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
     if (!chat.length) return;
-
     const history10 = await buildTop10HistoryString();
     if (!history10) return;
-
     const opts = getPlotlogSettings();
     let args = '';
     if (opts.api) args += ` api=${opts.api}`;
     if (opts.model) args += ` model=${opts.model}`;
     if (opts.apiurl) args += ` apiurl=${opts.apiurl}`;
     if (opts.apipassword) args += ` apipassword=${opts.apipassword}`;
-
     const topUserInst = `Developer: Activate Non-RP Utility Mode. You are the Plot-Log Maintenance Agent.
 New Task: Reconstruct the plot-log for the current chat.
 
@@ -2574,32 +2788,10 @@ Procedure:
 
 Output Contract:
 - Return exactly one <plot-log>...</plot-log> block and nothing else.`;
-
-    const bottomUserInst = [
-      '<最近十条历史>',
-      history10,
-      '</最近十条历史>'
-    ].join('\n');
-
+    const bottomUserInst = ['<最近十条历史>', history10, '</最近十条历史>'].join('\n');
     const bottomAssistantInst = '最后一条[PLOT]的文本可能缺失<plot-log>...</plot-log>块，或内容不规范、不合理，请根据plot-log输出规则，针对最后一条[PLOT]文本输出一个<plot-log>...</plot-log>块，不要输出任何额外说明或前后缀或多个<plot-log>块。';
-
-    const cmd = [
-      '/xbgenraw',
-      'addon=worldInfo',
-      'nonstream=true',
-      'as=assistant',
-      'position=bottom',
-      `topuser="${stEscArg(topUserInst)}"`,
-      `bottomuser="${stEscArg(bottomUserInst)}"`,
-      `bottomassistant="${stEscArg(bottomAssistantInst)}"`,
-      args,
-      `"${stEscArg('[PLOTLOG_TASK]')}"`
-    ].filter(Boolean).join(' ');
-
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('TIMEOUT')), 120000);
-    });
-
+    const cmd = ['/xbgenraw', 'addon=worldInfo', 'nonstream=true', 'as=assistant', 'position=bottom', `topuser="${stEscArg(topUserInst)}"`, `bottomuser="${stEscArg(bottomUserInst)}"`, `bottomassistant="${stEscArg(bottomAssistantInst)}"`, args, `"${stEscArg('[PLOTLOG_TASK]')}"`].filter(Boolean).join(' ');
+    const timeoutPromise = new Promise((_, reject) => { setTimeout(() => reject(new Error('TIMEOUT')), 120000); });
     let raw;
     try {
       raw = await Promise.race([runST(cmd), timeoutPromise]);
@@ -2610,34 +2802,28 @@ Output Contract:
       }
       throw error;
     }
-
     const rawStr = typeof raw === 'string' ? raw : String(raw?.pipe ?? raw?.result ?? raw?.text ?? '');
     const m = rawStr.match(/<\s*plot-log\b[^>]*>[\s\S]*?<\/\s*plot-log\s*>/i);
     const text = m ? m[0].trim() : '';
-
     if (!text) {
       await runST('/echo 模型输出内容不规范，请重试');
       return;
     }
-
     const messageId = chat.length - 1;
     const msg = chat[messageId];
     const prev = typeof msg?.mes === 'string' ? msg.mes : (typeof msg?.content === 'string' ? msg.content : '');
     const tagPattern = /<\s*plot-log\b[^>]*>[\s\S]*?<\/\s*plot-log\s*>/gi;
-
     if (tagPattern.test(prev)) {
       msg.mes = prev.replace(tagPattern, text);
     } else {
       msg.mes = prev ? `${prev}\n\n${text}` : text;
     }
-
     const { eventSource, event_types } = ctx || {};
     try { await ctx?.saveChat?.(); } catch {}
     try { updateMessageBlock(messageId, msg, { rerenderMessage: true }); } catch {}
     if (eventSource?.emit && event_types?.MESSAGE_EDITED) {
       await eventSource.emit(event_types.MESSAGE_EDITED, messageId);
     }
-
     await runST('/echo 已补全、修复块');
   } catch {}
 }
@@ -2675,42 +2861,99 @@ function registerPlotLogButton() {
   } catch {}
 }
 
+function makeMiniModal(innerHTML, title = '设置') {
+  const wrap = document.createElement('div');
+  wrap.style.position = 'fixed';
+  wrap.style.inset = '0';
+  wrap.style.zIndex = '10010';
+  wrap.style.display = 'flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.justifyContent = 'center';
+  const modal = document.createElement('div');
+  modal.style.minWidth = '420px';
+  modal.style.maxWidth = '720px';
+  modal.style.maxHeight = '80vh';
+  modal.style.overflow = 'hidden';
+  modal.style.background = 'var(--SmartThemeBlurTintColor)';
+  modal.style.border = '2px solid var(--SmartThemeBorderColor)';
+  modal.style.borderRadius = '10px';
+  modal.style.boxShadow = '0 8px 16px var(--SmartThemeShadowColor)';
+  modal.style.pointerEvents = 'auto';
+  const header = document.createElement('div');
+  header.style.display = 'flex';
+  header.style.justifyContent = 'space-between';
+  header.style.alignItems = 'center';
+  header.style.padding = '10px 14px';
+  header.style.borderBottom = '1px solid var(--SmartThemeBorderColor)';
+  const hTitle = document.createElement('span');
+  hTitle.textContent = title;
+  const hClose = document.createElement('span');
+  hClose.textContent = '✕';
+  hClose.style.cursor = 'pointer';
+  header.appendChild(hTitle);
+  header.appendChild(hClose);
+  const body = document.createElement('div');
+  body.style.padding = '10px';
+  body.style.overflow = 'auto';
+  body.style.maxHeight = '60vh';
+  body.innerHTML = innerHTML;
+  const footer = document.createElement('div');
+  footer.style.display = 'flex';
+  footer.style.gap = '8px';
+  footer.style.justifyContent = 'flex-end';
+  footer.style.padding = '12px 14px';
+  footer.style.borderTop = '1px solid var(--SmartThemeBorderColor)';
+  const btnCancel = document.createElement('button');
+  btnCancel.textContent = '取消';
+  btnCancel.className = 'menu_button';
+  const btnOk = document.createElement('button');
+  btnOk.textContent = '确认';
+  btnOk.className = 'menu_button';
+  footer.appendChild(btnCancel);
+  footer.appendChild(btnOk);
+  modal.appendChild(header);
+  modal.appendChild(body);
+  modal.appendChild(footer);
+  wrap.appendChild(modal);
+  document.body.appendChild(wrap);
+  const onClose = () => { try { wrap.remove(); } catch {} };
+  hClose.addEventListener('click', onClose);
+  btnCancel.addEventListener('click', onClose);
+  return { wrap, modal, body, btnOk, btnCancel };
+}
+
 function openPlotlogSettingsModal() {
   try {
     const cur = getPlotlogSettings();
     const html = `
-      <div class="lwb-ve-section">
-        <div class="lwb-ve-label">聊天补全来源</div>
-        <select id="lwb-plotlog-api" class="lwb-ve-input">
-          <option value="">（不指定）</option>
-          <option value="openai">openai</option>
-          <option value="claude">claude</option>
-          <option value="gemini">gemini</option>
-          <option value="cohere">cohere</option>
-          <option value="deepseek">deepseek</option>
-        </select>
-      </div>
-      <div class="lwb-ve-section">
-        <div class="lwb-ve-label">模型名称</div>
-        <input id="lwb-plotlog-model" class="lwb-ve-input" placeholder="例如：gpt-4o-mini / gemini-2.5-pro" />
-      </div>
-      <div class="lwb-ve-section">
-        <div class="lwb-ve-label">代理地址</div>
-        <input id="lwb-plotlog-apiurl" class="lwb-ve-input" placeholder="例如：claude.aslight.one/v1" />
-      </div>
-      <div class="lwb-ve-section">
-        <div class="lwb-ve-label">代理地址密码</div>
-        <input id="lwb-plotlog-apipassword" class="lwb-ve-input" type="password" placeholder="可留空" />
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <div style="opacity:.7;font-size:13px;margin-bottom:6px;">聊天补全来源</div>
+          <select id="lwb-plotlog-api" class="menu_button" style="width:100%;">
+            <option value="">（不指定）</option>
+            <option value="openai">openai</option>
+            <option value="claude">claude</option>
+            <option value="gemini">gemini</option>
+            <option value="cohere">cohere</option>
+            <option value="deepseek">deepseek</option>
+          </select>
+        </div>
+        <div>
+          <div style="opacity:.7;font-size:13px;margin-bottom:6px;">模型名称</div>
+          <input id="lwb-plotlog-model" class="text_pole" style="width:100%;" placeholder="例如：gpt-4o-mini / gemini-2.5-pro" />
+        </div>
+        <div>
+          <div style="opacity:.7;font-size:13px;margin-bottom:6px;">代理地址</div>
+          <input id="lwb-plotlog-apiurl" class="text_pole" style="width:100%;" placeholder="例如：claude.aslight.one/v1" />
+        </div>
+        <div>
+          <div style="opacity:.7;font-size:13px;margin-bottom:6px;">代理地址密码</div>
+          <input id="lwb-plotlog-apipassword" class="text_pole" type="password" style="width:100%;" placeholder="可留空" />
+        </div>
       </div>
     `;
-    const ui = makeMiniModal(html);
-    try {
-      if (ui?.body) ui.body.style.height = 'auto';
-      if (ui?.modal) {
-        ui.modal.style.width = 'auto';
-        ui.modal.style.maxWidth = 'none';
-      }
-    } catch {}
+    const ui = makeMiniModal(html, '设置');
+    try { if (ui?.body) ui.body.style.height = 'auto'; if (ui?.modal) { ui.modal.style.width = 'auto'; ui.modal.style.maxWidth = 'none'; } } catch {}
     const sel = ui.body.querySelector('#lwb-plotlog-api');
     const model = ui.body.querySelector('#lwb-plotlog-model');
     const apiurl = ui.body.querySelector('#lwb-plotlog-apiurl');
@@ -2731,8 +2974,708 @@ function openPlotlogSettingsModal() {
     });
   } catch {}
 }
-
-/* ============= 第七区：模块导出/初始化/清理 ============= */
+/* ============= 第七区：变量守护与规则集 ============= */
+const LWB_RULES_KEY = 'LWB_RULES';
+const guardianState = {
+  table: {},
+  regexCache: {},
+  bypass: false,
+  origVarApi: null,
+  lastMetaSyncAt: 0,
+};
+function rulesGetTable() {
+  return guardianState.table || {};
+}
+function rulesSetTable(t) {
+  guardianState.table = t || {};
+}
+function rulesClearCache() {
+  guardianState.table = {};
+  guardianState.regexCache = {};
+}
+function rulesLoadFromMeta() {
+  try {
+    const meta = getContext()?.chatMetadata || {};
+    const raw = meta[LWB_RULES_KEY];
+    if (raw && typeof raw === 'object') {
+      rulesSetTable(structuredClone(raw));
+      try {
+        for (const [p, node] of Object.entries(guardianState.table)) {
+          if (node?.constraints?.regex?.source) {
+            const src = node.constraints.regex.source;
+            const flg = node.constraints.regex.flags || '';
+            try { guardianState.regexCache[p] = new RegExp(src, flg); } catch {}
+          }
+        }
+      } catch {}
+    } else {
+      rulesSetTable({});
+    }
+  } catch {
+    rulesSetTable({});
+  }
+}
+function rulesSaveToMeta() {
+  try {
+    const meta = getContext()?.chatMetadata || {};
+    meta[LWB_RULES_KEY] = structuredClone(guardianState.table || {});
+    guardianState.lastMetaSyncAt = Date.now();
+    getContext()?.saveMetadataDebounced?.();
+  } catch {}
+}
+function guardBypass(on) {
+  guardianState.bypass = !!on;
+}
+function normalizePath(path) {
+  try {
+    const segs = lwbSplitPathWithBrackets(path);
+    const parts = [];
+    for (const s of segs) parts.push(String(s));
+    return parts.join('.');
+  } catch {
+    return String(path || '').trim();
+  }
+}
+function getRootValue(rootName) {
+  try {
+    const raw = getLocalVariable(rootName);
+    if (raw == null) return undefined;
+    if (typeof raw === 'string') {
+      const s = raw.trim();
+      if (s && (s[0] === '{' || s[0] === '[')) {
+        try { return JSON.parse(s); } catch { return raw; }
+      }
+      return raw;
+    }
+    return raw;
+  } catch { return undefined; }
+}
+function getValueAtPath(absPath) {
+  try {
+    const segs = lwbSplitPathWithBrackets(absPath);
+    if (!segs.length) return undefined;
+    const rootName = String(segs[0]);
+    let cur = getRootValue(rootName);
+    if (segs.length === 1) return cur;
+    if (typeof cur === 'string') {
+      const s = cur.trim();
+      if (s && (s[0] === '{' || s[0] === '[')) {
+        try { cur = JSON.parse(s); } catch { return undefined; }
+      } else {
+        return undefined;
+      }
+    }
+    for (let i = 1; i < segs.length; i++) {
+      const k = segs[i];
+      cur = cur?.[k];
+      if (cur === undefined) return undefined;
+    }
+    return cur;
+  } catch { return undefined; }
+}
+function typeOfValue(v) {
+  if (Array.isArray(v)) return 'array';
+  const t = typeof v;
+  if (t === 'object' && v !== null) return 'object';
+  if (t === 'number') return 'number';
+  if (t === 'string') return 'string';
+  if (t === 'boolean') return 'boolean';
+  if (v === null) return 'null';
+  return 'scalar';
+}
+function ensureRuleNode(path) {
+  const tbl = rulesGetTable();
+  const p = normalizePath(path);
+  const node = tbl[p] || (tbl[p] = {
+    typeLock: 'unknown',
+    ro: false,
+    objectPolicy: 'none',
+    arrayPolicy: 'lock',
+    constraints: {},
+    elementConstraints: null,
+  });
+  return node;
+}
+function getRuleNode(path) {
+  const tbl = rulesGetTable();
+  return tbl[normalizePath(path)];
+}
+function setTypeLockIfUnknown(path, v) {
+  const n = ensureRuleNode(path);
+  if (!n.typeLock || n.typeLock === 'unknown') {
+    n.typeLock = typeOfValue(v);
+    rulesSaveToMeta();
+  }
+}
+function parseDirectivesTokenList(tokens) {
+  const out = {
+    ro: false,
+    objectPolicy: null,
+    arrayPolicy: null,
+    constraints: {},
+  };
+  for (const tok of tokens) {
+    const t = String(tok || '').trim();
+    if (!t) continue;
+    if (t === '$ro') { out.ro = true; continue; }
+    if (t === '$ext') { out.objectPolicy = 'ext'; continue; }
+    if (t === '$prune') { out.objectPolicy = 'prune'; continue; }
+    if (t === '$free') { out.objectPolicy = 'free'; continue; }
+    if (t === '$grow') { out.arrayPolicy = 'grow'; continue; }
+    if (t === '$shrink') { out.arrayPolicy = 'shrink'; continue; }
+    if (t === '$list') { out.arrayPolicy = 'list'; continue; }
+    if (t.startsWith('$min=')) {
+      const num = Number(t.slice(5));
+      if (Number.isFinite(num)) { out.constraints.min = num; }
+      continue;
+    }
+    if (t.startsWith('$max=')) {
+      const num = Number(t.slice(5));
+      if (Number.isFinite(num)) { out.constraints.max = num; }
+      continue;
+    }
+    if (t.startsWith('$range=')) {
+      const m = t.match(/^\$range=\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]$/);
+      if (m) {
+        const a = Number(m[1]), b = Number(m[2]);
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+          out.constraints.min = Math.min(a, b);
+          out.constraints.max = Math.max(a, b);
+        }
+      }
+      continue;
+    }
+    if (t.startsWith('$enum=')) {
+      const m = t.match(/^\$enum=\{\s*([^}]+)\s*\}$/);
+      if (m) {
+        const raw = m[1];
+        const vals = raw.split(/[;；]/).map(s => s.trim()).filter(Boolean);
+        if (vals.length) out.constraints.enum = vals;
+      }
+      continue;
+    }
+    if (t.startsWith('$match=')) {
+      const raw = t.slice(7);
+      if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
+        const last = raw.lastIndexOf('/');
+        const patternRaw = raw.slice(1, last);
+        const flags = raw.slice(last + 1) || '';
+        const pattern = patternRaw.replace(/\\\//g, '/');
+        out.constraints.regex = { source: pattern, flags };
+      }
+      continue;
+    }
+  }
+  return out;
+}
+function applyRuleDelta(path, delta) {
+  const node = ensureRuleNode(path);
+  if (delta.ro) node.ro = true;
+  if (delta.objectPolicy) node.objectPolicy = delta.objectPolicy;
+  if (delta.arrayPolicy) node.arrayPolicy = delta.arrayPolicy;
+  if (delta.constraints) {
+    const c = node.constraints || {};
+    if (delta.constraints.min != null) c.min = Number(delta.constraints.min);
+    if (delta.constraints.max != null) c.max = Number(delta.constraints.max);
+    if (delta.constraints.enum) c.enum = delta.constraints.enum.slice();
+    if (delta.constraints.regex) {
+      c.regex = { source: delta.constraints.regex.source, flags: delta.constraints.regex.flags || '' };
+      try { guardianState.regexCache[normalizePath(path)] = new RegExp(c.regex.source, c.regex.flags); } catch {}
+    }
+    node.constraints = c;
+  }
+}
+function pathIsAbsolute(path) {
+  const s = String(path || '');
+  return !!s && !s.startsWith('.') && !s.startsWith('[');
+}
+function rulesLoadFromTree(valueTree, basePath) {
+  const clean = {};
+  const rulesDelta = {};
+  function setCleanAt(obj, key, val) { obj[key] = val; }
+  function mergeRule(target, p, d) {
+    const n = rulesDelta[p] || (rulesDelta[p] = { tokens: [] });
+    n.tokens.push(d);
+  }
+  function walk(obj, curAbs) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (k.startsWith('$')) {
+        const rest = k.slice(1).trim();
+        const parts = rest.split(/\s+/).filter(Boolean);
+        if (!parts.length) continue;
+        const rulePathToken = parts[parts.length - 1];
+        const dirTokens = parts.slice(0, parts.length - 1);
+        let targetPath = rulePathToken;
+        if (!pathIsAbsolute(targetPath) && curAbs) targetPath = curAbs ? `${curAbs}.${targetPath}` : targetPath;
+        if (!pathIsAbsolute(targetPath) && basePath) targetPath = basePath ? `${basePath}.${targetPath}` : targetPath;
+        targetPath = normalizePath(targetPath);
+        const parsed = parseDirectivesTokenList(dirTokens);
+        mergeRule(rulesDelta, targetPath, parsed);
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          const subClean = walk(v, targetPath);
+          if (subClean && typeof subClean === 'object' && Object.keys(subClean).length) {
+            Object.keys(subClean).forEach(() => {});
+          }
+        }
+      } else {
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          const sub = walk(v, curAbs ? `${curAbs}.${k}` : (basePath ? `${basePath}.${k}` : k));
+          setCleanAt(out, k, sub || {});
+        } else {
+          setCleanAt(out, k, v);
+        }
+      }
+    }
+    return out;
+  }
+  const cleaned = walk(valueTree, basePath || '');
+  const flatRules = {};
+  for (const [p, tokenBag] of Object.entries(rulesDelta)) {
+    for (const tok of tokenBag.tokens) {
+      if (!flatRules[p]) flatRules[p] = {};
+      const d = parseDirectivesTokenList([]);
+      if (tok.ro) d.ro = true;
+      if (tok.objectPolicy) d.objectPolicy = tok.objectPolicy;
+      if (tok.arrayPolicy) d.arrayPolicy = tok.arrayPolicy;
+      if (tok.constraints) d.constraints = structuredClone(tok.constraints);
+      const node = flatRules[p];
+      if (d.ro) node.ro = true;
+      if (d.objectPolicy) node.objectPolicy = d.objectPolicy;
+      if (d.arrayPolicy) node.arrayPolicy = d.arrayPolicy;
+      if (d.constraints) {
+        node.constraints = node.constraints || {};
+        if (d.constraints.min != null) node.constraints.min = d.constraints.min;
+        if (d.constraints.max != null) node.constraints.max = d.constraints.max;
+        if (d.constraints.enum) node.constraints.enum = d.constraints.enum.slice();
+        if (d.constraints.regex) node.constraints.regex = { source: d.constraints.regex.source, flags: d.constraints.regex.flags || '' };
+      }
+    }
+  }
+  return { cleanValue: cleaned, rulesDelta: flatRules };
+}
+function applyRulesDeltaToTable(delta) {
+  if (!delta || typeof delta !== 'object') return;
+  for (const [p, d] of Object.entries(delta)) {
+    applyRuleDelta(p, d);
+  }
+  rulesSaveToMeta();
+}
+function clampNumberWithConstraints(v, node) {
+  let out = Number(v);
+  if (!Number.isFinite(out)) return { ok: false };
+  const c = node?.constraints || {};
+  if (Number.isFinite(c.min)) out = Math.max(out, c.min);
+  if (Number.isFinite(c.max)) out = Math.min(out, c.max);
+  return { ok: true, value: out };
+}
+function checkStringWithConstraints(v, node) {
+  const s = String(v);
+  const c = node?.constraints || {};
+  if (Array.isArray(c.enum) && c.enum.length) {
+    if (!c.enum.includes(s)) return { ok: false };
+  }
+  if (c.regex && c.regex.source) {
+    let re = guardianState.regexCache[normalizePath(node.__path || '')];
+    if (!re) {
+      try {
+        re = new RegExp(c.regex.source, c.regex.flags || '');
+        guardianState.regexCache[normalizePath(node.__path || '')] = re;
+      } catch {}
+    }
+    if (re && !re.test(s)) return { ok: false };
+  }
+  return { ok: true, value: s };
+}
+function getParentPath(absPath) {
+  const segs = lwbSplitPathWithBrackets(absPath);
+  if (segs.length <= 1) return '';
+  return segs.slice(0, -1).map(s => String(s)).join('.');
+}
+function guardValidate(op, absPath, payload) {
+  if (guardianState.bypass) return { allow: true, value: payload };
+  const p = normalizePath(absPath);
+  const node = getRuleNode(p) || { typeLock: 'unknown', ro: false, objectPolicy: 'none', arrayPolicy: 'lock', constraints: {} };
+  if (node.ro) return { allow: false, reason: 'ro' };
+  const parentPath = getParentPath(p);
+  const parentNode = parentPath ? (getRuleNode(parentPath) || { objectPolicy: 'none', arrayPolicy: 'lock' }) : null;
+  const currentValue = getValueAtPath(p);
+  if (op === 'delNode') {
+    if (!parentPath) return { allow: false, reason: 'no-parent' };
+    const pp = getRuleNode(parentPath) || { objectPolicy: 'none', arrayPolicy: 'lock' };
+    const lastSeg = p.split('.').pop() || '';
+    const isIndex = /^\d+$/.test(lastSeg);
+    if (isIndex) {
+      if (!(pp.arrayPolicy === 'shrink' || pp.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-shrink' };
+      return { allow: true };
+    } else {
+      if (!(pp.objectPolicy === 'prune' || pp.objectPolicy === 'free')) return { allow: false, reason: 'object-no-prune' };
+      return { allow: true };
+    }
+  }
+  if (op === 'push') {
+    const arr = getValueAtPath(p);
+    if (arr === undefined) {
+      const lastSeg = p.split('.').pop() || '';
+      const isIndex = /^\d+$/.test(lastSeg);
+      if (parentPath) {
+        const parentVal = getValueAtPath(parentPath);
+        const pp = parentNode || { objectPolicy: 'none', arrayPolicy: 'lock' };
+        if (isIndex) {
+          if (!Array.isArray(parentVal)) return { allow: false, reason: 'parent-not-array' };
+          if (!(pp.arrayPolicy === 'grow' || pp.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-grow' };
+        } else {
+          if (!(pp.objectPolicy === 'ext' || pp.objectPolicy === 'free')) return { allow: false, reason: 'object-no-ext' };
+        }
+      }
+      const nn = ensureRuleNode(p);
+      nn.typeLock = 'array';
+      rulesSaveToMeta();
+      return { allow: true, value: payload };
+    }
+    if (!Array.isArray(arr)) {
+      if (node.typeLock !== 'unknown' && node.typeLock !== 'array') return { allow: false, reason: 'type-locked-not-array' };
+      return { allow: false, reason: 'not-array' };
+    }
+    if (!(node.arrayPolicy === 'grow' || node.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-grow' };
+    return { allow: true, value: payload };
+  }
+  if (op === 'bump') {
+    const delta = Number(payload);
+    if (!Number.isFinite(delta)) return { allow: false, reason: 'delta-nan' };
+    const cur = Number(currentValue);
+    if (!Number.isFinite(cur)) {
+      if (node.typeLock !== 'unknown' && node.typeLock !== 'number') return { allow: false, reason: 'type-locked-not-number' };
+      const base = 0 + delta;
+      const clamped = clampNumberWithConstraints(base, node);
+      if (!clamped.ok) return { allow: false, reason: 'number-constraint' };
+      setTypeLockIfUnknown(p, base);
+      return { allow: true, value: clamped.value };
+    }
+    const next = cur + delta;
+    const clamped = clampNumberWithConstraints(next, node);
+    if (!clamped.ok) return { allow: false, reason: 'number-constraint' };
+    return { allow: true, value: clamped.value };
+  }
+  if (op === 'set') {
+    const exists = currentValue !== undefined;
+    if (!exists) {
+      if (parentNode) {
+        const lastSeg = p.split('.').pop() || '';
+        const isIndex = /^\d+$/.test(lastSeg);
+        if (isIndex) {
+          if (!(parentNode.arrayPolicy === 'grow' || parentNode.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-grow' };
+        } else {
+          if (!(parentNode.objectPolicy === 'ext' || parentNode.objectPolicy === 'free')) return { allow: false, reason: 'object-no-ext' };
+        }
+      }
+    }
+    const incomingType = typeOfValue(payload);
+    if (node.typeLock !== 'unknown' && node.typeLock !== incomingType) return { allow: false, reason: 'type-locked-mismatch' };
+    if (incomingType === 'number') {
+      const clamped = clampNumberWithConstraints(payload, node);
+      if (!clamped.ok) return { allow: false, reason: 'number-constraint' };
+      setTypeLockIfUnknown(p, payload);
+      return { allow: true, value: clamped.value };
+    }
+    if (incomingType === 'string') {
+      const n2 = { ...node, __path: p };
+      const ok = checkStringWithConstraints(payload, n2);
+      if (!ok.ok) return { allow: false, reason: 'string-constraint' };
+      setTypeLockIfUnknown(p, payload);
+      return { allow: true, value: ok.value };
+    }
+    setTypeLockIfUnknown(p, payload);
+    return { allow: true, value: payload };
+  }
+  return { allow: true, value: payload };
+}
+function installVariableApiPatch() {
+  try {
+    const ctx = getContext();
+    const api = ctx?.variables?.local;
+    if (!api || guardianState.origVarApi) return;
+    guardianState.origVarApi = {
+      set: api.set?.bind(api),
+      add: api.add?.bind(api),
+      inc: api.inc?.bind(api),
+      dec: api.dec?.bind(api),
+      del: api.del?.bind(api),
+    };
+    if (guardianState.origVarApi.set) {
+      api.set = (name, value) => {
+        try {
+          if (guardianState.bypass) return guardianState.origVarApi.set(name, value);
+          let finalValue = value;
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            let hasRuleKey = false;
+            for (const k of Object.keys(value)) { if (k.startsWith('$')) { hasRuleKey = true; break; } }
+            if (hasRuleKey) {
+              const { cleanValue, rulesDelta } = rulesLoadFromTree(value, normalizePath(name));
+              finalValue = cleanValue;
+              applyRulesDeltaToTable(rulesDelta);
+            }
+          }
+          const res = guardValidate('set', normalizePath(name), finalValue);
+          if (!res.allow) return;
+          return guardianState.origVarApi.set(name, res.value);
+        } catch {
+          return;
+        }
+      };
+    }
+    if (guardianState.origVarApi.add) {
+      api.add = (name, delta) => {
+        try {
+          if (guardianState.bypass) return guardianState.origVarApi.add(name, delta);
+          const res = guardValidate('bump', normalizePath(name), delta);
+          if (!res.allow) return;
+          const cur = Number(getValueAtPath(normalizePath(name)));
+          if (!Number.isFinite(cur)) {
+            return guardianState.origVarApi.set(name, res.value);
+          }
+          const next = res.value;
+          const diff = Number(next) - cur;
+          return guardianState.origVarApi.add(name, diff);
+        } catch { return; }
+      };
+    }
+    if (guardianState.origVarApi.inc) {
+      api.inc = (name) => api.add ? api.add(name, 1) : undefined;
+    }
+    if (guardianState.origVarApi.dec) {
+      api.dec = (name) => api.add ? api.add(name, -1) : undefined;
+    }
+    if (guardianState.origVarApi.del) {
+      api.del = (name) => {
+        try {
+          if (guardianState.bypass) return guardianState.origVarApi.del(name);
+          const res = guardValidate('delNode', normalizePath(name));
+          if (!res.allow) return;
+          return guardianState.origVarApi.del(name);
+        } catch { return; }
+      };
+    }
+  } catch {}
+}
+function uninstallVariableApiPatch() {
+  try {
+    const ctx = getContext();
+    const api = ctx?.variables?.local;
+    if (!api || !guardianState.origVarApi) return;
+    if (guardianState.origVarApi.set) api.set = guardianState.origVarApi.set;
+    if (guardianState.origVarApi.add) api.add = guardianState.origVarApi.add;
+    if (guardianState.origVarApi.inc) api.inc = guardianState.origVarApi.inc;
+    if (guardianState.origVarApi.dec) api.dec = guardianState.origVarApi.dec;
+    if (guardianState.origVarApi.del) api.del = guardianState.origVarApi.del;
+    guardianState.origVarApi = null;
+  } catch {}
+}
+/* ============= 第八区：模块导出/初始化/清理 ============= */
+function bindEvents() {
+  try {
+    const { eventSource, event_types } = getContext() || {};
+    if (!eventSource || !event_types) return;
+    const onAnyRendered = (data) => {
+      try {
+        const id = typeof data === 'object' && data !== null ? (data.messageId ?? data.id ?? data) : data;
+        if (typeof id !== 'number') return;
+        applyVariablesForMessage(id);
+        applyXbGetVarForMessage(id, true);
+      } catch {}
+    };
+    if (event_types.USER_MESSAGE_RENDERED) {
+      eventSource.on(event_types.USER_MESSAGE_RENDERED, onAnyRendered);
+      listeners.push({ target: eventSource, event: event_types.USER_MESSAGE_RENDERED, handler: onAnyRendered });
+    }
+    if (event_types.CHARACTER_MESSAGE_RENDERED) {
+      eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onAnyRendered);
+      listeners.push({ target: eventSource, event: event_types.CHARACTER_MESSAGE_RENDERED, handler: onAnyRendered });
+    }
+    if (event_types.MESSAGE_UPDATED) {
+      eventSource.on(event_types.MESSAGE_UPDATED, onAnyRendered);
+      listeners.push({ target: eventSource, event: event_types.MESSAGE_UPDATED, handler: onAnyRendered });
+    }
+    if (event_types.MESSAGE_EDITED) {
+      eventSource.on(event_types.MESSAGE_EDITED, onAnyRendered);
+      listeners.push({ target: eventSource, event: event_types.MESSAGE_EDITED, handler: onAnyRendered });
+    }
+    if (event_types.MESSAGE_SWIPED) {
+      eventSource.on(event_types.MESSAGE_SWIPED, onAnyRendered);
+      listeners.push({ target: eventSource, event: event_types.MESSAGE_SWIPED, handler: onAnyRendered });
+    }
+    if (event_types.MESSAGE_DELETED) {
+      const onDeleted = (data) => {
+        try {
+          const id = typeof data === 'object' && data !== null ? (data.messageId ?? data.id ?? data) : data;
+          if (typeof id === 'number') clearSnapshotsFrom(id);
+        } catch {}
+      };
+      eventSource.on(event_types.MESSAGE_DELETED, onDeleted);
+      listeners.push({ target: eventSource, event: event_types.MESSAGE_DELETED, handler: onDeleted });
+    }
+    if (event_types.GENERATION_STARTED) {
+      const onGenStart = () => { try { snapshotPreviousFloor(); } catch {} };
+      eventSource.on(event_types.GENERATION_STARTED, onGenStart);
+      listeners.push({ target: eventSource, event: event_types.GENERATION_STARTED, handler: onGenStart });
+    }
+    if (event_types.GENERATION_ENDED) {
+      const onGenEnd = async () => { try { await executeQueuedVareventJsAfterTurn(); } catch {} };
+      eventSource.on(event_types.GENERATION_ENDED, onGenEnd);
+      listeners.push({ target: eventSource, event: event_types.GENERATION_ENDED, handler: onGenEnd });
+    }
+    if (event_types.CHAT_CHANGED) {
+      const onChatChanged = () => {
+        try {
+          drainPendingVareventBlocks();
+          runImmediateVarEventsDebounced();
+          const meta = getContext()?.chatMetadata || {};
+          meta[LWB_PLOT_APPLIED_KEY] = {};
+          getContext()?.saveMetadataDebounced?.();
+        } catch {}
+      };
+      eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
+      listeners.push({ target: eventSource, event: event_types.CHAT_CHANGED, handler: onChatChanged });
+    }
+    if (event_types.APP_READY) {
+      const onReady = () => { try { runImmediateVarEventsDebounced(); } catch {} };
+      eventSource.on(event_types.APP_READY, onReady);
+      listeners.push({ target: eventSource, event: event_types.APP_READY, handler: onReady });
+    }
+    const getMsgIdLoose = (payload) => {
+      if (payload && typeof payload === 'object') {
+        if (typeof payload.messageId === 'number') return payload.messageId;
+        if (typeof payload.id === 'number') return payload.id;
+      }
+      if (typeof payload === 'number') return payload;
+      const chat = getContext()?.chat || [];
+      return chat.length ? chat.length - 1 : undefined;
+    };
+    const getMsgIdStrictForDelete = (payload) => {
+      if (payload && typeof payload === 'object') {
+        if (typeof payload.id === 'number') return payload.id;
+        if (typeof payload.messageId === 'number') return payload.messageId;
+      }
+      if (typeof payload === 'number') return payload;
+      return undefined;
+    };
+    if (event_types.MESSAGE_SENT) {
+      on(eventSource, event_types.MESSAGE_SENT, async () => {
+        try {
+          snapshotCurrentLastFloor();
+          const chat = getContext()?.chat || [];
+          const id = chat.length ? chat.length - 1 : undefined;
+          if (typeof id === 'number') {
+            applyVariablesForMessage(id);
+            applyXbGetVarForMessage(id, true);
+          }
+        } catch {}
+      });
+    }
+    if (event_types.MESSAGE_RECEIVED) {
+      on(eventSource, event_types.MESSAGE_RECEIVED, async (data) => {
+        try {
+          const id = getMsgIdLoose(data);
+          if (typeof id === 'number') {
+            applyVariablesForMessage(id);
+            applyXbGetVarForMessage(id, true);
+            await executeQueuedVareventJsAfterTurn();
+          }
+        } catch {}
+      });
+    }
+    if (event_types.USER_MESSAGE_RENDERED) {
+      on(eventSource, event_types.USER_MESSAGE_RENDERED, (data) => {
+        try {
+          const id = getMsgIdLoose(data);
+          if (typeof id === 'number') snapshotForMessageId(id);
+        } catch {}
+      });
+    }
+    if (event_types.CHARACTER_MESSAGE_RENDERED) {
+      on(eventSource, event_types.CHARACTER_MESSAGE_RENDERED, (data) => {
+        try {
+          const id = getMsgIdLoose(data);
+          if (typeof id === 'number') snapshotForMessageId(id);
+        } catch {}
+      });
+    }
+    const pendingSwipeApply = new Map();
+    let lastSwipedId = undefined;
+    if (event_types.GENERATION_STARTED) {
+      on(eventSource, event_types.GENERATION_STARTED, (data) => {
+        try {
+          const t = (typeof data === 'string' ? data : (data?.type || data?.mode || data?.reason || '')).toLowerCase();
+          if (t === 'swipe') {
+            const id = lastSwipedId;
+            const tId = id != null ? pendingSwipeApply.get(id) : undefined;
+            if (tId) {
+              clearTimeout(tId);
+              pendingSwipeApply.delete(id);
+            }
+          }
+        } catch {}
+      });
+    }
+    if (event_types.MESSAGE_SWIPED) {
+      on(eventSource, event_types.MESSAGE_SWIPED, (data) => {
+        try {
+          const id = getMsgIdLoose(data);
+          if (typeof id === 'number') {
+            lastSwipedId = id;
+            clearAppliedFor(id);
+            rollbackToPreviousOf(id);
+            const tId = setTimeout(async () => {
+              pendingSwipeApply.delete(id);
+              applyVariablesForMessage(id);
+              await executeQueuedVareventJsAfterTurn();
+            }, 10);
+            pendingSwipeApply.set(id, tId);
+          }
+        } catch {}
+      });
+    }
+    if (event_types.MESSAGE_DELETED) {
+      on(eventSource, event_types.MESSAGE_DELETED, (data) => {
+        try {
+          const id = getMsgIdStrictForDelete(data);
+          if (typeof id === 'number') {
+            rollbackToPreviousOf(id);
+            clearSnapshotsFrom(id);
+            clearAppliedFrom(id);
+          }
+        } catch {}
+      });
+    }
+    if (event_types.MESSAGE_EDITED) {
+      on(eventSource, event_types.MESSAGE_EDITED, async (data) => {
+        try {
+          const id = getMsgIdLoose(data);
+          if (typeof id === 'number') {
+            clearAppliedFor(id);
+            rollbackToPreviousOf(id);
+            setTimeout(async () => {
+              applyVariablesForMessage(id);
+              applyXbGetVarForMessage(id, true);
+              try {
+                const ctx = getContext();
+                const msg = ctx?.chat?.[id];
+                if (msg) updateMessageBlock(id, msg, { rerenderMessage: true });
+              } catch {}
+              try {
+                if (eventSource?.emit && event_types?.MESSAGE_UPDATED) {
+                  await eventSource.emit(event_types.MESSAGE_UPDATED, id);
+                }
+              } catch {}
+              await executeQueuedVareventJsAfterTurn();
+            }, 10);
+          }
+        } catch {}
+      });
+    }
+  } catch {}
+}
 export function initVariablesCore(){
   if(initialized) return; initialized=true;
   bindEvents();
@@ -2742,11 +3685,19 @@ export function initVariablesCore(){
   try{ registerWIEventSystem(); }catch(e){}
   try{ installVarEventEditorUI(); }catch(e){}
   try{ registerPlotLogButton(); }catch{}
-  try{ if(typeof window?.registerModuleCleanup==='function'){ window.registerModuleCleanup(MODULE_ID, cleanupVariablesCore); } }catch{}
-}
+  try{ rulesLoadFromMeta(); }catch{}
+  try{ installVariableApiPatch(); }catch{}
+  try{
+    const { eventSource, event_types } = getContext() || {};
+    if (eventSource && event_types?.CHAT_CHANGED) {
+      on(eventSource, event_types.CHAT_CHANGED, () => {
+        try { rulesClearCache(); rulesLoadFromMeta(); const meta = getContext()?.chatMetadata || {}; meta[LWB_PLOT_APPLIED_KEY] = {}; getContext()?.saveMetadataDebounced?.(); } catch {}
+      });
+    }
+  }catch{}
+  try{ if(typeof window?.registerModuleCleanup==='function'){ window.registerModuleCleanup(MODULE_ID, cleanupVariablesCore); } }catch{} }
 export function cleanupVariablesCore(){
   try{ offAll(); }catch{}
-  try{ if(LWB_EDITOR_OBSERVER){ LWB_EDITOR_OBSERVER.disconnect(); LWB_EDITOR_OBSERVER=null; } }catch{}
   try{ qa(document, '.lwb-ve-overlay').forEach(el=>el.remove()); }catch{}
   try{ qa(document, '.lwb-var-editor-button').forEach(el=>el.remove()); }catch{}
   try{ document.getElementById('lwb-varevent-editor-styles')?.remove(); }catch{}
@@ -2760,6 +3711,9 @@ export function cleanupVariablesCore(){
   }catch{}
   try{ const { eventSource } = getContext()||{}; const orig = eventSource && origEmitMap && origEmitMap.get(eventSource); if(orig){ eventSource.emit = orig; origEmitMap.delete(eventSource); } }catch{}
   try{ const btn=document.getElementById(LWB_PLOTLOG_BTN_ID); if(btn){ btn.replaceWith(); } }catch{}
-  LWB_VAREDITOR_INSTALLED=false; initialized=false;
-}
+  try{ uninstallVariableApiPatch(); }catch{}
+  try{ rulesClearCache(); }catch{}
+  try{ guardBypass(false); }catch{}
+  try{ if (typeof window!=='undefined' && window.LWBVE) window.LWBVE.installed = false; }catch{}
+  initialized=false; }
 export { replaceXbGetVarInString };
