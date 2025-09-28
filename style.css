@@ -203,18 +203,15 @@ body.immersive-mode #chat {
     margin-top: 1em !important;
 }
 
-/* 宽屏时隐藏滚动条 */
 @media screen and (min-width: 1001px) {
     body.immersive-mode #chat {
         scrollbar-width: none;
-        /* Firefox */
         -ms-overflow-style: none;
         /* IE and Edge */
     }
 
     body.immersive-mode #chat::-webkit-scrollbar {
         display: none;
-        /* Chrome, Safari and Opera */
     }
 }
 
@@ -260,6 +257,10 @@ body.immersive-mode .mes_edit_buttons {
     position: absolute !important;
     top: 0 !important;
     right: 0 !important;
+}
+
+body.immersive-mode .mes_buttons {
+height: 20px;
 }
 
 body.immersive-mode .swipes-counter {
@@ -516,22 +517,19 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
 }
 
 /* ==================== 角色卡自动更新样式 (Character Updater) ==================== */
-/* === PRB styles (Preset ↔ Regex Binding) === */
-/* 放到任意可生效的样式里 */
 .character-menu-overlay.shadow_popup {
-  z-index: 9999;              /* 确保在设置抽屉之上 */
+  z-index: 9999;
 }
 .character-menu-overlay .character-menu-content {
-  pointer-events: auto;       /* 接受事件 */
+  pointer-events: auto;
 }
 .shadow_popup_open #some-settings-drawer-selector {
-  /* 如果你的设置抽屉脚本会根据类名判断，也可以在此禁止自动收起 */
 }
 
 .prb-popup-container .menu_button,
 .prb-actions .menu_button,
 .task_editor .menu_button{
-  white-space: nowrap;  /* 防止换行 */
+  white-space: nowrap;
 }
 
 .prb-list {
@@ -651,7 +649,6 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
     opacity: 1;
 }
 
-/* 角色编辑表单按钮样式 - 在角色编辑页面 */
 #character-updater-edit-button {
     color: var(--SmartThemeBodyColor);
     filter: grayscale(0.5);
@@ -1096,4 +1093,5 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
 .xiaobai_template_editor::-webkit-scrollbar-thumb {
     background: var(--SmartThemeBorderColor);
     border-radius: 3px;
+
 }
