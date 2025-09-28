@@ -2116,208 +2116,134 @@ function _segmentsRelativeToBase(absPath, basePath){
     return segs;
   }catch{ return []; }
 }
+
 function expandShorthandRuleObject(basePath, valueObj){
-    try{
-      if(!valueObj || typeof valueObj!== 'object' || Array.isArray(valueObj)) return null;
-      const out = {};
-      const normalOut = {};
-      const base = String(basePath||'');
+  try{
+    const base = String(basePath || '');
+    const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+    if (!isObj(valueObj)) return null;
 
-      function stripRuleKeysDeep(val){
-        if (Array.isArray(val)) return val.map(item => stripRuleKeysDeep(item));
-        if (val && typeof val === 'object'){
-          const obj = {};
-          for (const kk in val){
-            if (!Object.prototype.hasOwnProperty.call(val, kk)) continue;
-            const keyStr = String(kk);
-            if (keyStr.trim().startsWith('$')) {
-              const rest = keyStr.slice(1).trim();
-              const parts = rest.split(/\s+/).filter(Boolean);
-              if (parts.length > 0) {
-                const targetField = parts[parts.length - 1];
-                const cleanedValue = stripRuleKeysDeep(val[kk]);
-                obj[targetField] = cleanedValue;
-              }
-              continue;
-            }
-            obj[kk] = stripRuleKeysDeep(val[kk]);
-          }
-          return obj;
+    function stripDollarKeysDeep(val){
+      if (Array.isArray(val)) return val.map(stripDollarKeysDeep);
+      if (isObj(val)){
+        const out = {};
+        for (const k in val){
+          if (!Object.prototype.hasOwnProperty.call(val, k)) continue;
+          if (String(k).trim().startsWith('$')) continue;
+          out[k] = stripDollarKeysDeep(val[k]);
         }
-        return val;
+        return out;
       }
+      return val;
+    }
 
-      function formatPathWithBrackets(pathStr){
-        try{
-          const segs = lwbSplitPathWithBrackets(String(pathStr||''));
-          let outPath = '';
-          for (let i=0;i<segs.length;i++){
-            const s = segs[i];
-            if (typeof s === 'number') {
-              outPath += `[${s}]`;
-            } else {
-              outPath += outPath ? `.${s}` : `${s}`;
-            }
-          }
-          return outPath;
-        }catch{ return String(pathStr||''); }
+    function formatPathWithBrackets(pathStr){
+      const segs = lwbSplitPathWithBrackets(String(pathStr||''));
+      let out = '';
+      for (const s of segs){
+        if (typeof s === 'number') out += `[${s}]`;
+        else out += out ? `.${s}` : `${s}`;
       }
-
-      function processObject(obj, currentPath) {
-        for (const k in obj){
-          if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
-          const v = obj[k];
-          const keyStr = String(k);
-          const isRule = keyStr.trim().startsWith('$');
-
-          if (isRule) {
-            const rest = keyStr.slice(1).trim();
-            const parts = rest.split(/\s+/).filter(Boolean);
-            if (!parts.length) continue;
-
-            const ruleTarget = parts[parts.length - 1];
-            const dirTokens = parts.slice(0, parts.length - 1);
-            const dirTokensNormalized = dirTokens.map(t =>
-              String(t || '').trim().startsWith('$') ? String(t).trim() : ('$' + String(t).trim())
-            );
-
-            const fullTargetPath = currentPath ? `${currentPath}.${ruleTarget}` : ruleTarget;
-            const absTarget = _ensureAbsTargetPath(base, fullTargetPath);
-            const absTargetDisplay = formatPathWithBrackets(absTarget);
-            const ruleKey = `$ ${dirTokensNormalized.join(' ')} ${absTargetDisplay}`.trim();
-            out[ruleKey] = {};
-
-            if (v !== undefined) {
-              const relSegs = _segmentsRelativeToBase(absTarget, base);
-              if (relSegs.length) {
-                if (Array.isArray(v)) {
-                  const cleanedArr = new Array(v.length);
-                  for (let i = 0; i < v.length; i++){
-                    const el = v[i];
-                    if (el && typeof el === 'object' && !Array.isArray(el)){
-                      let hasRule = false;
-                      const cleanEl = {};
-                      for (const ek in el){
-                        if (!Object.prototype.hasOwnProperty.call(el, ek)) continue;
-                        const ev = el[ek];
-                        const ekStr = String(ek);
-                        if (ekStr.trim().startsWith('$')){
-                          hasRule = true;
-                          const rest2 = ekStr.slice(1).trim();
-                          const parts2 = rest2.split(/\s+/).filter(Boolean);
-                          if (parts2.length){
-                            const ruleTarget2 = parts2[parts2.length - 1];
-                            if (ev !== undefined) cleanEl[ruleTarget2] = stripRuleKeysDeep(ev);
-                          }
-                        } else {
-                          cleanEl[ek] = stripRuleKeysDeep(ev);
-                        }
-                      }
-                      if (hasRule){
-                        processObject(el, `${relSegs.join('.')}.${i}`);
-                      }
-                      cleanedArr[i] = cleanEl;
-                    } else {
-                      cleanedArr[i] = stripRuleKeysDeep(el);
-                    }
-                  }
-                  _setDeepBySegments(normalOut, relSegs, cleanedArr);
-                } else if (v && typeof v === 'object' && !Array.isArray(v)) {
-                  if (_hasTopLevelRuleKey(v)){
-                    processObject(v, relSegs.join('.'));
-                  }
-                  const cleaned = stripRuleKeysDeep(v);
-                  if (cleaned && typeof cleaned === 'object' && !Array.isArray(cleaned) && Object.keys(cleaned).length === 0){
-                  } else {
-                    _setDeepBySegments(normalOut, relSegs, cleaned);
-                  }
-                } else {
-                  _setDeepBySegments(normalOut, relSegs, v);
-                }
-              }
-            }
-          } else {
-            const newPath = currentPath ? `${currentPath}.${k}` : k;
-
-            if (Array.isArray(v)){
-              const cleanedArr = new Array(v.length);
-              for (let i = 0; i < v.length; i++){
-                const el = v[i];
-                if (el && typeof el === 'object' && !Array.isArray(el)){
-                  let hasRule = false;
-                  const cleanEl = {};
-                  for (const ek in el){
-                    if (!Object.prototype.hasOwnProperty.call(el, ek)) continue;
-                    const ev = el[ek];
-                    const ekStr = String(ek);
-                    if (ekStr.trim().startsWith('$')){
-                      hasRule = true;
-                      const rest2 = ekStr.slice(1).trim();
-                      const parts2 = rest2.split(/\s+/).filter(Boolean);
-                      if (parts2.length){
-                        const ruleTarget2 = parts2[parts2.length - 1];
-                        if (ev !== undefined) cleanEl[ruleTarget2] = stripRuleKeysDeep(ev);
-                      }
-                    } else {
-                      cleanEl[ek] = stripRuleKeysDeep(ev);
-                    }
-                  }
-                  if (hasRule){
-                    processObject(el, `${newPath}.${i}`);
-                  }
-                  cleanedArr[i] = cleanEl;
-                } else {
-                  cleanedArr[i] = stripRuleKeysDeep(el);
-                }
-              }
-              const relSegs = currentPath ?
-                _segmentsRelativeToBase(`${base}.${newPath}`, base) :
-                [k];
-              _setDeepBySegments(normalOut, relSegs, cleanedArr);
-            } else if (v && typeof v === 'object' && !Array.isArray(v)) {
-              const hasRules = _hasTopLevelRuleKey(v);
-              const relSegs = currentPath ?
-                _segmentsRelativeToBase(`${base}.${newPath}`, base) :
-                [k];
-
-              if (hasRules) {
-                processObject(v, newPath);
-                const cleaned = stripRuleKeysDeep(v);
-                if (!(cleaned && typeof cleaned === 'object' && !Array.isArray(cleaned) && Object.keys(cleaned).length === 0)){
-                  _setDeepBySegments(normalOut, relSegs, cleaned);
-                }
-              } else {
-                _setDeepBySegments(normalOut, relSegs, v);
-              }
-            } else {
-              const relSegs = currentPath ?
-                _segmentsRelativeToBase(`${base}.${newPath}`, base) :
-                [k];
-              _setDeepBySegments(normalOut, relSegs, v);
-            }
-          }
-        }
-      }
-
-      processObject(valueObj, '');
-
-      function assignDeep(obj, src){
-        for (const k in src){
-          if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
-          const v = src[k];
-          if (v && typeof v==='object' && !Array.isArray(v)){
-            if (!obj[k] || typeof obj[k] !== 'object' || Array.isArray(obj[k])) obj[k] = {};
-            assignDeep(obj[k], v);
-          } else {
-            obj[k] = v;
-          }
-        }
-      }
-      assignDeep(out, normalOut);
-
       return out;
-    }catch{ return null; }
-  }
+    }
+
+    function assignDeep(dst, src){
+      for (const k in src){
+        if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
+        const v = src[k];
+        if (v && typeof v==='object' && !Array.isArray(v)){
+          if (!dst[k] || typeof dst[k] !== 'object' || Array.isArray(dst[k])) dst[k] = {};
+          assignDeep(dst[k], v);
+        } else {
+          dst[k] = v;
+        }
+      }
+    }
+
+    const rulesTop = {};
+    const dataTree = {};
+
+    function writeDataAt(relPathStr, val){
+      const abs = _ensureAbsTargetPath(base, relPathStr);
+      const relSegs = _segmentsRelativeToBase(abs, base);
+      if (relSegs.length){
+        _setDeepBySegments(dataTree, relSegs, val);
+      } else {
+        if (val && typeof val==='object' && !Array.isArray(val)) {
+          assignDeep(dataTree, val);
+        } else {
+          dataTree['$root'] = val;
+        }
+      }
+    }
+
+    function walk(node, currentRelPathStr){
+      if (Array.isArray(node)){
+        const cleanedArr = node.map(stripDollarKeysDeep);
+        if (currentRelPathStr) writeDataAt(currentRelPathStr, cleanedArr);
+        for (let i=0;i<node.length;i++){
+          const el = node[i];
+          if (el && typeof el === 'object'){
+            const childRel = currentRelPathStr ? `${currentRelPathStr}.${i}` : String(i);
+            walk(el, childRel);
+          }
+        }
+        return;
+      }
+
+      if (!isObj(node)){
+        if (currentRelPathStr) writeDataAt(currentRelPathStr, node);
+        return;
+      }
+
+      const cleaned = stripDollarKeysDeep(node);
+      if (currentRelPathStr) writeDataAt(currentRelPathStr, cleaned);
+      else assignDeep(dataTree, cleaned);
+
+      for (const key in node){
+        if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+        const v = node[key];
+        const keyStr = String(key).trim();
+        const isRule = keyStr.startsWith('$');
+
+        if (!isRule){
+          const childRel = currentRelPathStr ? `${currentRelPathStr}.${keyStr}` : keyStr;
+          if (v && typeof v === 'object') walk(v, childRel);
+          continue;
+        }
+
+        const rest = keyStr.slice(1).trim();
+        if (!rest) continue;
+        const parts = rest.split(/\s+/).filter(Boolean);
+        if (!parts.length) continue;
+
+        const targetToken = parts.pop();
+        const dirs = parts.map(t => String(t).trim().startsWith('$') ? String(t).trim() : ('$' + String(t).trim()));
+        const fullRelTarget = currentRelPathStr ? `${currentRelPathStr}.${targetToken}` : targetToken;
+
+        const absTarget = _ensureAbsTargetPath(base, fullRelTarget);
+        const absDisplay = formatPathWithBrackets(absTarget);
+        const ruleKey = `$ ${dirs.join(' ')} ${absDisplay}`.trim();
+        rulesTop[ruleKey] = {};
+
+        if (v !== undefined){
+          const cleanedVal = stripDollarKeysDeep(v);
+          writeDataAt(fullRelTarget, cleanedVal);
+          if (v && typeof v === 'object'){
+            walk(v, fullRelTarget);
+          }
+        }
+      }
+    }
+
+    walk(valueObj, '');
+
+    const out = {};
+    assignDeep(out, rulesTop);
+    assignDeep(out, dataTree);
+    return out;
+  }catch{ return null; }
+}
 
 function lwbSplitPathWithBrackets(path){
   const s = String(path || '');
@@ -2410,7 +2336,7 @@ function replaceXbGetVarInChat(chat){
       const key=_getMsgKey(msg); if(!key) continue;
       const old=String(msg[key]??''); if(old.indexOf('{{xbgetvar::')===-1) continue;
       msg[key]=replaceXbGetVarInString(old);
-    }catch{}
+    }catch{};
   }
 }
 function applyXbGetVarForMessage(messageId,writeback=true){
@@ -2542,7 +2468,7 @@ function registerXbSetVarSlashCommand(){
                 toSet = expandedStr;
                 try { console.log('[LWB:/xbsetvar] 规则展开为:', `/xbsetvar key=${String(path||'')} ${expandedStr}`); } catch {}
               }
-            }            
+            }
           }catch{}
           lwbAssignVarPath(path, toSet);
           return '';
@@ -2550,6 +2476,7 @@ function registerXbSetVarSlashCommand(){
       },
     }));
   } catch {} }
+
 
 /* ============= 第五区：快照/回滚器 ============= */
 const SNAP_STORE_KEY = 'LWB_SNAP';
