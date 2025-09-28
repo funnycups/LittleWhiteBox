@@ -260,7 +260,8 @@ body.immersive-mode .mes_edit_buttons {
 }
 
 body.immersive-mode .mes_buttons {
-height: 20px;
+    height: 20px;
+    overflow-x: clip;
 }
 
 body.immersive-mode .swipes-counter {
@@ -1095,3 +1096,4 @@ body.immersive-mode .flex-container.flex1.alignitemscenter {
     border-radius: 3px;
 
 }
+
