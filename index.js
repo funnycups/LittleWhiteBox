@@ -1,5 +1,7 @@
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types, getRequestHeaders } from "../../../../script.js";
+import { getUserAvatar } from '../../../personas.js';
+import { default_user_avatar, default_avatar } from '../../../../script.js';
 import { statsTracker } from "./relationship-metrics.js";
 import { initTasks } from "./scheduledTasks.js";
 import { initScriptAssistant } from "./scriptAssistant.js";
@@ -478,7 +480,41 @@ function registerIframeMapping(iframe, wrapper) {
 let lastApplyTs = 0;
 let pendingHeight = null;
 let pendingRec = null;
+function resolveAvatarUrls() {
+    const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
+    const toAbsUrl = (relOrUrl) => {
+        if (!relOrUrl) return '';
+        const s = String(relOrUrl);
+        if (/^(data:|blob:|https?:)/i.test(s)) return s;
+        const encoded = s.split('/').map(seg => encodeURIComponent(seg)).join('/');
+        return `${origin}/${encoded.replace(/^\/+/, '')}`;
+    };
+    const pickSrc = (selectors) => {
+        for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el && el.src) return el.src;
+        }
+        return '';
+    };
 
+    let user = pickSrc([
+        '#user_avatar_block img',
+        '#avatar_user img',
+        '.user_avatar img',
+        'img#avatar_user',
+        '.st-user-avatar img'
+    ]) || default_user_avatar;
+
+    const ctx = getContext?.() || {};
+    const chId = ctx.characterId ?? ctx.this_chid;
+    const ch = Array.isArray(ctx.characters) ? ctx.characters[chId] : null;
+    let char = ch?.avatar || default_avatar;
+    if (char && !/^(data:|blob:|https?:)/i.test(char)) {
+        char = /[\/]/.test(char) ? char.replace(/^\/+/, '') : `characters/${char}`;
+    }
+
+    return { user: toAbsUrl(user), char: toAbsUrl(char) };
+}
 function handleIframeMessage(event) {
     const data = event.data || {};
     let rec = winMap.get(event.source);
@@ -499,7 +535,7 @@ function handleIframeMessage(event) {
         if (!data.force && Math.abs(next - prev) < 1) return;
         if (data.force) {
             lastHeights.set(rec.iframe, next);
-            requestAnimationFrame(() => { rec.iframe.style.height = `${next}px` });
+            requestAnimationFrame(() => { rec.iframe.style.height = `${next}px`; });
             return;
         }
         pendingHeight = next;
@@ -511,7 +547,7 @@ function handleIframeMessage(event) {
             const h = pendingHeight, r = pendingRec;
             pendingHeight = null; pendingRec = null;
             lastHeights.set(r.iframe, h);
-            requestAnimationFrame(() => { r.iframe.style.height = `${h}px` });
+            requestAnimationFrame(() => { r.iframe.style.height = `${h}px`; });
         } else {
             setTimeout(() => {
                 if (pendingRec && pendingHeight != null) {
@@ -519,7 +555,7 @@ function handleIframeMessage(event) {
                     const h = pendingHeight, r = pendingRec;
                     pendingHeight = null; pendingRec = null;
                     lastHeights.set(r.iframe, h);
-                    requestAnimationFrame(() => { r.iframe.style.height = `${h}px` });
+                    requestAnimationFrame(() => { r.iframe.style.height = `${h}px`; });
                 }
             }, Math.max(0, 50 - dt));
         }
@@ -529,6 +565,16 @@ function handleIframeMessage(event) {
         executeSlashCommand(data.command)
             .then(result => event.source.postMessage({ source: 'xiaobaix-host', type: 'commandResult', id: data.id, result }, '*'))
             .catch(err => event.source.postMessage({ source: 'xiaobaix-host', type: 'commandError', id: data.id, error: err.message || String(err) }, '*'));
+        return;
+    }
+    if (data && data.type === 'getAvatars') {
+        try {
+            const urls = resolveAvatarUrls();
+            event.source?.postMessage({ source: 'xiaobaix-host', type: 'avatars', urls }, '*');
+        } catch (e) {
+            event.source?.postMessage({ source: 'xiaobaix-host', type: 'avatars', urls: { user: '', char: '' } }, '*');
+        }
+        return;
     }
 }
 

@@ -2,29 +2,28 @@
   function defineCallGenerate(){
     function sanitizeOptions(options){
       try{
-        return JSON.parse(JSON.stringify(options, function(k,v){ return (typeof v==='function')?undefined:v }))
+        return JSON.parse(JSON.stringify(options,function(k,v){return(typeof v==='function')?undefined:v}))
       }catch(_){
         try{
           const seen=new WeakSet();
           const clone=(val)=>{
-            if(val===null||val===undefined) return val;
+            if(val===null||val===undefined)return val;
             const t=typeof val;
-            if(t==='function') return undefined;
-            if(t!=='object') return val;
-            if(seen.has(val)) return undefined;
+            if(t==='function')return undefined;
+            if(t!=='object')return val;
+            if(seen.has(val))return undefined;
             seen.add(val);
             if(Array.isArray(val)){
-              const arr=[]; for(let i=0;i<val.length;i++){ const v=clone(val[i]); if(v!==undefined) arr.push(v); } return arr;
+              const arr=[];for(let i=0;i<val.length;i++){const v=clone(val[i]);if(v!==undefined)arr.push(v)}return arr;
             }
-            // 非纯对象（如 DOM/Window/Map/Set）直接跳过，避免克隆失败
             const proto=Object.getPrototypeOf(val);
-            if(proto!==Object.prototype && proto!==null) return undefined;
+            if(proto!==Object.prototype&&proto!==null)return undefined;
             const out={};
-            for(const k in val){ if(Object.prototype.hasOwnProperty.call(val,k)){ const v=clone(val[k]); if(v!==undefined) out[k]=v; } }
+            for(const k in val){if(Object.prototype.hasOwnProperty.call(val,k)){const v=clone(val[k]);if(v!==undefined)out[k]=v}}
             return out;
           };
           return clone(options);
-        }catch(__){ return {}; }
+        }catch(__){return{}}
       }
     }
     function CallGenerateImpl(options){
@@ -59,4 +58,48 @@
     try{window.__xb_callGenerate_loaded=true}catch(e){}
   }
   try{defineCallGenerate()}catch(e){}
+})();
+
+(function(){
+  function applyAvatarCss(urls){
+    try{
+      const root=document.documentElement;
+      root.style.setProperty('--xb-user-avatar',urls&&urls.user?`url("${urls.user}")`:'none');
+      root.style.setProperty('--xb-char-avatar',urls&&urls.char?`url("${urls.char}")`:'none');
+      if(!document.getElementById('xb-avatar-style')){
+        const css=`
+          .xb-avatar,.xb-user-avatar,.xb-char-avatar{
+            width:36px;height:36px;border-radius:50%;
+            background-size:cover;background-position:center;background-repeat:no-repeat;
+            display:inline-block
+          }
+          .xb-user-avatar{background-image:var(--xb-user-avatar)}
+          .xb-char-avatar{background-image:var(--xb-char-avatar)}
+        `;
+        const style=document.createElement('style');
+        style.id='xb-avatar-style';
+        style.textContent=css;
+        document.head.appendChild(style);
+      }
+    }catch(_){}
+  }
+  function requestAvatars(){
+    try{parent.postMessage({type:'getAvatars'},'*')}catch(_){}
+  }
+  function onMessage(e){
+    const d=e&&e.data||{};
+    if(d&&d.source==='xiaobaix-host'&&d.type==='avatars'){
+      applyAvatarCss(d.urls);
+      try{window.removeEventListener('message',onMessage)}catch(_){}
+    }
+  }
+  try{
+    window.addEventListener('message',onMessage);
+    if(document.readyState==='loading'){
+      document.addEventListener('DOMContentLoaded',requestAvatars,{once:true});
+    }else{
+      requestAvatars();
+    }
+    window.addEventListener('load',requestAvatars,{once:true});
+  }catch(_){}
 })();
