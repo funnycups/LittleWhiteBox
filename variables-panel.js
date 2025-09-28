@@ -69,6 +69,26 @@ const EMBEDDED_CSS = `
 .vm-null-value{opacity:.6}
 .mes_btn.mes_variables_panel{opacity:.6}
 .mes_btn.mes_variables_panel:hover{opacity:1}
+.vm-badges{display:inline-flex;gap:6px;margin-left:6px;align-items:center}
+.vm-badge[data-type="ro"]{color:#F9C770}
+.vm-badge[data-type="struct"]{color:#48B0C7}
+.vm-badge[data-type="cons"]{color:#D95E37}
+.vm-badge:hover{opacity:1;filter:saturate(1.2)}
+:root{--vm-badge-nudge:0.06em}
+.vm-item-name{display:inline-flex;align-items:center}
+.vm-badges{display:inline-flex;gap:.35em;margin-left:.35em}
+.vm-item-name .vm-badge{
+  display:flex;
+  width:1em;
+  position:relative;
+  top:var(--vm-badge-nudge) !important;
+  opacity:.9;
+}
+.vm-item-name .vm-badge i{
+  display:block;
+  font-size:.8em;
+  line-height:1em;
+}
 `;
 
 const EMBEDDED_HTML = `
@@ -118,11 +138,69 @@ const VARIABLE_TYPES = {
     }
 };
 
+const LWB_RULES_KEY = 'LWB_RULES';
+function getRulesTable() {
+  try { return (getContext()?.chatMetadata?.[LWB_RULES_KEY]) || {}; } catch { return {}; }
+}
+function normalizePathForRules(pathArr) {
+  try { return (pathArr||[]).map(x => String(x)).join('.'); } catch { return ''; }
+}
+function getRuleNodeByPath(pathArr) {
+  const key = normalizePathForRules(pathArr);
+  const tbl = getRulesTable();
+  return key ? tbl[key] : undefined;
+}
+function hasAnyRule(node) {
+  if (!node) return false;
+  if (node.ro) return true;
+  if (node.objectPolicy && node.objectPolicy !== 'none') return true;
+  if (node.arrayPolicy && node.arrayPolicy !== 'lock') return true;
+  const c = node.constraints || {};
+  if ('min' in c || 'max' in c) return true;
+  if (Array.isArray(c.enum) && c.enum.length) return true;
+  if (c.regex && c.regex.source) return true;
+  return false;
+}
+function buildRuleTooltip(node) {
+  if (!node) return '';
+  const lines = [];
+  if (node.ro) lines.push('只读：$ro');
+  if (node.objectPolicy) {
+    const map = { none:'(默认：不可增删键)', ext:'$ext（可增键）', prune:'$prune（可删键）', free:'$free（可增删键）' };
+    lines.push(`对象策略：${map[node.objectPolicy] || node.objectPolicy}`);
+  }
+  if (node.arrayPolicy) {
+    const map = { lock:'(默认：不可增删项)', grow:'$grow（可增项）', shrink:'$shrink（可删项）', list:'$list（可增删项）' };
+    lines.push(`数组策略：${map[node.arrayPolicy] || node.arrayPolicy}`);
+  }
+  const c = node.constraints || {};
+  if ('min' in c || 'max' in c) {
+    if ('min' in c && 'max' in c) lines.push(`范围：$range=[${c.min},${c.max}]`);
+    else if ('min' in c) lines.push(`下限：$min=${c.min}`);
+    else if ('max' in c) lines.push(`上限：$max=${c.max}`);
+  }
+  if (Array.isArray(c.enum) && c.enum.length) lines.push(`枚举：$enum={${c.enum.join(';')}}`);
+  if (c.regex && c.regex.source) lines.push(`正则：$match=/${c.regex.source}/${c.regex.flags||''}`);
+  return lines.join('\n');
+}
+function renderBadges(node) {
+  if (!node) return '';
+  const badges = [];
+  if (node.ro) badges.push(`<span class="vm-badge" data-type="ro" title="${buildRuleTooltip(node).replace(/"/g,'&quot;')}"><i class="fa-solid fa-shield-halved"></i></span>`);
+  const hasStruct = (node.objectPolicy && node.objectPolicy !== 'none') || (node.arrayPolicy && node.arrayPolicy !== 'lock');
+  if (hasStruct) badges.push(`<span class="vm-badge" data-type="struct" title="${buildRuleTooltip(node).replace(/"/g,'&quot;')}"><i class="fa-solid fa-diagram-project"></i></span>`);
+  const c = node.constraints || {};
+  const hasCons = ('min' in c) || ('max' in c) || (Array.isArray(c.enum) && c.enum.length) || (c.regex && c.regex.source);
+  if (hasCons) badges.push(`<span class="vm-badge" data-type="cons" title="${buildRuleTooltip(node).replace(/"/g,'&quot;')}"><i class="fa-solid fa-ruler-vertical"></i></span>`);
+  if (!badges.length) return '';
+  return `<span class="vm-badges">${badges.join('')}</span>`;
+}
+
 function debounce(fn, wait = 200) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), wait); }; }
 
 class VariablesPanel {
     constructor() {
-        this.state = { isOpen: false, isEnabled: false, container: null, timers: { watcher: null, longPress: null, touch: new Map() }, currentInlineForm: null, formState: {} };
+        this.state = { isOpen: false, isEnabled: false, container: null, timers: { watcher: null, longPress: null, touch: new Map() }, currentInlineForm: null, formState: {}, rulesChecksum: '' };
         this.variableSnapshot = null; this.eventHandlers = {}; this.savingInProgress = false;
     }
 
@@ -150,7 +228,7 @@ class VariablesPanel {
         this.stopWatcher(); this.unbindEvents(); this.unbindControlToggle(); this.removeContainer(); this.removeAllMessageButtons();
         const t = this.state.timers; if (t.watcher) clearInterval(t.watcher); if (t.longPress) clearTimeout(t.longPress);
         t.touch.forEach(x => clearTimeout(x)); t.touch.clear();
-        Object.assign(this.state, { isOpen: false, timers: { watcher: null, longPress: null, touch: new Map() }, currentInlineForm: null, formState: {} });
+        Object.assign(this.state, { isOpen: false, timers: { watcher: null, longPress: null, touch: new Map() }, currentInlineForm: null, formState: {}, rulesChecksum: '' });
         this.variableSnapshot = null; this.savingInProgress = false;
     }
 
@@ -163,7 +241,7 @@ class VariablesPanel {
     }
     removeContainer() { this.state.container?.remove(); this.state.container = null; }
 
-    open() { if (!this.state.isEnabled) return toastr.warning('请先启用变量面板'); this.createContainer(); this.bindEvents(); this.state.isOpen = true; this.state.container.show(); this.loadVariables(); this.startWatcher(); }
+    open() { if (!this.state.isEnabled) return toastr.warning('请先启用变量面板'); this.createContainer(); this.bindEvents(); this.state.isOpen = true; this.state.container.show(); this.rulesChecksum = JSON.stringify(getRulesTable() || {}); this.loadVariables(); this.startWatcher(); }
     close() { this.state.isOpen = false; this.stopWatcher(); this.unbindEvents(); this.removeContainer(); }
 
     bindControlToggle() {
@@ -256,11 +334,20 @@ class VariablesPanel {
 
     checkChanges() {
         try {
+            try {
+                const rt = getRulesTable();
+                const sum = JSON.stringify(rt);
+                if (sum !== this.state.rulesChecksum) {
+                    this.state.rulesChecksum = sum;
+                    const statesR = this.saveAllExpandedStates();
+                    this.loadVariables();
+                    this.restoreAllExpandedStates(statesR);
+                }
+            } catch {}
             const cur = {
                 character: this.makeSnapshotMap('character'),
                 global: this.makeSnapshotMap('global'),
             };
-
             const changed = { character: new Set(), global: new Set() };
             ['character', 'global'].forEach(t => {
                 const prev = this.variableSnapshot?.[t] || {};
@@ -270,9 +357,7 @@ class VariablesPanel {
                     if (!(k in prev) || !(k in now) || prev[k] !== now[k]) changed[t].add(k);
                 });
             });
-
             const varsChanged = changed.character.size || changed.global.size;
-
             if (varsChanged) {
                 const states = this.saveAllExpandedStates();
                 this.variableSnapshot = cur;
@@ -280,7 +365,7 @@ class VariablesPanel {
                 this.restoreAllExpandedStates(states);
                 this.expandChangedKeys(changed);
             }
-        } catch (e) { console.warn('[Variables Panel] watch error:', e); }
+        } catch (e) {}
     }
 
     loadVariables() { ['character', 'global'].forEach(t => { this.renderVariables(t); $(`#${t}-variables-section [data-act="collapse"] i`).removeClass('fa-chevron-up').addClass('fa-chevron-down'); }); }
@@ -288,18 +373,20 @@ class VariablesPanel {
         const c = $(`#${t}-variables-list`).empty(), s = this.store(t);
         const root = Object.entries(s);
         if (!root.length) c.append('<div class="vm-empty-message">暂无变量</div>');
-        else root.forEach(([k, v]) => c.append(this.createVariableItem(t, k, v)));
+        else root.forEach(([k, v]) => c.append(this.createVariableItem(t, k, v, 0, [k])));
     }
 
-    createVariableItem(t, k, v, l = 0) {
+    createVariableItem(t, k, v, l = 0, fullPath = []) {
         const disp = l === 0 ? this.formatTopLevelValue(v) : this.formatValue(v), parsed = this.parseValue(v), hasChildren = typeof parsed === 'object' && parsed !== null;
-        return $(`<div class="vm-item ${l > 0 ? 'vm-tree-level-var' : ''}" data-key="${k}" data-type="${t || ''}" ${l > 0 ? `data-level="${l}"` : ''}>
+        const ruleNode = getRuleNodeByPath(fullPath);
+        const badgesHtml = hasAnyRule(ruleNode) ? renderBadges(ruleNode) : '';
+        return $(`<div class="vm-item ${l > 0 ? 'vm-tree-level-var' : ''}" data-key="${k}" data-type="${t || ''}" ${l > 0 ? `data-level="${l}"` : ''} data-path="${this.escape(normalizePathForRules(fullPath))}">
       <div class="vm-item-header">
-        <div class="vm-item-name vm-item-name-visible">${this.escape(k)}<span class="vm-item-separator">:</span></div>
+        <div class="vm-item-name vm-item-name-visible">${this.escape(k)}${badgesHtml}<span class="vm-item-separator">:</span></div>
         <div class="vm-tree-value">${disp}</div>
         <div class="vm-item-controls">${this.createButtons('item', l)}</div>
       </div>
-      ${hasChildren ? `<div class="vm-item-content">${this.renderChildren(parsed, l + 1)}</div>` : ''}
+      ${hasChildren ? `<div class="vm-item-content">${this.renderChildren(parsed, l + 1, fullPath)}</div>` : ''}
     </div>`);
     }
     createButtons(type) {
@@ -326,7 +413,7 @@ class VariablesPanel {
         setTimeout(() => { inf.addClass('active'); inf.find('.inline-name').focus(); }, 10);
         return inf;
     }
-    renderChildren(obj, level) { return Object.entries(obj).map(([k, v]) => this.createVariableItem(null, k, v, level)[0].outerHTML).join(''); }
+    renderChildren(obj, level, parentPath) { return Object.entries(obj).map(([k, v]) => this.createVariableItem(null, k, v, level, [...(parentPath||[]), k])[0].outerHTML).join(''); }
 
     handleTouch(e) {
         if ($(e.target).closest('.vm-item-controls').length) return;
@@ -440,7 +527,7 @@ class VariablesPanel {
             });
             this.hideInlineForm();
             toastr.success('变量已保存');
-        } catch (e) { console.error(e); toastr.error('JSON格式错误: ' + e.message); }
+        } catch (e) { toastr.error('JSON格式错误: ' + e.message); }
         finally { this.savingInProgress = false; }
     }
     hideInlineForm() { if (this.state.currentInlineForm) { this.state.currentInlineForm.removeClass('active'); setTimeout(() => { this.state.currentInlineForm?.remove(); this.state.currentInlineForm = null; }, 200); } this.state.formState = {}; }
