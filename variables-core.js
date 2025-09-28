@@ -2100,7 +2100,6 @@ function _ensureAbsTargetPath(basePath, token){
     const t = String(token||'').trim();
     if(!t) return String(basePath||'');
     const base = String(basePath||'');
-    // 若已以 basePath 开头，则认为是绝对路径；否则前缀 basePath.
     if (t === base || t.startsWith(base + '.')) return t;
     return base ? (base + '.' + t) : t;
   }catch{ return String(basePath||''); }
@@ -2114,7 +2113,6 @@ function _segmentsRelativeToBase(absPath, basePath){
     if(baseSegs.length && String(segs[0])===String(baseSegs[0])){
       return segs.slice(1);
     }
-    // 若无法匹配根，则按原样（整个路径作为相对段）
     return segs;
   }catch{ return []; }
 }
@@ -2125,14 +2123,23 @@ function expandShorthandRuleObject(basePath, valueObj){
       const normalOut = {};
       const base = String(basePath||'');
 
-      // 深拷贝移除所有以 $ 开头的规则键（对象/数组均处理）
       function stripRuleKeysDeep(val){
         if (Array.isArray(val)) return val.map(item => stripRuleKeysDeep(item));
         if (val && typeof val === 'object'){
           const obj = {};
           for (const kk in val){
             if (!Object.prototype.hasOwnProperty.call(val, kk)) continue;
-            if (String(kk).trim().startsWith('$')) continue;
+            const keyStr = String(kk);
+            if (keyStr.trim().startsWith('$')) {
+              const rest = keyStr.slice(1).trim();
+              const parts = rest.split(/\s+/).filter(Boolean);
+              if (parts.length > 0) {
+                const targetField = parts[parts.length - 1];
+                const cleanedValue = stripRuleKeysDeep(val[kk]);
+                obj[targetField] = cleanedValue;
+              }
+              continue;
+            }
             obj[kk] = stripRuleKeysDeep(val[kk]);
           }
           return obj;
@@ -2140,7 +2147,6 @@ function expandShorthandRuleObject(basePath, valueObj){
         return val;
       }
 
-      // 将路径字符串格式化为带中括号的数组索引表示（如 a.b[1].c）
       function formatPathWithBrackets(pathStr){
         try{
           const segs = lwbSplitPathWithBrackets(String(pathStr||''));
@@ -2157,7 +2163,6 @@ function expandShorthandRuleObject(basePath, valueObj){
         }catch{ return String(pathStr||''); }
       }
 
-      // 递归处理
       function processObject(obj, currentPath) {
         for (const k in obj){
           if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
@@ -2166,7 +2171,6 @@ function expandShorthandRuleObject(basePath, valueObj){
           const isRule = keyStr.trim().startsWith('$');
 
           if (isRule) {
-            // 规则键：$dir ... target
             const rest = keyStr.slice(1).trim();
             const parts = rest.split(/\s+/).filter(Boolean);
             if (!parts.length) continue;
@@ -2181,11 +2185,8 @@ function expandShorthandRuleObject(basePath, valueObj){
             const absTarget = _ensureAbsTargetPath(base, fullTargetPath);
             const absTargetDisplay = formatPathWithBrackets(absTarget);
             const ruleKey = `$ ${dirTokensNormalized.join(' ')} ${absTargetDisplay}`.trim();
-
-            // 保持轻量：规则条目为空对象（仅作存在声明）
             out[ruleKey] = {};
 
-            // 将值写回普通键，并递归解析值内的规则（数组/对象）
             if (v !== undefined) {
               const relSegs = _segmentsRelativeToBase(absTarget, base);
               if (relSegs.length) {
@@ -2226,9 +2227,7 @@ function expandShorthandRuleObject(basePath, valueObj){
                     processObject(v, relSegs.join('.'));
                   }
                   const cleaned = stripRuleKeysDeep(v);
-                  // 性能+语义：若清洗后为空且原对象仅含规则，则不写入空对象
                   if (cleaned && typeof cleaned === 'object' && !Array.isArray(cleaned) && Object.keys(cleaned).length === 0){
-                    // skip
                   } else {
                     _setDeepBySegments(normalOut, relSegs, cleaned);
                   }
@@ -2238,7 +2237,6 @@ function expandShorthandRuleObject(basePath, valueObj){
               }
             }
           } else {
-            // 普通键
             const newPath = currentPath ? `${currentPath}.${k}` : k;
 
             if (Array.isArray(v)){
@@ -2283,7 +2281,6 @@ function expandShorthandRuleObject(basePath, valueObj){
                 [k];
 
               if (hasRules) {
-                // 同时：递归处理规则 + 回填清洗后的普通键
                 processObject(v, newPath);
                 const cleaned = stripRuleKeysDeep(v);
                 if (!(cleaned && typeof cleaned === 'object' && !Array.isArray(cleaned) && Object.keys(cleaned).length === 0)){
@@ -2302,10 +2299,8 @@ function expandShorthandRuleObject(basePath, valueObj){
         }
       }
 
-      // 开始处理
       processObject(valueObj, '');
 
-      // 合并：规则在前，普通键在后
       function assignDeep(obj, src){
         for (const k in src){
           if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
@@ -2323,8 +2318,6 @@ function expandShorthandRuleObject(basePath, valueObj){
       return out;
     }catch{ return null; }
   }
-
-
 
 function lwbSplitPathWithBrackets(path){
   const s = String(path || '');
@@ -2538,20 +2531,18 @@ function registerXbSetVarSlashCommand(){
       callback: (namedArgs, unnamedArgs) => {
         try{
           const { path, rest } = _extractPathAndRestForSet(namedArgs, unnamedArgs);
-          // 1) 原始命令日志
           try{ console.log('[LWB:/xbsetvar] 玩家输入的/xbgetvar是:', `/xbsetvar key=${String(path||'')} ${String(rest||'')}`); }catch{}
           let toSet = rest;
-          // 2) 若是 JSON 对象且含有规则键，则进行短写展开与二次写入模拟
           try{
             const parsed = _parseValueForSet(rest);
-            if (parsed && typeof parsed==='object' && !Array.isArray(parsed) && _hasTopLevelRuleKey(parsed)){
+            if (parsed && typeof parsed==='object' && !Array.isArray(parsed)){
               const expanded = expandShorthandRuleObject(String(path||''), parsed);
               if (expanded && typeof expanded==='object'){
                 const expandedStr = _safeJSONStringify(expanded) || '';
                 toSet = expandedStr;
-                try{ console.log('[LWB:/xbsetvar] 发现$规则，内部改写为:', `/xbsetvar key=${String(path||'')} ${expandedStr}`); }catch{}
+                try { console.log('[LWB:/xbsetvar] 规则展开为:', `/xbsetvar key=${String(path||'')} ${expandedStr}`); } catch {}
               }
-            }
+            }            
           }catch{}
           lwbAssignVarPath(path, toSet);
           return '';
