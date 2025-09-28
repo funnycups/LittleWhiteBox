@@ -2130,9 +2130,10 @@ function expandShorthandRuleObject(basePath, valueObj){
         if (Array.isArray(val)) return val.map(item => stripRuleKeysDeep(item));
         if (val && typeof val === 'object'){
           const obj = {};
-          for (const [kk, vv] of Object.entries(val)){
+          for (const kk in val){
+            if (!Object.prototype.hasOwnProperty.call(val, kk)) continue;
             if (String(kk).trim().startsWith('$')) continue;
-            obj[kk] = stripRuleKeysDeep(vv);
+            obj[kk] = stripRuleKeysDeep(val[kk]);
           }
           return obj;
         }
@@ -2144,7 +2145,8 @@ function expandShorthandRuleObject(basePath, valueObj){
         try{
           const segs = lwbSplitPathWithBrackets(String(pathStr||''));
           let outPath = '';
-          for (const s of segs){
+          for (let i=0;i<segs.length;i++){
+            const s = segs[i];
             if (typeof s === 'number') {
               outPath += `[${s}]`;
             } else {
@@ -2155,14 +2157,16 @@ function expandShorthandRuleObject(basePath, valueObj){
         }catch{ return String(pathStr||''); }
       }
 
-      // 递归处理函数
+      // 递归处理
       function processObject(obj, currentPath) {
-        for (const [k, v] of Object.entries(obj)) {
+        for (const k in obj){
+          if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+          const v = obj[k];
           const keyStr = String(k);
           const isRule = keyStr.trim().startsWith('$');
 
           if (isRule) {
-            // 处理规则键
+            // 规则键：$dir ... target
             const rest = keyStr.slice(1).trim();
             const parts = rest.split(/\s+/).filter(Boolean);
             if (!parts.length) continue;
@@ -2173,26 +2177,28 @@ function expandShorthandRuleObject(basePath, valueObj){
               String(t || '').trim().startsWith('$') ? String(t).trim() : ('$' + String(t).trim())
             );
 
-            // 构建绝对路径
             const fullTargetPath = currentPath ? `${currentPath}.${ruleTarget}` : ruleTarget;
             const absTarget = _ensureAbsTargetPath(base, fullTargetPath);
             const absTargetDisplay = formatPathWithBrackets(absTarget);
             const ruleKey = `$ ${dirTokensNormalized.join(' ')} ${absTargetDisplay}`.trim();
+
+            // 保持轻量：规则条目为空对象（仅作存在声明）
             out[ruleKey] = {};
 
             // 将值写回普通键，并递归解析值内的规则（数组/对象）
             if (v !== undefined) {
               const relSegs = _segmentsRelativeToBase(absTarget, base);
-              const targetRelPath = relSegs.join('.');
               if (relSegs.length) {
                 if (Array.isArray(v)) {
-                  const cleanedArr = [];
+                  const cleanedArr = new Array(v.length);
                   for (let i = 0; i < v.length; i++){
                     const el = v[i];
                     if (el && typeof el === 'object' && !Array.isArray(el)){
                       let hasRule = false;
                       const cleanEl = {};
-                      for (const [ek, ev] of Object.entries(el)){
+                      for (const ek in el){
+                        if (!Object.prototype.hasOwnProperty.call(el, ek)) continue;
+                        const ev = el[ek];
                         const ekStr = String(ek);
                         if (ekStr.trim().startsWith('$')){
                           hasRule = true;
@@ -2207,40 +2213,47 @@ function expandShorthandRuleObject(basePath, valueObj){
                         }
                       }
                       if (hasRule){
-                        processObject(el, `${targetRelPath}.${i}`);
+                        processObject(el, `${relSegs.join('.')}.${i}`);
                       }
-                      cleanedArr.push(cleanEl);
+                      cleanedArr[i] = cleanEl;
                     } else {
-                      cleanedArr.push(stripRuleKeysDeep(el));
+                      cleanedArr[i] = stripRuleKeysDeep(el);
                     }
                   }
                   _setDeepBySegments(normalOut, relSegs, cleanedArr);
                 } else if (v && typeof v === 'object' && !Array.isArray(v)) {
                   if (_hasTopLevelRuleKey(v)){
-                    processObject(v, targetRelPath);
+                    processObject(v, relSegs.join('.'));
                   }
-                  _setDeepBySegments(normalOut, relSegs, stripRuleKeysDeep(v));
+                  const cleaned = stripRuleKeysDeep(v);
+                  // 性能+语义：若清洗后为空且原对象仅含规则，则不写入空对象
+                  if (cleaned && typeof cleaned === 'object' && !Array.isArray(cleaned) && Object.keys(cleaned).length === 0){
+                    // skip
+                  } else {
+                    _setDeepBySegments(normalOut, relSegs, cleaned);
+                  }
                 } else {
                   _setDeepBySegments(normalOut, relSegs, v);
                 }
               }
             }
           } else {
-            // 处理普通键
+            // 普通键
+            const newPath = currentPath ? `${currentPath}.${k}` : k;
+
             if (Array.isArray(v)){
-              // 数组：遍历元素，递归处理包含规则的对象元素；同时构造“清洗且回填派生值”的数组
-              const newPath = currentPath ? `${currentPath}.${k}` : k;
-              const cleanedArr = [];
+              const cleanedArr = new Array(v.length);
               for (let i = 0; i < v.length; i++){
                 const el = v[i];
                 if (el && typeof el === 'object' && !Array.isArray(el)){
                   let hasRule = false;
                   const cleanEl = {};
-                  for (const [ek, ev] of Object.entries(el)){
+                  for (const ek in el){
+                    if (!Object.prototype.hasOwnProperty.call(el, ek)) continue;
+                    const ev = el[ek];
                     const ekStr = String(ek);
                     if (ekStr.trim().startsWith('$')){
                       hasRule = true;
-                      // 解析目标字段名（最后一个 token），用于把值回填进干净元素
                       const rest2 = ekStr.slice(1).trim();
                       const parts2 = rest2.split(/\s+/).filter(Boolean);
                       if (parts2.length){
@@ -2252,37 +2265,36 @@ function expandShorthandRuleObject(basePath, valueObj){
                     }
                   }
                   if (hasRule){
-                    // 生成规则键展开
                     processObject(el, `${newPath}.${i}`);
                   }
-                  cleanedArr.push(cleanEl);
+                  cleanedArr[i] = cleanEl;
                 } else {
-                  cleanedArr.push(stripRuleKeysDeep(el));
+                  cleanedArr[i] = stripRuleKeysDeep(el);
                 }
               }
               const relSegs = currentPath ?
-                _segmentsRelativeToBase(`${base}.${currentPath}.${k}`, base) :
+                _segmentsRelativeToBase(`${base}.${newPath}`, base) :
                 [k];
               _setDeepBySegments(normalOut, relSegs, cleanedArr);
             } else if (v && typeof v === 'object' && !Array.isArray(v)) {
-              // 如果是对象，需要递归检查是否包含规则键
-              const newPath = currentPath ? `${currentPath}.${k}` : k;
               const hasRules = _hasTopLevelRuleKey(v);
+              const relSegs = currentPath ?
+                _segmentsRelativeToBase(`${base}.${newPath}`, base) :
+                [k];
 
               if (hasRules) {
-                // 递归处理包含规则的子对象
+                // 同时：递归处理规则 + 回填清洗后的普通键
                 processObject(v, newPath);
+                const cleaned = stripRuleKeysDeep(v);
+                if (!(cleaned && typeof cleaned === 'object' && !Array.isArray(cleaned) && Object.keys(cleaned).length === 0)){
+                  _setDeepBySegments(normalOut, relSegs, cleaned);
+                }
               } else {
-                // 普通对象，直接设置到 normalOut
-                const relSegs = currentPath ?
-                  _segmentsRelativeToBase(`${base}.${currentPath}.${k}`, base) :
-                  [k];
                 _setDeepBySegments(normalOut, relSegs, v);
               }
             } else {
-              // 标量值，直接设置
               const relSegs = currentPath ?
-                _segmentsRelativeToBase(`${base}.${currentPath}.${k}`, base) :
+                _segmentsRelativeToBase(`${base}.${newPath}`, base) :
                 [k];
               _setDeepBySegments(normalOut, relSegs, v);
             }
@@ -2293,9 +2305,11 @@ function expandShorthandRuleObject(basePath, valueObj){
       // 开始处理
       processObject(valueObj, '');
 
-      // 将 normalOut 合并到 out 结尾，以保证显示顺序：规则在前，普通键在后
+      // 合并：规则在前，普通键在后
       function assignDeep(obj, src){
-        for(const [k,v] of Object.entries(src)){
+        for (const k in src){
+          if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
+          const v = src[k];
           if (v && typeof v==='object' && !Array.isArray(v)){
             if (!obj[k] || typeof obj[k] !== 'object' || Array.isArray(obj[k])) obj[k] = {};
             assignDeep(obj[k], v);
@@ -2309,6 +2323,7 @@ function expandShorthandRuleObject(basePath, valueObj){
       return out;
     }catch{ return null; }
   }
+
 
 
 function lwbSplitPathWithBrackets(path){
