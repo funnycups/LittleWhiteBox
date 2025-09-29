@@ -39,7 +39,7 @@ extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     variablesPanel: { enabled: false },
     variablesCore: { enabled: true },
     useBlob: false,
-    wrapperIframe: false
+    wrapperIframe: true
 };
 
 const settings = extension_settings[EXT_ID];
@@ -968,7 +968,7 @@ async function setupSettings() {
             OFF.forEach(k=>setChecked(MAP[k],false));
             setChecked('xiaobaix_sandbox',false);
             setChecked('xiaobaix_use_blob',false);
-            setChecked('Wrapperiframe',false);
+            setChecked('Wrapperiframe',true);
             try{ saveSettingsDebounced() }catch(e){}
         });
     } catch (err) {}

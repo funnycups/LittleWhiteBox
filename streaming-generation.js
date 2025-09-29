@@ -286,6 +286,54 @@ class StreamingGeneration {
     _stripNamePrefix = (s) => String(s || '').replace(/^\s*[^:]{1,32}:\s*/, '');
     _normStrip = (s) => this._normalize(this._stripNamePrefix(s));
 
+	    /**
+	     * Parse composite param like: "assistant={A};user={B};sys={C};user={D}"
+	     * Returns ordered array: [{ role, content }]
+	     */
+	    _parseCompositeParam(param) {
+	        const input = String(param || '').trim();
+	        if (!input) return [];
+	        const parts = [];
+	        let buf = '';
+	        let depth = 0;
+	        for (let i = 0; i < input.length; i++) {
+	            const ch = input[i];
+	            if (ch === '{') depth++;
+	            if (ch === '}') depth = Math.max(0, depth - 1);
+	            if (ch === ';' && depth === 0) {
+	                parts.push(buf);
+	                buf = '';
+	            } else {
+	                buf += ch;
+	            }
+	        }
+	        if (buf) parts.push(buf);
+	        const normRole = (r) => {
+	            const x = String(r || '').trim().toLowerCase();
+	            if (x === 'sys' || x === 'system') return 'system';
+	            if (x === 'assistant' || x === 'asst' || x === 'ai') return 'assistant';
+	            if (x === 'user' || x === 'u') return 'user';
+	            return '';
+	        };
+	        const extractValue = (v) => {
+	            let s = String(v || '').trim();
+	            if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('"') && s.endsWith('"')) || (s.startsWith('\'') && s.endsWith('\''))) {
+	                s = s.slice(1, -1);
+	            }
+	            return s.trim();
+	        };
+	        const result = [];
+	        for (const seg of parts) {
+	            const idx = seg.indexOf('=');
+	            if (idx === -1) continue;
+	            const role = normRole(seg.slice(0, idx));
+	            if (!role) continue;
+	            const content = extractValue(seg.slice(idx + 1));
+	            if (content) result.push({ role, content });
+	        }
+	        return result;
+	    }
+
     _createIsFromChat() {
         const chatNorms = chat.map(m => this._normStrip(m?.mes)).filter(Boolean);
         const chatSet = new Set(chatNorms);
@@ -359,7 +407,7 @@ class StreamingGeneration {
         }
     }
 
-    async xbgenrawCommand(args, prompt) {
+	    async xbgenrawCommand(args, prompt) {
         if (!prompt?.trim()) return '';
         const role = ['user', 'system', 'assistant'].includes(args?.as) ? args.as : 'user';
         const sessionId = this._getSlotId(args?.id);
@@ -381,15 +429,19 @@ class StreamingGeneration {
         } catch {}
         const nonstream = String(args?.nonstream || '').toLowerCase() === 'true';
         const addonSet = new Set(String(args?.addon || '').split(',').map(s => s.trim()).filter(Boolean));
-        const createMsgs = (prefix) => {
-            const msgs = [];
-            ['sys', 'user', 'assistant'].forEach(role => {
-                const content = String(args?.[`${prefix}${role === 'sys' ? 'sys' : role}`] || '').trim();
-                if (content) msgs.push({ role: role === 'sys' ? 'system' : role, content });
-            });
-            return msgs;
-        };
-        const [topMsgs, bottomMsgs] = [createMsgs('top'), createMsgs('bottom')];
+	        const createMsgs = (prefix) => {
+	            const msgs = [];
+	            ['sys', 'user', 'assistant'].forEach(role => {
+	                const content = String(args?.[`${prefix}${role === 'sys' ? 'sys' : role}`] || '').trim();
+	                if (content) msgs.push({ role: role === 'sys' ? 'system' : role, content });
+	            });
+	            return msgs;
+	        };
+	        // New composite params take precedence if provided
+	        const topComposite = String(args?.top || '').trim();
+	        const bottomComposite = String(args?.bottom || '').trim();
+	        const topMsgs = topComposite ? this._parseCompositeParam(topComposite) : createMsgs('top');
+	        const bottomMsgs = bottomComposite ? this._parseCompositeParam(bottomComposite) : createMsgs('bottom');
 
         const buildAddonFinalMessages = async () => {
             const context = getContext();
@@ -485,7 +537,7 @@ class StreamingGeneration {
             }
             return finalMessages;
         };
-        if (addonSet.size === 0) {
+	        if (addonSet.size === 0) {
             const messages = [...topMsgs, { role, content: prompt.trim() }, ...bottomMsgs];
             const common = { messages, apiOptions, stop: parsedStop };
             if (nonstream) {
@@ -668,7 +720,7 @@ class StreamingGeneration {
             { name: 'model', description: '模型名', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'position', description: '插入位置：bottom/history', typeList: [ARGUMENT_TYPE.STRING], enumList: ['bottom', 'history'] },
         ];
-        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+	        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'xbgen',
             callback: (args, prompt) => this.xbgenCommand(args, prompt),
             namedArgumentList: [
@@ -683,7 +735,7 @@ class StreamingGeneration {
             helpString: '使用完整上下文进行流式生成',
             returns: 'session ID'
         }));
-        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+	        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'xbgenraw',
             callback: (args, prompt) => this.xbgenrawCommand(args, prompt),
             namedArgumentList: [
@@ -691,12 +743,14 @@ class StreamingGeneration {
                 { name: 'nonstream', description: '非流式：true/false', typeList: [ARGUMENT_TYPE.STRING], enumList: ['true', 'false'] },
                 { name: 'lock', description: '生成时锁定输入 on/off', typeList: [ARGUMENT_TYPE.STRING], enumList: ['on', 'off'] },
                 { name: 'addon', description: '附加上下文', typeList: [ARGUMENT_TYPE.STRING] },
-                { name: 'topsys', description: '置顶 system', typeList: [ARGUMENT_TYPE.STRING] },
-                { name: 'topuser', description: '置顶 user', typeList: [ARGUMENT_TYPE.STRING] },
-                { name: 'topassistant', description: '置顶 assistant', typeList: [ARGUMENT_TYPE.STRING] },
-                { name: 'bottomsys', description: '置底 system', typeList: [ARGUMENT_TYPE.STRING] },
-                { name: 'bottomuser', description: '置底 user', typeList: [ARGUMENT_TYPE.STRING] },
-                { name: 'bottomassistant', description: '置底 assistant', typeList: [ARGUMENT_TYPE.STRING] },
+	                { name: 'topsys', description: '置顶 system', typeList: [ARGUMENT_TYPE.STRING] },
+	                { name: 'topuser', description: '置顶 user', typeList: [ARGUMENT_TYPE.STRING] },
+	                { name: 'topassistant', description: '置顶 assistant', typeList: [ARGUMENT_TYPE.STRING] },
+	                { name: 'bottomsys', description: '置底 system', typeList: [ARGUMENT_TYPE.STRING] },
+	                { name: 'bottomuser', description: '置底 user', typeList: [ARGUMENT_TYPE.STRING] },
+	                { name: 'bottomassistant', description: '置底 assistant', typeList: [ARGUMENT_TYPE.STRING] },
+	                { name: 'top', description: '复合置顶: assistant={A};user={B};sys={C}', typeList: [ARGUMENT_TYPE.STRING] },
+	                { name: 'bottom', description: '复合置底: assistant={C};sys={D1}', typeList: [ARGUMENT_TYPE.STRING] },
                 ...commonArgs
             ].map(SlashCommandNamedArgument.fromProps),
             unnamedArgumentList: [SlashCommandArgument.fromProps({
