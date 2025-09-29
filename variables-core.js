@@ -2336,7 +2336,7 @@ function replaceXbGetVarInChat(chat){
       const key=_getMsgKey(msg); if(!key) continue;
       const old=String(msg[key]??''); if(old.indexOf('{{xbgetvar::')===-1) continue;
       msg[key]=replaceXbGetVarInString(old);
-    }catch{};
+    }catch{}
   }
 }
 function applyXbGetVarForMessage(messageId,writeback=true){
@@ -3277,6 +3277,17 @@ function guardValidate(op, absPath, payload) {
   if (op === 'bump') {
     const delta = Number(payload);
     if (!Number.isFinite(delta)) return { allow: false, reason: 'delta-nan' };
+    if (currentValue === undefined) {
+      if (parentPath) {
+        const lastSeg = p.split('.').pop() || '';
+        const isIndex = /^\d+$/.test(lastSeg);
+        if (isIndex) {
+          if (!(parentNode && (parentNode.arrayPolicy === 'grow' || parentNode.arrayPolicy === 'list'))) return { allow: false, reason: 'array-no-grow' };
+        } else {
+          if (!(parentNode && (parentNode.objectPolicy === 'ext' || parentNode.objectPolicy === 'free'))) return { allow: false, reason: 'object-no-ext' };
+        }
+      }
+    }
     const cur = Number(currentValue);
     if (!Number.isFinite(cur)) {
       if (node.typeLock !== 'unknown' && node.typeLock !== 'number') return { allow: false, reason: 'type-locked-not-number' };
