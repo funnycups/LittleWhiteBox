@@ -45,6 +45,10 @@
                         <input type="checkbox" id="Wrapperiframe" />
                         <label for="Wrapperiframe" class="has-tooltip" data-tooltip="按需在 iframe 中注入 Wrapperiframe.js">启用封装函数</label>
                     </div>
+                    <div class="flex-container alignItemsCenter" style="gap: 8px; flex-wrap: wrap;">
+                        <input type="checkbox" id="xiaobaix_audio_enabled" checked />
+                        <label for="xiaobaix_audio_enabled" style="margin-top: 0px;">启用音频</label>
+                    </div>
                     <br>
                     <div class="section-divider">流式，非基础的渲染
                         <hr class="sysHR" />
@@ -311,6 +315,7 @@
                         <option value="any_message">任意对话</option>
                         <option value="initialization">角色卡初始化</option>
                         <option value="plugin_init">插件初始化</option>
+                        <option value="chat_changed">切换聊天后</option>
                         <option value="only_this_floor">仅在“间隔楼层”的那个楼层执行一次</option>
                     </select>
                     <small>选择任务执行的时机</small>
@@ -366,8 +371,7 @@
     .template-replacer-status.has-settings { background: #1a4a1a; color: #90ee90; }
     .template-replacer-status.no-character { background: #4a1a1a; color: #ffb3b3; }
     .dark-number-input { background-color: rgba(0, 0, 0, 0.3) !important; color: var(--SmartThemeText) !important; border-color: var(--SmartThemeBorderColor) !important; width: 8vw !important; }
-    .littlewhitebox input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 1.2rem; height: 1.2rem; border: 0.13em solid #222; background: #181818; border-radius: 0.25em; display: inline-block; position: relative; vertical-align: middle; margin-right: 0em; transition: border 0.2s, background 0.2s; box-shadow: 0 0.07em 0.13em rgba(0, 0, 0, 0.08); }
-    .littlewhitebox input[type="checkbox"]:checked { background: #181818; border-color: #000000; }
+    .littlewhitebox input[type="checkbox"] { width: 1.2rem; height: 1.2rem; background: var(--black30a); border-radius: 0.25em; }
     .littlewhitebox input[type="checkbox"]:checked::after { content: ""; display: block; position: absolute; top: 18%; left: 18%; width: 64%; height: 64%; background: #999999; border-radius: 0.13em; }
     .littlewhitebox input[type="checkbox"]+label { color: #888; transition: color 0.2s; }
     .littlewhitebox input[type="checkbox"]:checked+label { color: #dbdbdb; }
@@ -533,13 +537,14 @@
             dynamicPrompt: 'xiaobaix_dynamic_prompt_enabled',
             variablesPanel: 'xiaobaix_variables_panel_enabled',
             variablesCore: 'xiaobaix_variables_core_enabled',
+            audio: 'xiaobaix_audio_enabled',
             sandboxMode: 'xiaobaix_sandbox',
             useBlob: 'xiaobaix_use_blob',
             wrapperIframe: 'Wrapperiframe',
         };
-        const DEFAULTS_ON = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','Wrapperiframe'];
+        const DEFAULTS_ON = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','Wrapperiframe','audio'];
         const DEFAULTS_OFF = ['recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel'];
-        const MODULE_KEYS = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel'];
+        const MODULE_KEYS = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel','audio'];
         function setModuleEnabled(key, enabled) {
             try {
                 if (!extension_settings[EXT_ID][key]) extension_settings[EXT_ID][key] = {};

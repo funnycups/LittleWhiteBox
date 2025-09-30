@@ -444,6 +444,7 @@ function calculateTurnCount() {
 function shouldSkipByContext(taskTriggerTiming, triggerContext) {
     if (taskTriggerTiming === 'initialization') return triggerContext !== 'chat_created';
     if (taskTriggerTiming === 'plugin_init') return triggerContext !== 'plugin_initialized';
+    if (taskTriggerTiming === 'chat_changed') return triggerContext !== 'chat_changed';
     if (taskTriggerTiming === 'only_this_floor' || taskTriggerTiming === 'any_message') {
         return triggerContext !== 'before_user' && triggerContext !== 'after_ai';
     }
@@ -471,6 +472,11 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
         if (isTaskInCooldown(task.name, n)) return false;
 
         const tt = task.triggerTiming || 'after_ai';
+        // 切换聊天后：忽略间隔与楼层，只要时机匹配则执行一次
+        if (tt === 'chat_changed') {
+            if (shouldSkipByContext(tt, triggerContext)) return false;
+            return true;
+        }
         if (tt === 'initialization') return triggerContext === 'chat_created';
         if (tt === 'plugin_init') return triggerContext === 'plugin_initialized';
 
@@ -526,7 +532,7 @@ function onMessageDeleted() {
     debouncedSave();
 }
 
-function onChatChanged(chatId) {
+async function onChatChanged(chatId) {
     Object.assign(state, {
         chatJustChanged: true,
         isNewChat: state.lastChatId !== chatId && chat.length <= 1,
@@ -544,6 +550,7 @@ function onChatChanged(chatId) {
 
     checkEmbeddedTasks();
     refreshUI();
+    try { await checkAndExecuteTasks('chat_changed', false, false); } catch (e) { console.debug(e); }
     setTimeout(() => { state.chatJustChanged = state.isNewChat = false; }, 2000);
 }
 
@@ -562,12 +569,13 @@ function createTaskItem(task, index, isCharacterTask = false) {
 
     const taskType = isCharacterTask ? 'character' : 'global';
 	const floorTypeText = { user: '用户楼层', llm: 'LLM楼层' }[task.floorType] || '全部楼层';
-	const triggerTimingText = { before_user: '用户前', any_message: '任意对话', initialization: '角色卡初始化', plugin_init: '插件初始化', only_this_floor: '仅该楼层' }[task.triggerTiming] || 'AI后';
+	const triggerTimingText = { before_user: '用户前', any_message: '任意对话', initialization: '角色卡初始化', plugin_init: '插件初始化', only_this_floor: '仅该楼层', chat_changed: '切换聊天后' }[task.triggerTiming] || 'AI后';
 
     let displayName;
 	if (task.interval === 0) displayName = `${task.name} (手动触发)`;
 	else if (task.triggerTiming === 'initialization') displayName = `${task.name} (角色卡初始化)`;
 	else if (task.triggerTiming === 'plugin_init') displayName = `${task.name} (插件初始化)`;
+	else if (task.triggerTiming === 'chat_changed') displayName = `${task.name} (切换聊天后)`;
     else if (task.triggerTiming === 'only_this_floor') displayName = `${task.name} (仅第${task.interval}${floorTypeText})`;
     else displayName = `${task.name} (每${task.interval}${floorTypeText}·${triggerTimingText})`;
 
@@ -753,7 +761,7 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
             triggerTimingControl.prop('disabled', false).css('opacity', '1');
             editorTemplate.find('.manual-trigger-hint').hide();
 
-            if (triggerTiming === 'initialization' || triggerTiming === 'plugin_init') {
+            if (triggerTiming === 'initialization' || triggerTiming === 'plugin_init' || triggerTiming === 'chat_changed') {
                 intervalControl.prop('disabled', true).css('opacity', '0.5');
                 floorTypeControl.prop('disabled', true).css('opacity', '0.5');
             } else {
@@ -934,8 +942,9 @@ function exportSingleTask(index, isCharacterTask) {
     const tasks = isCharacterTask ? getCharacterTasks() : getSettings().globalTasks;
     if (index < 0 || index >= tasks.length) return;
     const task = tasks[index];
-    const fileName = `${isCharacterTask ? 'character' : 'global'}_task_${task?.name || 'unnamed'}_${new Date().toISOString().split('T')[0]}.json`;
-    const fileData = JSON.stringify({ type: isCharacterTask ? 'character' : 'global', exportDate: new Date().toISOString(), tasks: [task] }, null, 4);
+    const type = isCharacterTask ? 'character' : 'global';
+    const fileName = `${type}_task_${task?.name || 'unnamed'}_${new Date().toISOString().split('T')[0]}.json`;
+    const fileData = JSON.stringify({ type, exportDate: new Date().toISOString(), tasks: [task] }, null, 4);
     download(fileData, fileName, 'application/json');
 }
 
@@ -945,9 +954,18 @@ async function importGlobalTasks(file) {
         const fileText = await getFileText(file);
         const raw = JSON.parse(fileText);
         let incomingTasks = [];
-        if (Array.isArray(raw)) incomingTasks = raw;
-        else if (Array.isArray(raw.tasks)) incomingTasks = raw.tasks;
-        else if (raw && typeof raw === 'object' && raw.name && (raw.commands || raw.interval !== undefined)) incomingTasks = [raw];
+        // 识别文件类型（默认全局）
+        let fileType = 'global';
+        if (Array.isArray(raw)) {
+            incomingTasks = raw;
+            fileType = 'global';
+        } else if (Array.isArray(raw?.tasks)) {
+            incomingTasks = raw.tasks;
+            if (raw?.type === 'character' || raw?.type === 'global') fileType = raw.type;
+        } else if (raw && typeof raw === 'object' && raw.name && (raw.commands || raw.interval !== undefined)) {
+            incomingTasks = [raw];
+            if (raw?.type === 'character' || raw?.type === 'global') fileType = raw.type;
+        }
 
         if (!Array.isArray(incomingTasks) || incomingTasks.length === 0) throw new Error('无效的任务文件格式');
 
@@ -958,7 +976,7 @@ async function importGlobalTasks(file) {
             commands: String(task.commands || '').trim(),
             interval: clampInt(task.interval, 0, 99999, 0),
             floorType: ['all', 'user', 'llm'].includes(task.floorType) ? task.floorType : 'all',
-            triggerTiming: ['after_ai','before_user','any_message','initialization','plugin_init','only_this_floor'].includes(task.triggerTiming)
+            triggerTiming: ['after_ai','before_user','any_message','initialization','plugin_init','only_this_floor','chat_changed'].includes(task.triggerTiming)
                 ? task.triggerTiming : (task.interval === 0 ? 'after_ai' : 'after_ai'),
             disabled: !!task.disabled,
             buttonActivated: !!task.buttonActivated,
@@ -966,9 +984,18 @@ async function importGlobalTasks(file) {
             importedAt: new Date().toISOString(),
         }));
 
-        const settings = getSettings();
-        settings.globalTasks = [...settings.globalTasks, ...tasksToImport];
-        debouncedSave();
+        if (fileType === 'character') {
+            if (!this_chid || !characters[this_chid]) {
+                await callGenericPopup('请选择角色导入。', POPUP_TYPE.TEXT, '', { okButton: '确定' });
+                return;
+            }
+            const current = getCharacterTasks();
+            await saveCharacterTasks([...current, ...tasksToImport]);
+        } else {
+            const settings = getSettings();
+            settings.globalTasks = [...settings.globalTasks, ...tasksToImport];
+            debouncedSave();
+        }
         refreshTaskLists();
     } catch (error) {
         console.error('任务导入失败:', error);
