@@ -1,228 +1,244 @@
 let stylesInjected = false;
 
 const SELECTORS = {
-  chat: '#chat',
-  messages: '.mes',
-  mesButtons: '.mes_block .mes_buttons',
-  buttons: '.memory-button, .dynamic-prompt-analysis-btn, .mes_history_preview',
-  collapse: '.xiaobaix-collapse-btn',
+ chat: '#chat',
+ messages: '.mes',
+ mesButtons: '.mes_block .mes_buttons',
+ buttons: '.memory-button, .dynamic-prompt-analysis-btn, .mes_history_preview',
+ collapse: '.xiaobaix-collapse-btn',
 };
 
 const injectStyles = () => {
-  if (stylesInjected) return;
-  const css = `
+ if (stylesInjected) return;
+ const css = `
 .mes_block .mes_buttons {
-   align-items: center;
+  align-items: center;
 }
 
 .xiaobaix-collapse-btn{
-  position:relative;display:inline-flex;width:32px;height:32px;justify-content:center;align-items: center;
-  border-radius:50%;background:var(--SmartThemeBlurTintColor);cursor:pointer;
-  box-shadow:inset 0 0 15px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.2);
-  transition:opacity .15s ease,transform .15s ease;
+ position:relative;display:inline-flex;width:32px;height:32px;justify-content:center;align-items: center;
+ border-radius:50%;background:var(--SmartThemeBlurTintColor);cursor:pointer;
+ box-shadow:inset 0 0 15px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.2);
+ transition:opacity .15s ease,transform .15s ease;
 }
 .xiaobaix-xstack{position:relative;display:inline-flex;align-items:center;justify-content:center;pointer-events:none;}
 .xiaobaix-xstack span{
-  position:absolute;font:italic 900 20px 'Arial Black',sans-serif;letter-spacing:-2px;transform:scaleX(.8);
-  text-shadow:0 0 10px rgba(255,255,255,.5),0 0 20px rgba(100,200,255,.3);color:#fff;
+ position:absolute;font:italic 900 20px 'Arial Black',sans-serif;letter-spacing:-2px;transform:scaleX(.8);
+ text-shadow:0 0 10px rgba(255,255,255,.5),0 0 20px rgba(100,200,255,.3);color:#fff;
 }
 .xiaobaix-xstack span:nth-child(1){color:rgba(255,255,255,.1);transform:scaleX(.8) translateX(-8px);text-shadow:none}
 .xiaobaix-xstack span:nth-child(2){color:rgba(255,255,255,.2);transform:scaleX(.8) translateX(-4px);text-shadow:none}
 .xiaobaix-xstack span:nth-child(3){color:rgba(255,255,255,.4);transform:scaleX(.8) translateX(-2px);text-shadow:none}
 .xiaobaix-sub-container{
-  display:none;position:absolute;right:38px;
-  border-radius:8px;padding:4px;gap:8px;pointer-events:auto;
+ display:none;position:absolute;right:38px;
+ border-radius:8px;padding:4px;gap:8px;pointer-events:auto;
 }
 .xiaobaix-collapse-btn.open .xiaobaix-sub-container{
-  display:flex;background:var(--SmartThemeBlurTintColor);
+ display:flex;background:var(--SmartThemeBlurTintColor);
+}
+.xiaobaix-collapse-btn.open ~ *,
+.xiaobaix-collapse-btn.open {
+ pointer-events: auto !important;
+}
+.mes_block .mes_buttons.xiaobaix-expanded {
+ width: 150px;
 }
 .xiaobaix-sub-container, .xiaobaix-sub-container *{pointer-events:auto !important;}
 .xiaobaix-sub-container .memory-button,
 .xiaobaix-sub-container .dynamic-prompt-analysis-btn,
 .xiaobaix-sub-container .mes_history_preview{opacity:1 !important;filter:none !important;}
 `;
-  const style = document.createElement('style');
-  style.textContent = css;
-  document.head.appendChild(style);
-  stylesInjected = true;
+ const style = document.createElement('style');
+ style.textContent = css;
+ document.head.appendChild(style);
+ stylesInjected = true;
 };
 
 const createCollapseButton = () => {
-  injectStyles();
-  const btn = document.createElement('div');
-  btn.className = 'mes_btn xiaobaix-collapse-btn';
-  btn.innerHTML = `
-    <div class="xiaobaix-xstack"><span>X</span><span>X</span><span>X</span><span>X</span></div>
-    <div class="xiaobaix-sub-container"></div>
-  `;
-  const sub = btn.lastElementChild;
-  ['click','pointerdown','pointerup'].forEach(t => {
-    sub.addEventListener(t, e => e.stopPropagation(), { passive: true });
-  });
-  btn.addEventListener('click', (e) => {
-    e.preventDefault(); e.stopPropagation();
-    btn.classList.toggle('open');
-  }, { passive: false });
-  return btn;
+ injectStyles();
+ const btn = document.createElement('div');
+ btn.className = 'mes_btn xiaobaix-collapse-btn';
+ btn.innerHTML = `
+   <div class="xiaobaix-xstack"><span>X</span><span>X</span><span>X</span><span>X</span></div>
+   <div class="xiaobaix-sub-container"></div>
+ `;
+ const sub = btn.lastElementChild;
+ ['click','pointerdown','pointerup'].forEach(t => {
+   sub.addEventListener(t, e => e.stopPropagation(), { passive: true });
+ });
+ btn.addEventListener('click', (e) => {
+   e.preventDefault(); e.stopPropagation();
+   btn.classList.toggle('open');
+   const mesButtons = btn.closest(SELECTORS.mesButtons);
+   if (mesButtons) {
+     if (btn.classList.contains('open')) {
+       mesButtons.classList.add('xiaobaix-expanded');
+     } else {
+       mesButtons.classList.remove('xiaobaix-expanded');
+     }
+   }
+ }, { passive: false });
+ return btn;
 };
 
 const placeButton = (mesButtons, btn) => {
-  if (!mesButtons || !btn) return;
-  if (mesButtons.lastElementChild !== btn) mesButtons.append(btn);
+ if (!mesButtons || !btn) return;
+ if (mesButtons.lastElementChild !== btn) mesButtons.append(btn);
 };
 
 const ensureCollapseForMessage = (messageEl) => {
-  const mesButtons = messageEl?.querySelector(SELECTORS.mesButtons);
-  if (!mesButtons) return null;
-  let collapseBtn = mesButtons.querySelector(SELECTORS.collapse);
-  if (!collapseBtn) collapseBtn = createCollapseButton();
-  placeButton(mesButtons, collapseBtn);
-  return collapseBtn;
+ const mesButtons = messageEl?.querySelector(SELECTORS.mesButtons);
+ if (!mesButtons) return null;
+ let collapseBtn = mesButtons.querySelector(SELECTORS.collapse);
+ if (!collapseBtn) collapseBtn = createCollapseButton();
+ placeButton(mesButtons, collapseBtn);
+ return collapseBtn;
 };
 
 let processed = new WeakSet();
 let io, mo;
 
 const processOneMessage = (message) => {
-  if (!message || processed.has(message)) return;
-  const mesButtons = message.querySelector(SELECTORS.mesButtons);
-  if (!mesButtons) { processed.add(message); return; }
-  const targetBtns = mesButtons.querySelectorAll(SELECTORS.buttons);
-  if (!targetBtns.length) { processed.add(message); return; }
-  const collapseBtn = ensureCollapseForMessage(message);
-  if (!collapseBtn) { processed.add(message); return; }
-  const sub = collapseBtn.querySelector('.xiaobaix-sub-container');
-  const frag = document.createDocumentFragment();
-  targetBtns.forEach(b => frag.appendChild(b));
-  sub.appendChild(frag);
-  processed.add(message);
+ if (!message || processed.has(message)) return;
+ const mesButtons = message.querySelector(SELECTORS.mesButtons);
+ if (!mesButtons) { processed.add(message); return; }
+ const targetBtns = mesButtons.querySelectorAll(SELECTORS.buttons);
+ if (!targetBtns.length) { processed.add(message); return; }
+ const collapseBtn = ensureCollapseForMessage(message);
+ if (!collapseBtn) { processed.add(message); return; }
+ const sub = collapseBtn.querySelector('.xiaobaix-sub-container');
+ const frag = document.createDocumentFragment();
+ targetBtns.forEach(b => frag.appendChild(b));
+ sub.appendChild(frag);
+ processed.add(message);
 };
 
 const observeVisibility = (nodes) => {
-  if (!io) {
-    io = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (processed.has(e.target)) { io.unobserve(e.target); continue; }
-        if (e.isIntersecting) {
-          processOneMessage(e.target);
-          io.unobserve(e.target);
-        }
-      }
-    }, {
-      root: document.querySelector(SELECTORS.chat) || null,
-      rootMargin: '200px 0px',
-      threshold: 0
-    });
-  }
-  const root = io.root || null;
-  const rootRect = (root || document.documentElement).getBoundingClientRect();
-  const maxDistancePx = 3000;
-  nodes.forEach(n => {
-    if (!n || processed.has(n)) return;
-    let r;
-    try { r = n.getBoundingClientRect(); } catch { r = null; }
-    if (!r) { io.observe(n); return; }
-    const beyond = r.bottom < rootRect.top - maxDistancePx || r.top > rootRect.bottom + maxDistancePx;
-    if (!beyond) io.observe(n);
-  });
+ if (!io) {
+   io = new IntersectionObserver((entries) => {
+     for (const e of entries) {
+       if (processed.has(e.target)) { io.unobserve(e.target); continue; }
+       if (e.isIntersecting) {
+         processOneMessage(e.target);
+         io.unobserve(e.target);
+       }
+     }
+   }, {
+     root: document.querySelector(SELECTORS.chat) || null,
+     rootMargin: '200px 0px',
+     threshold: 0
+   });
+ }
+ const root = io.root || null;
+ const rootRect = (root || document.documentElement).getBoundingClientRect();
+ const maxDistancePx = 3000;
+ nodes.forEach(n => {
+   if (!n || processed.has(n)) return;
+   let r;
+   try { r = n.getBoundingClientRect(); } catch { r = null; }
+   if (!r) { io.observe(n); return; }
+   const beyond = r.bottom < rootRect.top - maxDistancePx || r.top > rootRect.bottom + maxDistancePx;
+   if (!beyond) io.observe(n);
+ });
 };
 
 let moQueued = false, moAddedBuffer = [];
 const hookMutations = () => {
-  const chat = document.querySelector(SELECTORS.chat);
-  if (!chat) return;
-  if (!mo) {
-    mo = new MutationObserver((muts) => {
-      for (const m of muts) {
-        m.addedNodes && m.addedNodes.forEach(n => {
-          if (n.nodeType !== 1) return;
-          if (n.matches?.(SELECTORS.messages)) {
-            moAddedBuffer.push(n);
-          } else {
-            const list = n.querySelectorAll?.(SELECTORS.messages);
-            if (list?.length) moAddedBuffer.push(...list);
-          }
-        });
-      }
-      if (!moQueued && moAddedBuffer.length) {
-        moQueued = true;
-        requestAnimationFrame(() => {
-          const batch = moAddedBuffer;
-          moAddedBuffer = [];
-          moQueued = false;
-          observeVisibility(batch);
-        });
-      }
-    });
-  }
-  mo.observe(chat, { childList: true, subtree: true });
+ const chat = document.querySelector(SELECTORS.chat);
+ if (!chat) return;
+ if (!mo) {
+   mo = new MutationObserver((muts) => {
+     for (const m of muts) {
+       m.addedNodes && m.addedNodes.forEach(n => {
+         if (n.nodeType !== 1) return;
+         if (n.matches?.(SELECTORS.messages)) {
+           moAddedBuffer.push(n);
+         } else {
+           const list = n.querySelectorAll?.(SELECTORS.messages);
+           if (list?.length) moAddedBuffer.push(...list);
+         }
+       });
+     }
+     if (!moQueued && moAddedBuffer.length) {
+       moQueued = true;
+       requestAnimationFrame(() => {
+         const batch = moAddedBuffer;
+         moAddedBuffer = [];
+         moQueued = false;
+         observeVisibility(batch);
+       });
+     }
+   });
+ }
+ mo.observe(chat, { childList: true, subtree: true });
 };
 
 const processExistingVisible = () => {
-  const all = document.querySelectorAll(`${SELECTORS.chat} ${SELECTORS.messages}`);
-  if (!all.length) return;
-  const unprocessed = [];
-  all.forEach(n => { if (!processed.has(n)) unprocessed.push(n); });
-  if (unprocessed.length) observeVisibility(unprocessed);
+ const all = document.querySelectorAll(`${SELECTORS.chat} ${SELECTORS.messages}`);
+ if (!all.length) return;
+ const unprocessed = [];
+ all.forEach(n => { if (!processed.has(n)) unprocessed.push(n); });
+ if (unprocessed.length) observeVisibility(unprocessed);
 };
 
 const initButtonCollapse = () => {
-  injectStyles();
-  hookMutations();
-  processExistingVisible();
-  if (window.registerModuleCleanup) {
-    try { window.registerModuleCleanup('buttonCollapse', cleanup); } catch (e) {}
-  }
+ injectStyles();
+ hookMutations();
+ processExistingVisible();
+ if (window.registerModuleCleanup) {
+   try { window.registerModuleCleanup('buttonCollapse', cleanup); } catch (e) {}
+ }
 };
 
 const processButtonCollapse = () => {
-  processExistingVisible();
+ processExistingVisible();
 };
 
 const registerButtonToSubContainer = (messageId, buttonEl) => {
-  if (!buttonEl) return false;
-  const message = document.querySelector(`${SELECTORS.chat} ${SELECTORS.messages}[mesid="${messageId}"]`);
-  if (!message) return false;
-  processOneMessage(message);
-  const collapseBtn = message.querySelector(SELECTORS.collapse) || ensureCollapseForMessage(message);
-  if (!collapseBtn) return false;
-  const sub = collapseBtn.querySelector('.xiaobaix-sub-container');
-  sub.appendChild(buttonEl);
-  buttonEl.style.pointerEvents = 'auto';
-  buttonEl.style.opacity = '1';
-  return true;
+ if (!buttonEl) return false;
+ const message = document.querySelector(`${SELECTORS.chat} ${SELECTORS.messages}[mesid="${messageId}"]`);
+ if (!message) return false;
+ processOneMessage(message);
+ const collapseBtn = message.querySelector(SELECTORS.collapse) || ensureCollapseForMessage(message);
+ if (!collapseBtn) return false;
+ const sub = collapseBtn.querySelector('.xiaobaix-sub-container');
+ sub.appendChild(buttonEl);
+ buttonEl.style.pointerEvents = 'auto';
+ buttonEl.style.opacity = '1';
+ return true;
 };
 
 const cleanup = () => {
-  io?.disconnect(); io = null;
-  mo?.disconnect(); mo = null;
-  moAddedBuffer = [];
-  moQueued = false;
-  const collapseBtns = document.querySelectorAll(SELECTORS.collapse);
-  collapseBtns.forEach(btn => {
-    const sub = btn.querySelector('.xiaobaix-sub-container');
-    const mesButtons = btn.closest(SELECTORS.mesButtons) || btn.closest('.mes_buttons');
-    if (sub && mesButtons) {
-      const frag = document.createDocumentFragment();
-      while (sub.firstChild) frag.appendChild(sub.firstChild);
-      mesButtons.appendChild(frag);
-    }
-    btn.remove();
-  });
-  processed = new WeakSet();
+ io?.disconnect(); io = null;
+ mo?.disconnect(); mo = null;
+ moAddedBuffer = [];
+ moQueued = false;
+ const collapseBtns = document.querySelectorAll(SELECTORS.collapse);
+ collapseBtns.forEach(btn => {
+   const sub = btn.querySelector('.xiaobaix-sub-container');
+   const mesButtons = btn.closest(SELECTORS.mesButtons) || btn.closest('.mes_buttons');
+   if (sub && mesButtons) {
+     mesButtons.classList.remove('xiaobaix-expanded');
+     const frag = document.createDocumentFragment();
+     while (sub.firstChild) frag.appendChild(sub.firstChild);
+     mesButtons.appendChild(frag);
+   }
+   btn.remove();
+ });
+ processed = new WeakSet();
 };
 
 if (typeof window !== 'undefined') {
-  Object.assign(window, {
-    initButtonCollapse,
-    cleanupButtonCollapse: cleanup,
-    registerButtonToSubContainer,
-    processButtonCollapse,
-  });
-  document.addEventListener('xiaobaixEnabledChanged', (e) => {
-    const en = e && e.detail && e.detail.enabled;
-    if (!en) cleanup();
-  });
+ Object.assign(window, {
+   initButtonCollapse,
+   cleanupButtonCollapse: cleanup,
+   registerButtonToSubContainer,
+   processButtonCollapse,
+ });
+ document.addEventListener('xiaobaixEnabledChanged', (e) => {
+   const en = e && e.detail && e.detail.enabled;
+   if (!en) cleanup();
+ });
 }
 
 export { initButtonCollapse, cleanup, registerButtonToSubContainer, processButtonCollapse };
