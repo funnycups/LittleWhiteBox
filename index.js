@@ -15,6 +15,7 @@ import { initButtonCollapse } from "./button-collapse.js";
 import { initVariablesPanel, getVariablesPanelInstance, cleanupVariablesPanel } from "./variables-panel.js";
 import { initStreamingGeneration } from "./streaming-generation.js";
 import { initVariablesCore, cleanupVariablesCore, replaceXbGetVarInString } from "./variables-core.js";
+import { initControlAudio } from "./control-audio.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
@@ -36,6 +37,7 @@ extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     immersive: { enabled: false },
     characterUpdater: { enabled: true, showNotifications: true, serverUrl: "https://db.littlewhitebox.qzz.io" },
     dynamicPrompt: { enabled: true },
+    audio: { enabled: true },
     variablesPanel: { enabled: false },
     variablesCore: { enabled: true },
     useBlob: false,
@@ -58,8 +60,6 @@ const blobUrls = new WeakMap();
 const hashToBlobUrl = new Map();
 const blobLRU = [];
 const BLOB_CACHE_LIMIT = 32;
-
-// State helpers moved to settings.html (window.XB_*).
 
 window.isXiaobaixEnabled = isXiaobaixEnabled;
 window.testLittleWhiteBoxUpdate = async () => {
@@ -482,17 +482,26 @@ let pendingHeight = null;
 let pendingRec = null;
 function resolveAvatarUrls() {
     const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
+
     const toAbsUrl = (relOrUrl) => {
         if (!relOrUrl) return '';
         const s = String(relOrUrl);
         if (/^(data:|blob:|https?:)/i.test(s)) return s;
+        if (s.startsWith('User Avatars/')) {
+            return `${origin}/${s}`;
+        }
         const encoded = s.split('/').map(seg => encodeURIComponent(seg)).join('/');
         return `${origin}/${encoded.replace(/^\/+/, '')}`;
     };
+
     const pickSrc = (selectors) => {
         for (const sel of selectors) {
             const el = document.querySelector(sel);
-            if (el && el.src) return el.src;
+            if (el) {
+                const highRes = el.getAttribute('data-izoomify-url');
+                if (highRes) return highRes;
+                if (el.src) return el.src;
+            }
         }
         return '';
     };
@@ -504,10 +513,15 @@ function resolveAvatarUrls() {
         'img#avatar_user',
         '.st-user-avatar img'
     ]) || default_user_avatar;
+    const m = String(user).match(/\/thumbnail\?type=persona&file=([^&]+)/i);
+    if (m) {
+        user = `User Avatars/${decodeURIComponent(m[1])}`;
+    }
 
     const ctx = getContext?.() || {};
     const chId = ctx.characterId ?? ctx.this_chid;
     const ch = Array.isArray(ctx.characters) ? ctx.characters[chId] : null;
+
     let char = ch?.avatar || default_avatar;
     if (char && !/^(data:|blob:|https?:)/i.test(char)) {
         char = /[\/]/.test(char) ? char.replace(/^\/+/, '') : `characters/${char}`;
@@ -663,6 +677,7 @@ function toggleSettingsControls(enabled) {
         'wallhaven_enabled', 'wallhaven_bg_mode', 'wallhaven_category',
         'wallhaven_purity', 'wallhaven_opacity',
         'xiaobaix_immersive_enabled', 'character_updater_enabled', 'xiaobaix_dynamic_prompt_enabled',
+        'xiaobaix_audio_enabled','xiaobaix_variables_panel_enabled',
         'xiaobaix_use_blob', 'xiaobaix_variables_core_enabled', 'Wrapperiframe'
     ];
     controls.forEach(id => {
@@ -1154,6 +1169,7 @@ jQuery(async () => {
         moduleInstances.statsTracker = statsTracker;
         statsTracker.init(EXT_ID, MODULE_NAME, settings, executeSlashCommand);
         await setupSettings();
+        try { initControlAudio(); } catch (e) {}
         if (isXiaobaixEnabled) setupEventListeners();
         try{if(isXiaobaixEnabled&&settings.wrapperIframe&&!document.getElementById('xb-callgen'))document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-callgen',type:'module',src:`${extensionFolderPath}/call-generate-service.js`}))}catch(e){}
         try{if(isXiaobaixEnabled&&!document.getElementById('xb-worldbook'))document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-worldbook',type:'module',src:`${extensionFolderPath}/worldbook-bridge.js`}))}catch(e){}
