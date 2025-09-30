@@ -174,7 +174,6 @@ class StreamingGeneration {
             if (proxyPassword) body.proxy_password = proxyPassword;
         }
 
-        // 自定义（兼容 OpenAI）专用字段
         if (source === chat_completion_sources.CUSTOM) {
             const customUrl = String(cmdApiUrl || oai_settings?.custom_url || '').trim();
             if (customUrl) {
@@ -286,53 +285,49 @@ class StreamingGeneration {
     _stripNamePrefix = (s) => String(s || '').replace(/^\s*[^:]{1,32}:\s*/, '');
     _normStrip = (s) => this._normalize(this._stripNamePrefix(s));
 
-	    /**
-	     * Parse composite param like: "assistant={A};user={B};sys={C};user={D}"
-	     * Returns ordered array: [{ role, content }]
-	     */
-	    _parseCompositeParam(param) {
-	        const input = String(param || '').trim();
-	        if (!input) return [];
-	        const parts = [];
-	        let buf = '';
-	        let depth = 0;
-	        for (let i = 0; i < input.length; i++) {
-	            const ch = input[i];
-	            if (ch === '{') depth++;
-	            if (ch === '}') depth = Math.max(0, depth - 1);
-	            if (ch === ';' && depth === 0) {
-	                parts.push(buf);
-	                buf = '';
-	            } else {
-	                buf += ch;
-	            }
-	        }
-	        if (buf) parts.push(buf);
-	        const normRole = (r) => {
-	            const x = String(r || '').trim().toLowerCase();
-	            if (x === 'sys' || x === 'system') return 'system';
-	            if (x === 'assistant' || x === 'asst' || x === 'ai') return 'assistant';
-	            if (x === 'user' || x === 'u') return 'user';
-	            return '';
-	        };
-	        const extractValue = (v) => {
-	            let s = String(v || '').trim();
-	            if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('"') && s.endsWith('"')) || (s.startsWith('\'') && s.endsWith('\''))) {
-	                s = s.slice(1, -1);
-	            }
-	            return s.trim();
-	        };
-	        const result = [];
-	        for (const seg of parts) {
-	            const idx = seg.indexOf('=');
-	            if (idx === -1) continue;
-	            const role = normRole(seg.slice(0, idx));
-	            if (!role) continue;
-	            const content = extractValue(seg.slice(idx + 1));
-	            if (content) result.push({ role, content });
-	        }
-	        return result;
-	    }
+    _parseCompositeParam(param) {
+        const input = String(param || '').trim();
+        if (!input) return [];
+        const parts = [];
+        let buf = '';
+        let depth = 0;
+        for (let i = 0; i < input.length; i++) {
+            const ch = input[i];
+            if (ch === '{') depth++;
+            if (ch === '}') depth = Math.max(0, depth - 1);
+            if (ch === ';' && depth === 0) {
+                parts.push(buf);
+                buf = '';
+            } else {
+                buf += ch;
+            }
+        }
+        if (buf) parts.push(buf);
+        const normRole = (r) => {
+            const x = String(r || '').trim().toLowerCase();
+            if (x === 'sys' || x === 'system') return 'system';
+            if (x === 'assistant' || x === 'asst' || x === 'ai') return 'assistant';
+            if (x === 'user' || x === 'u') return 'user';
+            return '';
+        };
+        const extractValue = (v) => {
+            let s = String(v || '').trim();
+            if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('"') && s.endsWith('"')) || (s.startsWith('\'') && s.endsWith('\''))) {
+                s = s.slice(1, -1);
+            }
+            return s.trim();
+        };
+        const result = [];
+        for (const seg of parts) {
+            const idx = seg.indexOf('=');
+            if (idx === -1) continue;
+            const role = normRole(seg.slice(0, idx));
+            if (!role) continue;
+            const content = extractValue(seg.slice(idx + 1));
+            if (content) result.push({ role, content });
+        }
+        return result;
+    }
 
     _createIsFromChat() {
         const chatNorms = chat.map(m => this._normStrip(m?.mes)).filter(Boolean);
@@ -407,8 +402,13 @@ class StreamingGeneration {
         }
     }
 
-	    async xbgenrawCommand(args, prompt) {
-        if (!prompt?.trim()) return '';
+    async xbgenrawCommand(args, prompt) {
+        const hasScaffolding = Boolean(String(
+            args?.top || args?.topsys || args?.topuser || args?.topassistant ||
+            args?.bottom || args?.bottomsys || args?.bottomuser || args?.bottomassistant ||
+            args?.addon || ''
+        ).trim());
+        if (!prompt?.trim() && !hasScaffolding) return '';
         const role = ['user', 'system', 'assistant'].includes(args?.as) ? args.as : 'user';
         const sessionId = this._getSlotId(args?.id);
         const lockArg = String(args?.lock || '').toLowerCase();
@@ -429,25 +429,26 @@ class StreamingGeneration {
         } catch {}
         const nonstream = String(args?.nonstream || '').toLowerCase() === 'true';
         const addonSet = new Set(String(args?.addon || '').split(',').map(s => s.trim()).filter(Boolean));
-	        const createMsgs = (prefix) => {
-	            const msgs = [];
-	            ['sys', 'user', 'assistant'].forEach(role => {
-	                const content = String(args?.[`${prefix}${role === 'sys' ? 'sys' : role}`] || '').trim();
-	                if (content) msgs.push({ role: role === 'sys' ? 'system' : role, content });
-	            });
-	            return msgs;
-	        };
-	        // New composite params take precedence if provided
-	        const topComposite = String(args?.top || '').trim();
-	        const bottomComposite = String(args?.bottom || '').trim();
-	        const topMsgs = topComposite ? this._parseCompositeParam(topComposite) : createMsgs('top');
-	        const bottomMsgs = bottomComposite ? this._parseCompositeParam(bottomComposite) : createMsgs('bottom');
+        const createMsgs = (prefix) => {
+            const msgs = [];
+            ['sys', 'user', 'assistant'].forEach(r => {
+                const content = String(args?.[`${prefix}${r === 'sys' ? 'sys' : r}`] || '').trim();
+                if (content) msgs.push({ role: r === 'sys' ? 'system' : r, content });
+            });
+            return msgs;
+        };
+        const topComposite = String(args?.top || '').trim();
+        const bottomComposite = String(args?.bottom || '').trim();
+        const topMsgs = []
+            .concat(topComposite ? this._parseCompositeParam(topComposite) : [])
+            .concat(createMsgs('top'));
+        const bottomMsgs = []
+            .concat(bottomComposite ? this._parseCompositeParam(bottomComposite) : [])
+            .concat(createMsgs('bottom'));
 
         const buildAddonFinalMessages = async () => {
             const context = getContext();
             let capturedData = null;
-            /** @type {{prompt?: any[]} | any[] | null} */
-            capturedData = null;
             const dataListener = (data) => {
                 capturedData = (data && typeof data === 'object' && !Array.isArray(data) && Array.isArray(data.prompt))
                     ? { ...data, prompt: data.prompt.slice() }
@@ -469,7 +470,7 @@ class StreamingGeneration {
                 }
                 try {
                     await context.generate('normal', {
-                        quiet_prompt: prompt.trim(), quietToLoud: false,
+                        quiet_prompt: (prompt || '').trim(), quietToLoud: false,
                         skipWIAN, force_name2: true
                     }, true);
                 } finally {
@@ -482,11 +483,11 @@ class StreamingGeneration {
             eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
             tempKeys.forEach(key => {});
             let src = [];
-            const cd = /** @type {{prompt?: any[]} | any[] | null} */ (capturedData);
+            const cd = capturedData;
             if (Array.isArray(cd)) {
                 src = cd.slice();
-            } else if (cd && typeof cd === 'object' && Array.isArray((/** @type {any} */(cd)).prompt)) {
-                src = /** @type {any[]} */((/** @type {any} */(cd)).prompt).slice();
+            } else if (cd && typeof cd === 'object' && Array.isArray(cd.prompt)) {
+                src = cd.prompt.slice();
             }
             const sandboxedAfter = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
             const isFromChat = this._createIsFromChat();
@@ -500,9 +501,12 @@ class StreamingGeneration {
             const norm = this._normStrip;
             const position = ['history', 'after_history', 'afterhistory', 'chathistory']
                 .includes(String(args?.position || '').toLowerCase()) ? 'history' : 'bottom';
-            const targetIdx = finalPromptMessages.findIndex(m => m && typeof m.content === 'string' && norm(m.content) === norm(prompt));
+            const targetIdx = finalPromptMessages.findIndex(m => m && typeof m.content === 'string' && norm(m.content) === norm(prompt || ''));
             if (targetIdx !== -1) {
-                const [msg] = finalPromptMessages.splice(targetIdx, 1);
+                finalPromptMessages.splice(targetIdx, 1);
+            }
+            if (prompt?.trim()) {
+                const centerMsg = { role: (args?.as || 'assistant'), content: prompt.trim() };
                 if (position === 'history') {
                     let lastHistoryIndex = -1;
                     const isFromChat2 = this._createIsFromChat();
@@ -512,17 +516,17 @@ class StreamingGeneration {
                             lastHistoryIndex = i;
                         }
                     }
-                    if (lastHistoryIndex >= 0) finalPromptMessages.splice(lastHistoryIndex + 1, 0, msg);
+                    if (lastHistoryIndex >= 0) finalPromptMessages.splice(lastHistoryIndex + 1, 0, centerMsg);
                     else {
                         let lastSystemIndex = -1;
                         for (let i = 0; i < finalPromptMessages.length; i++) {
                             if (finalPromptMessages[i]?.role === 'system') lastSystemIndex = i;
                         }
-                        if (lastSystemIndex >= 0) finalPromptMessages.splice(lastSystemIndex + 1, 0, msg);
-                        else finalPromptMessages.push(msg);
+                        if (lastSystemIndex >= 0) finalPromptMessages.splice(lastSystemIndex + 1, 0, centerMsg);
+                        else finalPromptMessages.push(centerMsg);
                     }
                 } else {
-                    finalPromptMessages.push(msg);
+                    finalPromptMessages.push(centerMsg);
                 }
             }
             const mergedOnce = ([]).concat(topMsgs).concat(finalPromptMessages).concat(bottomMsgs);
@@ -537,14 +541,17 @@ class StreamingGeneration {
             }
             return finalMessages;
         };
-	        if (addonSet.size === 0) {
-            const messages = [...topMsgs, { role, content: prompt.trim() }, ...bottomMsgs];
+
+        if (addonSet.size === 0) {
+            const messages = [].concat(topMsgs);
+            if (prompt?.trim()) messages.push({ role, content: prompt.trim() });
+            messages.push(...bottomMsgs);
             const common = { messages, apiOptions, stop: parsedStop };
             if (nonstream) {
                 try { if (lock) deactivateSendButtons(); } catch {}
                 try {
                     await this._emitPromptReady(messages);
-                    const finalText = await this.processGeneration(common, prompt, sessionId, false);
+                    const finalText = await this.processGeneration(common, prompt || '', sessionId, false);
                     return String(finalText ?? '');
                 } finally {
                     try { if (lock) activateSendButtons(); } catch {}
@@ -552,7 +559,7 @@ class StreamingGeneration {
             } else {
                 try { if (lock) deactivateSendButtons(); } catch {}
                 await this._emitPromptReady(messages);
-                const p = this.processGeneration(common, prompt, sessionId, true);
+                const p = this.processGeneration(common, prompt || '', sessionId, true);
                 p.finally(() => { try { if (lock) activateSendButtons(); } catch {} });
                 p.catch(() => {});
                 return String(sessionId);
@@ -564,7 +571,7 @@ class StreamingGeneration {
                 const finalMessages = await buildAddonFinalMessages();
                 const common = { messages: finalMessages, apiOptions, stop: parsedStop };
                 await this._emitPromptReady(finalMessages);
-                const finalText = await this.processGeneration(common, prompt, sessionId, false);
+                const finalText = await this.processGeneration(common, prompt || '', sessionId, false);
                 return String(finalText ?? '');
             } finally {
                 try { if (lock) activateSendButtons(); } catch {}
@@ -576,7 +583,7 @@ class StreamingGeneration {
                     const finalMessages = await buildAddonFinalMessages();
                     const common = { messages: finalMessages, apiOptions, stop: parsedStop };
                     await this._emitPromptReady(finalMessages);
-                    await this.processGeneration(common, prompt, sessionId, true);
+                    await this.processGeneration(common, prompt || '', sessionId, true);
                 } catch {} finally {
                     try { if (lock) activateSendButtons(); } catch {}
                 }
@@ -720,7 +727,7 @@ class StreamingGeneration {
             { name: 'model', description: '模型名', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'position', description: '插入位置：bottom/history', typeList: [ARGUMENT_TYPE.STRING], enumList: ['bottom', 'history'] },
         ];
-	        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'xbgen',
             callback: (args, prompt) => this.xbgenCommand(args, prompt),
             namedArgumentList: [
@@ -735,7 +742,7 @@ class StreamingGeneration {
             helpString: '使用完整上下文进行流式生成',
             returns: 'session ID'
         }));
-	        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'xbgenraw',
             callback: (args, prompt) => this.xbgenrawCommand(args, prompt),
             namedArgumentList: [
@@ -743,14 +750,14 @@ class StreamingGeneration {
                 { name: 'nonstream', description: '非流式：true/false', typeList: [ARGUMENT_TYPE.STRING], enumList: ['true', 'false'] },
                 { name: 'lock', description: '生成时锁定输入 on/off', typeList: [ARGUMENT_TYPE.STRING], enumList: ['on', 'off'] },
                 { name: 'addon', description: '附加上下文', typeList: [ARGUMENT_TYPE.STRING] },
-	                { name: 'topsys', description: '置顶 system', typeList: [ARGUMENT_TYPE.STRING] },
-	                { name: 'topuser', description: '置顶 user', typeList: [ARGUMENT_TYPE.STRING] },
-	                { name: 'topassistant', description: '置顶 assistant', typeList: [ARGUMENT_TYPE.STRING] },
-	                { name: 'bottomsys', description: '置底 system', typeList: [ARGUMENT_TYPE.STRING] },
-	                { name: 'bottomuser', description: '置底 user', typeList: [ARGUMENT_TYPE.STRING] },
-	                { name: 'bottomassistant', description: '置底 assistant', typeList: [ARGUMENT_TYPE.STRING] },
-	                { name: 'top', description: '复合置顶: assistant={A};user={B};sys={C}', typeList: [ARGUMENT_TYPE.STRING] },
-	                { name: 'bottom', description: '复合置底: assistant={C};sys={D1}', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'topsys', description: '置顶 system', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'topuser', description: '置顶 user', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'topassistant', description: '置顶 assistant', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'bottomsys', description: '置底 system', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'bottomuser', description: '置底 user', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'bottomassistant', description: '置底 assistant', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'top', description: '复合置顶: assistant={A};user={B};sys={C}', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'bottom', description: '复合置底: assistant={C};sys={D1}', typeList: [ARGUMENT_TYPE.STRING] },
                 ...commonArgs
             ].map(SlashCommandNamedArgument.fromProps),
             unnamedArgumentList: [SlashCommandArgument.fromProps({
