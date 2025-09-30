@@ -709,9 +709,11 @@ async function applyVariablesForMessage(messageId){
           const localPath=joinPath(subPath,k);
           const absPath = (localPath ? `${root}.${localPath}` : root);
           const stdPath = typeof normalizePath==='function' ? normalizePath(absPath) : absPath;
-          let allow = true; let newVal = v;
+          let allow = true;
+          let newValInit = (typeof _parseValueForSet === 'function') ? _parseValueForSet(v) : v;
+          let newVal = newValInit;
           if (typeof guardValidate==='function') {
-            const res = guardValidate('set', stdPath, v);
+            const res = guardValidate('set', stdPath, newValInit);
             allow = !!res?.allow;
             if (res && 'value' in res) newVal = res.value;
           }
@@ -2436,19 +2438,75 @@ function registerXbSetVarSlashCommand(){
     const ctx = getContext();
     const { SlashCommandParser, SlashCommand, SlashCommandArgument, ARGUMENT_TYPE } = ctx || {};
     if (!SlashCommandParser?.addCommandObject || !SlashCommand?.fromProps || !SlashCommandArgument?.fromProps) return;
+
+    function joinUnnamed(args){
+      if (Array.isArray(args)) return args.filter(v=>v!=null).map(v=>String(v)).join(' ').trim();
+      return String(args ?? '').trim();
+    }
+    function splitTokensBySpace(s){
+      return String(s||'').split(/\s+/).filter(Boolean);
+    }
+    function isDirectiveToken(tok){
+      const t = String(tok||'').trim();
+      if (!t.startsWith('$')) return false;
+      if (t === '$ro' || t === '$ext' || t === '$prune' || t === '$free' || t === '$grow' || t === '$shrink' || t === '$list') return true;
+      if (t.startsWith('$min=') || t.startsWith('$max=') || t.startsWith('$range=') || t.startsWith('$enum=') || t.startsWith('$match=')) return true;
+      return false;
+    }
+    function parseKeyAndValue(namedArgs, unnamedArgs){
+      const unnamedJoined = joinUnnamed(unnamedArgs);
+      const hasNamedKey = typeof namedArgs?.key === 'string' && namedArgs.key.trim().length > 0;
+      if (hasNamedKey){
+        const keyRaw = namedArgs.key.trim();
+        const keyParts = splitTokensBySpace(keyRaw);
+        if (keyParts.length > 1 && keyParts.every(p => isDirectiveToken(p) || p === keyParts[keyParts.length - 1])) {
+          const directives = keyParts.slice(0, -1);
+          const realPath = keyParts[keyParts.length - 1];
+          return { directives, realPath, valueText: unnamedJoined };
+        }
+        if (isDirectiveToken(keyRaw)) {
+          const rest = unnamedJoined;
+          const m = rest.match(/^\S+/);
+          const realPath = m ? m[0] : '';
+          const valueText = realPath ? rest.slice(realPath.length).trim() : '';
+          return { directives:[keyRaw], realPath, valueText };
+        }
+        return { directives:[], realPath:keyRaw, valueText:unnamedJoined };
+      } else {
+        const firstRaw = joinUnnamed(unnamedArgs);
+        if (!firstRaw) return { directives:[], realPath:'', valueText:'' };
+        const sp = lwbSplitPathAndValue(firstRaw);
+        let head = String(sp.path||'').trim();
+        let rest = String(sp.value||'').trim();
+        const parts = splitTokensBySpace(head);
+        if (parts.length > 1 && parts.every(p => isDirectiveToken(p) || p === parts[parts.length - 1])) {
+          const directives = parts.slice(0, -1);
+          const realPath = parts[parts.length - 1];
+          return { directives, realPath, valueText: rest };
+        }
+        if (isDirectiveToken(head)) {
+          const m = rest.match(/^\S+/);
+          const realPath = m ? m[0] : '';
+          const valueText = realPath ? rest.slice(realPath.length).trim() : '';
+          return { directives:[head], realPath, valueText };
+        }
+        return { directives:[], realPath:head, valueText:rest };
+      }
+    }
+
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
       name: 'xbsetvar',
       returns: 'string',
-      helpString: '设置嵌套本地变量：/xbsetvar <path> <value> 或 /xbsetvar key=<path> <value>。示例：/xbsetvar <user>.黄粱 10；支持 ["key"],[index] 路径。',
+      helpString: '设置嵌套本地变量：/xbsetvar <path> <value> 或 /xbsetvar key=<path> <value>。支持指令前缀，例如：/xbsetvar key=$list 情节小结 ["item1"] 或 /xbsetvar "$list 情节小结" ["item1"]',
       unnamedArgumentList: [
         SlashCommandArgument.fromProps({
-          description: '变量路径，例如 <user>.黄粱 或 A[0].name 或 A["0"].name',
+          description: '变量路径或(指令 前缀 + 路径)，例如 $list 情节小结 或 A[0].name',
           typeList: [ARGUMENT_TYPE.STRING],
           isRequired: true,
           acceptsMultiple: false,
         }),
         SlashCommandArgument.fromProps({
-          description: '要设置的值（可为数字、布尔、null、JSON、或字符串）',
+          description: '要设置的值（数字、布尔、null、JSON、或字符串）',
           typeList: [ARGUMENT_TYPE.STRING],
           isRequired: true,
           acceptsMultiple: false,
@@ -2456,26 +2514,49 @@ function registerXbSetVarSlashCommand(){
       ],
       callback: (namedArgs, unnamedArgs) => {
         try{
-          const { path, rest } = _extractPathAndRestForSet(namedArgs, unnamedArgs);
-          try{ console.log('[LWB:/xbsetvar] 玩家输入的/xbgetvar是:', `/xbsetvar key=${String(path||'')} ${String(rest||'')}`); }catch{}
+          const parsed = parseKeyAndValue(namedArgs, unnamedArgs);
+          const directives = parsed.directives || [];
+          const realPath = String(parsed.realPath || '').trim();
+          let rest = String(parsed.valueText || '').trim();
+          if (!realPath) return '';
+
+          try{ console.log('[LWB:/xbsetvar] 指令:', directives, '真实路径:', realPath, '值:', rest); }catch{}
+
+          if (directives.length > 0) {
+            const delta = parseDirectivesTokenList(directives);
+            const absPath = normalizePath(realPath);
+            applyRuleDelta(absPath, delta);
+            rulesSaveToMeta();
+          }
+
           let toSet = rest;
           try{
-            const parsed = _parseValueForSet(rest);
-            if (parsed && typeof parsed==='object' && !Array.isArray(parsed)){
-              const expanded = expandShorthandRuleObject(String(path||''), parsed);
+            const parsedVal = _parseValueForSet(rest);
+            if (parsedVal && typeof parsedVal==='object' && !Array.isArray(parsedVal)){
+              const expanded = expandShorthandRuleObject(String(realPath||''), parsedVal);
               if (expanded && typeof expanded==='object'){
                 const expandedStr = _safeJSONStringify(expanded) || '';
                 toSet = expandedStr;
-                try { console.log('[LWB:/xbsetvar] 规则展开为:', `/xbsetvar key=${String(path||'')} ${expandedStr}`); } catch {}
+                try { console.log('[LWB:/xbsetvar] 规则展开为:', `/xbsetvar key=${String(realPath||'')} ${expandedStr}`); } catch {}
+              } else {
+                toSet = rest;
               }
+            } else {
+              toSet = rest;
             }
-          }catch{}
-          lwbAssignVarPath(path, toSet);
+          }catch{
+            toSet = rest;
+          }
+
+          lwbAssignVarPath(realPath, toSet);
           return '';
-        }catch{ return ''; }
+        }catch{
+          return '';
+        }
       },
     }));
-  } catch {} }
+  } catch {} 
+}
 
 
 /* ============= 第五区：快照/回滚器 ============= */
