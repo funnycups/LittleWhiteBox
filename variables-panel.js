@@ -207,8 +207,8 @@ class VariablesPanel {
     const bind=()=>{
       const cb=document.getElementById(id); if(!cb) return false;
       this.handleCheckboxChange && cb.removeEventListener('change',this.handleCheckboxChange);
-      this.handleCheckboxChange=e=>this.toggleEnabled(e.target.checked);
-      cb.addEventListener('change',this.handleCheckboxChange); cb.checked=this.state.isEnabled; return true;
+      this.handleCheckboxChange=e=> this.toggleEnabled(e.target instanceof HTMLInputElement ? !!e.target.checked : false);
+      cb.addEventListener('change',this.handleCheckboxChange); if(cb instanceof HTMLInputElement) cb.checked=this.state.isEnabled; return true;
     };
     if(!bind()) setTimeout(bind,100);
   }
@@ -217,7 +217,7 @@ class VariablesPanel {
     if(cb && this.handleCheckboxChange) cb.removeEventListener('change',this.handleCheckboxChange);
     this.handleCheckboxChange=null;
   }
-  syncCheckbox(){ const cb=document.getElementById('xiaobaix_variables_panel_enabled'); if(cb) cb.checked=this.state.isEnabled; }
+  syncCheckbox(){ const cb=document.getElementById('xiaobaix_variables_panel_enabled'); if(cb instanceof HTMLInputElement) cb.checked=this.state.isEnabled; }
 
   bindEvents(){
     if(!this.state.container?.length) return;
@@ -230,7 +230,10 @@ class VariablesPanel {
       .on(`click${ns}`,'.vm-item-controls [data-act]',e=>this.onItemAction(e))
       .on(`click${ns}`,'.vm-inline-form [data-act]',e=>this.onInlineAction(e))
       .on(`mousedown${ns} touchstart${ns}`,'[data-act="copy"]',e=>this.bindCopyPress(e));
-    ['character','global'].forEach(t=> $(`#${t}-vm-search`).on('input',e=>this.searchVariables(t,e.target.value)));
+    ['character','global'].forEach(t=> $(`#${t}-vm-search`).on('input',e=>{
+      if(e.currentTarget instanceof HTMLInputElement) this.searchVariables(t,e.currentTarget.value);
+      else this.searchVariables(t,'');
+    }));
   }
   unbindEvents(){ $(document).off('.vm'); ['character','global'].forEach(t=> $(`#${t}-vm-search`).off('input')); }
 
@@ -440,19 +443,33 @@ class VariablesPanel {
     if(this.savingInProgress) return; this.savingInProgress=true;
     try{
       if(!form?.length) return toastr.error('表单未找到');
-      const name=form.find('.inline-name').val()?.trim(), value=form.find('.inline-value').val()?.trim(), type=form.data('type');
+      const rawName=form.find('.inline-name').val();
+      const rawValue=form.find('.inline-value').val();
+      const name= typeof rawName==='string'? rawName.trim() : String(rawName ?? '').trim();
+      const value= typeof rawValue==='string'? rawValue.trim() : String(rawValue ?? '').trim();
+      const type=form.data('type');
       if(!name) return form.find('.inline-name').focus(), toastr.error('请输入变量名称');
       const val=this.processValue(value), {action,path}=this.state.formState;
       this.withPreservedExpansion(type,()=>{
-        if(action==='addChild') this.setValueByPath(type,[...path,name],val);
-        else if(action==='edit'){
+        if(action==='addChild') {
+          this.setValueByPath(type,[...path,name],val);
+        } else if(action==='edit'){
           const old=path[path.length-1];
           if(name!==old){
             this.deleteByPathSilently(type,path);
-            if(path.length===1) this.vt(type).setter(name,val);
-            else this.setValueByPath(type,[...path.slice(0,-1),name],val);
-          }else this.setValueByPath(type,path,val);
-        }else this.vt(type).setter(name,val);
+            if(path.length===1) {
+              const toSave=(typeof val==='object'&&val!==null)?JSON.stringify(val):val;
+              this.vt(type).setter(name,toSave);
+            } else {
+              this.setValueByPath(type,[...path.slice(0,-1),name],val);
+            }
+          } else {
+            this.setValueByPath(type,path,val);
+          }
+        } else {
+          const toSave=(typeof val==='object'&&val!==null)?JSON.stringify(val):val;
+          this.vt(type).setter(name,toSave);
+        }
       });
       this.hideInlineForm(); toastr.success('变量已保存');
     }catch(e){ toastr.error('JSON格式错误: '+e.message); }
@@ -472,10 +489,16 @@ class VariablesPanel {
   saveAddVariable(t){
     if(this.savingInProgress) return; this.savingInProgress=true;
     try{
-      const n=$(`#${t}-vm-name`).val().trim(), v=$(`#${t}-vm-value`).val().trim();
+      const rawN=$(`#${t}-vm-name`).val();
+      const rawV=$(`#${t}-vm-value`).val();
+      const n= typeof rawN==='string' ? rawN.trim() : String(rawN ?? '').trim();
+      const v= typeof rawV==='string' ? rawV.trim() : String(rawV ?? '').trim();
       if(!n) return toastr.error('请输入变量名称');
       const val=this.processValue(v);
-      this.withPreservedExpansion(t,()=> this.vt(t).setter(n,val));
+      this.withPreservedExpansion(t,()=> {
+        const toSave=(typeof val==='object'&&val!==null)?JSON.stringify(val):val;
+        this.vt(t).setter(n,toSave);
+      });
       this.hideAddForm(t); toastr.success('变量已保存');
     }catch(e){ toastr.error('JSON格式错误: '+e.message); }
     finally{ this.savingInProgress=false; }
@@ -484,17 +507,21 @@ class VariablesPanel {
   getValueByPath(t,p){ if(p.length===1) return this.vt(t).getter(p[0]); let v=this.parseValue(this.vt(t).getter(p[0])); p.slice(1).forEach(k=> v=v?.[k]); return v; }
 
   setValueByPath(t,p,v){
-    if(p.length===1){ this.vt(t).setter(p[0],v); return; }
+    if(p.length===1){
+      const toSave = (typeof v==='object' && v!==null) ? JSON.stringify(v) : v;
+      this.vt(t).setter(p[0], toSave);
+      return;
+    }
     let root=this.parseValue(this.vt(t).getter(p[0])); if(typeof root!=='object'||root===null) root={};
     let cur=root; p.slice(1,-1).forEach(k=>{ if(typeof cur[k]!=='object'||cur[k]===null) cur[k]={}; cur=cur[k]; });
-    cur[p[p.length-1]]=v; this.vt(t).setter(p[0],root);
+    cur[p[p.length-1]]=v; this.vt(t).setter(p[0], JSON.stringify(root));
   }
 
   deleteByPathSilently(t,p){
     if(p.length===1){ delete this.store(t)[p[0]]; return; }
     let root=this.parseValue(this.vt(t).getter(p[0])); if(typeof root!=='object'||root===null) return;
     let cur=root; p.slice(1,-1).forEach(k=>{ if(typeof cur[k]!=='object'||cur[k]===null) cur[k]={}; cur=cur[k]; });
-    delete cur[p[p.length-1]]; this.vt(t).setter(p[0],root);
+    delete cur[p[p.length-1]]; this.vt(t).setter(p[0], JSON.stringify(root));
   }
 
   formatPath(t,path){
@@ -531,8 +558,16 @@ class VariablesPanel {
     const inp=document.createElement('input'); inp.type='file'; inp.accept='.json';
     inp.onchange=async(e)=>{
       try{
-        const txt=await e.target.files[0].text(), v=JSON.parse(txt);
-        this.withPreservedExpansion(t,()=> Object.entries(v).forEach(([k,val])=> this.vt(t).setter(k,val)));
+        const tgt=e.target;
+        const file = (tgt && 'files' in tgt && tgt.files && tgt.files[0]) ? tgt.files[0] : null;
+        if(!file) throw new Error('未选择文件');
+        const txt=await file.text(), v=JSON.parse(txt);
+        this.withPreservedExpansion(t,()=> {
+          Object.entries(v).forEach(([k,val])=> {
+            const toSave=(typeof val==='object'&&val!==null)?JSON.stringify(val):val;
+            this.vt(t).setter(k,toSave);
+          });
+        });
         toastr.success(`成功导入 ${Object.keys(v).length} 个变量`);
       }catch{ toastr.error('文件格式错误'); }
     };
@@ -570,8 +605,8 @@ class VariablesPanel {
     if(!msg.length || msg.find('.mes_btn.mes_variables_panel').length) return;
     const btn=this.createPerMessageBtn(messageId);
     const appendToFlex=(m)=>{ const flex=m.find('.flex-container.flex1.alignitemscenter'); if(flex.length) flex.append(btn); };
-    if(typeof window.registerButtonToSubContainer==='function'){
-      const ok=window.registerButtonToSubContainer(messageId,btn);
+    if(typeof window['registerButtonToSubContainer']==='function'){
+      const ok=window['registerButtonToSubContainer'](messageId,btn);
       if(!ok) appendToFlex(msg);
     } else appendToFlex(msg);
   }
@@ -625,11 +660,8 @@ class VariablesPanel {
   normalizeStore(t){
     const s=this.store(t); let changed=0;
     for(const[k,v] of Object.entries(s)){
-      if(typeof v==='string'){
-        const sv=v.trim();
-        if((sv.startsWith('{')&&sv.endsWith('}'))||(sv.startsWith('[')&&sv.endsWith(']'))){
-          try{ s[k]=JSON.parse(sv); changed++; }catch{}
-        }
+      if(typeof v==='object' && v!==null){
+        try{ s[k]=JSON.stringify(v); changed++; }catch{}
       }
     }
     if(changed) this.vt(t).save?.();
