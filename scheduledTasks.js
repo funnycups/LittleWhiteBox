@@ -8,68 +8,6 @@ import { accountStorage } from "../../../util/AccountStorage.js";
 import { download, getFileText, uuidv4, debounce, getSortableDelay } from "../../../utils.js";
 import { executeSlashCommand } from "./index.js";
 
-// ====== Task Aggregation BEGIN ===================================================
-const __taskModuleRegistry = {};
-const __taskPropCache = new Map();
-
-async function __taskDynamicImport(path) {
-    const mod = await import(path);
-    __taskModuleRegistry[path] = mod;
-    return mod;
-}
-
-function __createModuleProxy(moduleName) {
-    const modulePath = moduleName === 'script' ? `/script.js` : `/scripts/${moduleName}.js`;
-    return new Proxy({}, {
-        get(_tt, exportName) {
-            if (exportName === 'import') {
-                return () => __taskDynamicImport(modulePath);
-            }
-            return async (...args) => {
-                try {
-                    const mod = await __taskDynamicImport(modulePath);
-                    const value = mod?.[exportName];
-                    if (typeof value === 'function') {
-                        return await value.apply(mod, args);
-                    }
-                    return value;
-                } catch (err) {
-                    console.debug('[Task] 动态导入失败:', modulePath, err);
-                    return undefined;
-                }
-            };
-        },
-        has() { return true; },
-    });
-}
-
-const Task = new Proxy({}, {
-    get(_t, prop) {
-        if (prop === 'import') return __taskDynamicImport;
-        if (__taskPropCache.has(prop)) return __taskPropCache.get(prop);
-        for (const mod of Object.values(__taskModuleRegistry)) {
-            if (prop in mod) {
-                const val = mod[prop];
-                __taskPropCache.set(prop, val);
-                return val;
-            }
-        }
-        if (prop in window) {
-            const val = window[prop];
-            __taskPropCache.set(prop, val);
-            return val;
-        }
-        if (typeof prop === 'string' && /^[A-Za-z0-9_\-]+$/.test(prop)) {
-            const moduleProxy = __createModuleProxy(prop);
-            __taskPropCache.set(prop, moduleProxy);
-            return moduleProxy;
-        }
-        return undefined;
-    },
-});
-/** @type {any} */ (window).Task = Task;
-// ====== Task Aggregation END =====================================================
-
 const TASKS_MODULE_NAME = "xiaobaix-tasks";
 const EXT_ID = "LittleWhiteBox";
 const defaultSettings = { enabled: true, globalTasks: [], processedMessages: [], character_allowed_tasks: [] };
@@ -381,13 +319,12 @@ async function executeTaskJS(jsCode, taskName = 'AnonymousTask') {
 
         const runInScope = async (code) => {
             const fn = new Function(
-                'STscript', 'Task',
+                'STscript',
                 'addListener', 'setTimeoutSafe', 'clearTimeoutSafe', 'setIntervalSafe', 'clearIntervalSafe', 'abortSignal',
                 `return (async () => { ${code} })();`
             );
             return await fn(
                 STscript,
-                /** @type {any} */ (window).Task,
                 addListener,
                 setTimeoutSafe,
                 clearTimeoutSafe,
