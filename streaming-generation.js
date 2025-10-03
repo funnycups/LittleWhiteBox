@@ -152,7 +152,6 @@ class StreamingGeneration {
             chat_completion_source: source,
             max_tokens: Number(oai_settings?.openai_max_tokens ?? 0) || 1024,
             temperature: Number(oai_settings?.temp_openai ?? ''),
-            top_p: Number(oai_settings?.top_p_openai ?? ''),
             presence_penalty: Number(oai_settings?.pres_pen_openai ?? ''),
             frequency_penalty: Number(oai_settings?.freq_pen_openai ?? ''),
             stop: Array.isArray(generateData?.stop) ? generateData.stop : undefined,
@@ -439,12 +438,67 @@ class StreamingGeneration {
         };
         const topComposite = String(args?.top || '').trim();
         const bottomComposite = String(args?.bottom || '').trim();
-        const topMsgs = []
-            .concat(topComposite ? this._parseCompositeParam(topComposite) : [])
-            .concat(createMsgs('top'));
-        const bottomMsgs = []
-            .concat(bottomComposite ? this._parseCompositeParam(bottomComposite) : [])
-            .concat(createMsgs('bottom'));
+        const historyPlaceholderRegex = /\{\$history(\d{1,3})\}/ig;
+        const resolveHistoryPlaceholder = async (text) => {
+            if (!text || typeof text !== 'string') return text;
+            const ctx = getContext();
+            const chatArr = Array.isArray(ctx?.chat) ? ctx.chat : [];
+            if (!chatArr.length) return text;
+            const extractText = (msg) => {
+                if (typeof msg?.mes === 'string') return msg.mes.replace(/\r\n/g, '\n');
+                if (typeof msg?.content === 'string') return msg.content.replace(/\r\n/g, '\n');
+                if (Array.isArray(msg?.content)) {
+                    return msg.content
+                        .filter(p => p && p.type === 'text' && typeof p.text === 'string')
+                        .map(p => p.text.replace(/\r\n/g, '\n')).join('\n');
+                }
+                return '';
+            };
+            const replaceFn = (match, countStr) => {
+                const count = Math.max(1, Math.min(200, Number(countStr)));
+                const start = Math.max(0, chatArr.length - count);
+                const lines = [];
+                for (let i = start; i < chatArr.length; i++) {
+                    const msg = chatArr[i];
+                    const isUser = !!msg?.is_user;
+                    if (isUser) {
+                        const speaker = (msg?.name && String(msg.name).trim())
+                            || (ctx?.name1 && String(ctx.name1).trim())
+                            || 'USER';
+                        lines.push(`${speaker}：`);
+                    } else {
+                        const speaker = (msg?.name && String(msg.name).trim())
+                            || (ctx?.name2 && String(ctx.name2).trim())
+                            || 'ASSISTANT';
+                        lines.push(`${speaker}：`);
+                    }
+                    const textContent = (extractText(msg) || '').trim();
+                    if (textContent) lines.push(textContent);
+                    lines.push('');
+                }
+                return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+            };
+            return text.replace(historyPlaceholderRegex, replaceFn);
+        };
+        const mapHistoryPlaceholders = async (messages) => {
+            const out = [];
+            for (const m of messages) {
+                if (!m) continue;
+                const content = await resolveHistoryPlaceholder(m.content);
+                out.push({ ...m, content });
+            }
+            return out;
+        };
+        const topMsgs = await mapHistoryPlaceholders(
+            []
+                .concat(topComposite ? this._parseCompositeParam(topComposite) : [])
+                .concat(createMsgs('top'))
+        );
+        const bottomMsgs = await mapHistoryPlaceholders(
+            []
+                .concat(bottomComposite ? this._parseCompositeParam(bottomComposite) : [])
+                .concat(createMsgs('bottom'))
+        );
 
         const buildAddonFinalMessages = async () => {
             const context = getContext();
