@@ -781,40 +781,25 @@ const PRB=(()=>{
 
   function onExportReady(preset){
     try{
-      const name=PresetStore.currentName(); if(!name) return;
-      preset.extensions=preset.extensions||{};
-      const binding=read(name);
-      if(binding?.scripts?.length){
-        preset.extensions.regexBindings=toPayload(binding);
+      const name = PresetStore.currentName(); if(!name) return;
+      preset.extensions = preset.extensions || {};
 
-        const scripts = binding.strategy==='byEmbed' ? binding.scripts : [];
-        const content = JSON.stringify(scripts);
-        const oai = (preset.chatCompletionSettings = preset.chatCompletionSettings || {});
-        const prompts = (oai.prompts = Array.isArray(oai.prompts) ? oai.prompts : []);
-        const idx = prompts.findIndex(p=>p?.identifier==='regexes-bindings');
-        const promptObj = {
-          identifier:"regexes-bindings",
-          system_prompt:false,
-          enabled:false,
-          marker:false,
-          name:"【勿删】绑定正则",
-          role:"system",
-          content,
-          injection_position:0,
-          injection_depth:4,
-          injection_order:100,
-          injection_trigger:null,
-          forbid_overrides:false
+      const binding = PRB.read(name);
+      if (binding?.scripts?.length){
+        preset.extensions.regexBindings = PRB.toPayload(binding);
+      const d = PresetAdapter.getLocalData(name);
+      if (d?.uniqueValue && d?.timestamp){
+        preset.extensions.presetdetailnfo = {
+          uniqueValue: d.uniqueValue,
+          timestamp: d.timestamp,
+          nameGroup: d.nameGroup || "",
+          linkAddress: d.linkAddress || "",
+          updateNote: d.updateNote || ""
         };
-        if(idx>=0) prompts[idx] = { ...prompts[idx], ...promptObj };
-        else prompts.push(promptObj);
-      }
-      const d=PresetAdapter.getLocalData(name);
-      if(d?.uniqueValue&&d?.timestamp){
-        preset.extensions.presetdetailnfo={ uniqueValue:d.uniqueValue, timestamp:d.timestamp, nameGroup:d.nameGroup||"", linkAddress:d.linkAddress||"", updateNote:d.updateNote||"" };
       }
     }catch{}
   }
+
 
   async function onImportReady({ data, presetName }){
     try{
