@@ -1,8 +1,8 @@
 import { extension_settings, getContext, writeExtensionField, renderExtensionTemplateAsync } from "../../../extensions.js";
-import { saveSettingsDebounced, eventSource, event_types, characters, this_chid, chat } from "../../../../script.js";
+import { saveSettingsDebounced, eventSource, event_types, characters, this_chid, chat, callPopup } from "../../../../script.js";
 import { SlashCommandParser } from "../../../slash-commands/SlashCommandParser.js";
 import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
-import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/SlashCommandArgument.js";
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from "../../../slash-commands/SlashCommandArgument.js";
 import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { accountStorage } from "../../../util/AccountStorage.js";
 import { download, getFileText, uuidv4, debounce, getSortableDelay } from "../../../utils.js";
@@ -14,26 +14,32 @@ const defaultSettings = { enabled: true, globalTasks: [], processedMessages: [],
 const CONFIG = { MAX_PROCESSED: 20, MAX_COOLDOWN: 10, CLEANUP_INTERVAL: 30000, TASK_COOLDOWN: 50, DEBOUNCE_DELAY: 1000 };
 
 let state = {
-    currentEditingTask: null, currentEditingIndex: -1, lastChatId: null, chatJustChanged: false,
+    currentEditingTask: null, currentEditingIndex: -1, currentEditingId: null, lastChatId: null, chatJustChanged: false,
     isNewChat: false, lastTurnCount: 0, isExecutingTask: false, isCommandGenerated: false,
     taskLastExecutionTime: new Map(), cleanupTimer: null, lastTasksHash: '', taskBarVisible: true,
     processedMessagesSet: new Set(),
-    taskBarSignature: ''
+    taskBarSignature: '',
+    floorCounts: { all: 0, user: 0, llm: 0 },
+    dynamicCallbacks: new Map(),
+    qrObserver: null,
+    isUpdatingTaskBar: false
 };
 
 const debouncedSave = debounce(() => saveSettingsDebounced(), CONFIG.DEBOUNCE_DELAY);
 
 const isGloballyEnabled = () => (window.isXiaobaixEnabled !== undefined ? window.isXiaobaixEnabled : true) && getSettings().enabled;
-const allTasks = () => [...getSettings().globalTasks, ...getCharacterTasks()];
+const allTasks = () => {
+    const normalizeTiming = (t) => (String(t || '').toLowerCase() === 'initialization' ? 'character_init' : t);
+    const mapTiming = (task) => ({ ...task, triggerTiming: normalizeTiming(task.triggerTiming) });
+    return [...getSettings().globalTasks.map(mapTiming), ...getCharacterTasks().map(mapTiming)];
+};
 const clampInt = (v, min, max, d = 0) => (Number.isFinite(+v) ? Math.max(min, Math.min(max, +v)) : d);
 const nowMs = () => Date.now();
 
 function getSettings() {
     const ext = extension_settings[EXT_ID] || (extension_settings[EXT_ID] = {});
-    if (!ext.tasks) {
-        ext.tasks = structuredClone(defaultSettings);
-        return ext.tasks;
-    }
+    if (!ext.tasks) ext.tasks = structuredClone(defaultSettings);
+
     const t = ext.tasks;
     if (typeof t.enabled !== 'boolean') t.enabled = defaultSettings.enabled;
     if (!Array.isArray(t.globalTasks)) t.globalTasks = [];
@@ -93,17 +99,26 @@ function markMessageAsProcessed(key) {
 function getCharacterTasks() {
     if (!this_chid || !characters[this_chid]) return [];
     const c = characters[this_chid];
-    if (!c.data?.extensions?.[TASKS_MODULE_NAME]) {
-        if (!c.data) c.data = {};
-        if (!c.data.extensions) c.data.extensions = {};
-        c.data.extensions[TASKS_MODULE_NAME] = { tasks: [] };
-    }
-    return c.data.extensions[TASKS_MODULE_NAME].tasks || [];
+    if (!c.data) c.data = {};
+    if (!c.data.extensions) c.data.extensions = {};
+    if (!c.data.extensions[TASKS_MODULE_NAME]) c.data.extensions[TASKS_MODULE_NAME] = { tasks: [] };
+
+    const list = c.data.extensions[TASKS_MODULE_NAME].tasks;
+    if (!Array.isArray(list)) c.data.extensions[TASKS_MODULE_NAME].tasks = [];
+    return c.data.extensions[TASKS_MODULE_NAME].tasks;
 }
 
 async function saveCharacterTasks(tasks) {
     if (!this_chid || !characters[this_chid]) return;
+
     await writeExtensionField(Number(this_chid), TASKS_MODULE_NAME, { tasks });
+    try {
+        // 同步回内存，确保引用一致
+        if (!characters[this_chid].data) characters[this_chid].data = {};
+        if (!characters[this_chid].data.extensions) characters[this_chid].data.extensions = {};
+        if (!characters[this_chid].data.extensions[TASKS_MODULE_NAME]) characters[this_chid].data.extensions[TASKS_MODULE_NAME] = { tasks: [] };
+        characters[this_chid].data.extensions[TASKS_MODULE_NAME].tasks = tasks;
+    } catch {}
     const settings = getSettings();
     const avatar = characters[this_chid].avatar;
     if (avatar && !settings.character_allowed_tasks?.includes(avatar)) {
@@ -225,7 +240,7 @@ async function executeTaskJS(jsCode, taskName = 'AnonymousTask') {
     const codeSig = __hashStringForKey(String(jsCode || ''));
     const stableKey = (String(taskName || '').trim()) || `js-${codeSig}`;
 
-    await __runTaskSingleInstance(stableKey, async (utils) => {
+	await __runTaskSingleInstance(stableKey, async (utils) => {
         const { addListener, setTimeoutSafe, clearTimeoutSafe, setIntervalSafe, clearIntervalSafe, abortSignal } = utils;
 
         const originalWindowFns = {
@@ -317,14 +332,33 @@ async function executeTaskJS(jsCode, taskName = 'AnonymousTask') {
             } catch {}
         };
 
-        const runInScope = async (code) => {
+		const addFloorListener = (callback, options = {}) => {
+			if (typeof callback !== 'function') throw new Error('callback 必须是函数');
+			const callbackId = `${taskName}_fl_${uuidv4()}`;
+			const entryAbort = new AbortController();
+			try { abortSignal.addEventListener('abort', () => { try { entryAbort.abort(); } catch {} state.dynamicCallbacks.delete(callbackId); }); } catch {}
+			state.dynamicCallbacks.set(callbackId, {
+				callback,
+				options: {
+					interval: Number.isFinite(parseInt(options.interval)) ? parseInt(options.interval) : 0,
+					timing: options.timing || 'after_ai',
+					floorType: options.floorType || 'all'
+				},
+				abortController: entryAbort
+			});
+			return () => { try { entryAbort.abort(); } catch {} state.dynamicCallbacks.delete(callbackId); };
+		};
+
+		const runInScope = async (code) => {
             const fn = new Function(
                 'STscript',
-                'addListener', 'setTimeoutSafe', 'clearTimeoutSafe', 'setIntervalSafe', 'clearIntervalSafe', 'abortSignal',
+				'addFloorListener',
+				'addListener', 'setTimeoutSafe', 'clearTimeoutSafe', 'setIntervalSafe', 'clearIntervalSafe', 'abortSignal',
                 `return (async () => { ${code} })();`
             );
             return await fn(
                 STscript,
+				addFloorListener,
                 addListener,
                 setTimeoutSafe,
                 clearTimeoutSafe,
@@ -354,14 +388,7 @@ function handleTaskMessage(event) {
 
 // ------------- Chat metrics --------------
 function getFloorCounts() {
-    if (!Array.isArray(chat) || chat.length === 0) return { all: 0, user: 0, llm: 0 };
-    let user = 0, llm = 0, all = 0;
-    for (const m of chat) {
-        all++;
-        if (m.is_system) continue;
-        if (m.is_user) user++; else llm++;
-    }
-    return { all, user, llm };
+    return state.floorCounts || { all: 0, user: 0, llm: 0 };
 }
 function pickFloorByType(floorType, counts) {
     switch (floorType) {
@@ -379,7 +406,7 @@ function calculateTurnCount() {
 
 // ------------- Task trigger core ---------
 function shouldSkipByContext(taskTriggerTiming, triggerContext) {
-    if (taskTriggerTiming === 'initialization') return triggerContext !== 'chat_created';
+    if (taskTriggerTiming === 'character_init') return triggerContext !== 'chat_created';
     if (taskTriggerTiming === 'plugin_init') return triggerContext !== 'plugin_initialized';
     if (taskTriggerTiming === 'chat_changed') return triggerContext !== 'chat_changed';
     if (taskTriggerTiming === 'only_this_floor' || taskTriggerTiming === 'any_message') {
@@ -395,26 +422,46 @@ function matchInterval(task, counts, triggerContext) {
     return currentFloor % task.interval === 0;
 }
 
+
 async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatChanged = null, overrideNewChat = null) {
-    if (!isGloballyEnabled() || state.isExecutingTask) return;
+	if (!isGloballyEnabled() || state.isExecutingTask) return;
 
-    const tasks = allTasks();
-    if (tasks.length === 0) return;
+	const tasks = allTasks();
+	const n = nowMs();
+	const counts = getFloorCounts();
 
-    const n = nowMs();
-    const counts = getFloorCounts();
+	const dynamicTaskList = [];
+	if (state.dynamicCallbacks?.size > 0) {
+		for (const [callbackId, entry] of state.dynamicCallbacks.entries()) {
+			const { callback, options, abortController } = entry || {};
+			if (!callback) { state.dynamicCallbacks.delete(callbackId); continue; }
+			if (abortController?.signal?.aborted) { state.dynamicCallbacks.delete(callbackId); continue; }
+			const interval = Number.isFinite(parseInt(options?.interval)) ? parseInt(options.interval) : 0;
+			dynamicTaskList.push({
+				name: callbackId,
+				disabled: false,
+				interval,
+				floorType: options?.floorType || 'all',
+				triggerTiming: options?.timing || 'after_ai',
+				__dynamic: true,
+				__callback: callback
+			});
+		}
+	}
 
-    const tasksToExecute = tasks.filter(task => {
+	const combined = [...tasks, ...dynamicTaskList];
+	if (combined.length === 0) return;
+
+	const tasksToExecute = combined.filter(task => {
         if (task.disabled) return false;
         if (isTaskInCooldown(task.name, n)) return false;
 
         const tt = task.triggerTiming || 'after_ai';
-        // 切换聊天后：忽略间隔与楼层，只要时机匹配则执行一次
         if (tt === 'chat_changed') {
             if (shouldSkipByContext(tt, triggerContext)) return false;
             return true;
         }
-        if (tt === 'initialization') return triggerContext === 'chat_created';
+        if (tt === 'character_init') return triggerContext === 'chat_created';
         if (tt === 'plugin_init') return triggerContext === 'plugin_initialized';
 
         if ((overrideChatChanged ?? state.chatJustChanged) || (overrideNewChat ?? state.isNewChat)) return false;
@@ -424,10 +471,23 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
         return matchInterval(task, counts, triggerContext);
     });
 
-    for (const task of tasksToExecute) {
-        state.taskLastExecutionTime.set(task.name, n);
-        await executeCommands(task.commands, task.name);
-    }
+	for (const task of tasksToExecute) {
+		state.taskLastExecutionTime.set(task.name, n);
+		if (task.__dynamic) {
+			try {
+				const currentFloor = pickFloorByType(task.floorType || 'all', counts);
+				await Promise.resolve().then(() => task.__callback({
+					timing: triggerContext,
+					floors: counts,
+					currentFloor,
+					interval: task.interval,
+					floorType: task.floorType || 'all'
+				}));
+			} catch (e) { console.error('[动态回调错误]', task.name, e); }
+		} else {
+			await executeCommands(task.commands, task.name);
+		}
+	}
 
     if (triggerContext === 'after_ai') state.lastTurnCount = calculateTurnCount();
 }
@@ -446,6 +506,7 @@ async function onMessageReceived(messageId) {
     if (isMessageProcessed(messageKey)) return;
 
     markMessageAsProcessed(messageKey);
+    try { state.floorCounts.all = Math.max(0, (state.floorCounts.all || 0) + 1); state.floorCounts.llm = Math.max(0, (state.floorCounts.llm || 0) + 1); } catch {}
     await checkAndExecuteTasks('after_ai');
     state.chatJustChanged = state.isNewChat = false;
 }
@@ -456,6 +517,7 @@ async function onUserMessage() {
     if (isMessageProcessed(messageKey)) return;
 
     markMessageAsProcessed(messageKey);
+    try { state.floorCounts.all = Math.max(0, (state.floorCounts.all || 0) + 1); state.floorCounts.user = Math.max(0, (state.floorCounts.user || 0) + 1); } catch {}
     await checkAndExecuteTasks('before_user');
     state.chatJustChanged = state.isNewChat = false;
 }
@@ -466,6 +528,17 @@ function onMessageDeleted() {
     settings.processedMessages = settings.processedMessages.filter(key => !key.startsWith(`${chatId}_`));
     state.processedMessagesSet = new Set(settings.processedMessages);
     state.isExecutingTask = state.isCommandGenerated = false;
+    try {
+        let user = 0, llm = 0, all = 0;
+        if (Array.isArray(chat)) {
+            for (const m of chat) {
+                all++;
+                if (m.is_system) continue;
+                if (m.is_user) user++; else llm++;
+            }
+        }
+        state.floorCounts = { all, user, llm };
+    } catch {}
     debouncedSave();
 }
 
@@ -480,39 +553,73 @@ async function onChatChanged(chatId) {
     });
     state.taskLastExecutionTime.clear();
 
-    const settings = getSettings();
-    settings.processedMessages = settings.processedMessages.filter(key => !key.startsWith(`${chatId}_`));
-    state.processedMessagesSet = new Set(settings.processedMessages);
-    debouncedSave();
+    requestAnimationFrame(() => {
+        state.processedMessagesSet.clear();
+        const settings = getSettings();
+        settings.processedMessages = [];
 
-    checkEmbeddedTasks();
-    refreshUI();
-    try { await checkAndExecuteTasks('chat_changed', false, false); } catch (e) { console.debug(e); }
+        checkEmbeddedTasks();
+        refreshUI();
+        checkAndExecuteTasks('chat_changed', false, false);
+        requestAnimationFrame(() => requestAnimationFrame(() => { try { updateTaskBar(); } catch {} }));
+    });
+
+    try {
+        let user = 0, llm = 0, all = 0;
+        if (Array.isArray(chat)) {
+            for (const m of chat) {
+                all++;
+                if (m.is_system) continue;
+                if (m.is_user) user++; else llm++;
+            }
+        }
+        state.floorCounts = { all, user, llm };
+    } catch {}
+
     setTimeout(() => { state.chatJustChanged = state.isNewChat = false; }, 2000);
 }
 
 async function onChatCreated() {
+    try {
+        let user = 0, llm = 0, all = 0;
+        if (Array.isArray(chat)) {
+            for (const m of chat) {
+                all++;
+                if (m.is_system) continue;
+                if (m.is_user) user++; else llm++;
+            }
+        }
+        state.floorCounts = { all, user, llm };
+    } catch {}
     await checkAndExecuteTasks('chat_created', false, false);
 }
 
 // ------------- UI: lists & items ----------
 function getTasksHash() {
     const tasks = [...getSettings().globalTasks, ...getCharacterTasks()];
-    return tasks.map(t => `${t.id}_${t.disabled}_${t.name}_${t.interval}_${t.floorType}_${t.triggerTiming || 'after_ai'}`).join('|');
+    // 包含 commands 的长度以确保仅修改 commands 也会刷新 UI，但避免对长串做完整拼接
+    return tasks.map(t => `${t.id}_${t.disabled}_${t.name}_${t.interval}_${t.floorType}_${t.triggerTiming || 'after_ai'}_${(t.commands||'').length}`).join('|');
 }
 
-function createTaskItem(task, index, isCharacterTask = false) {
+function createTaskItemSimple(task, index, isCharacterTask = false) {
     if (!task.id) task.id = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     const taskType = isCharacterTask ? 'character' : 'global';
-	const floorTypeText = { user: '用户楼层', llm: 'LLM楼层' }[task.floorType] || '全部楼层';
-	const triggerTimingText = { before_user: '用户前', any_message: '任意对话', initialization: '角色卡初始化', plugin_init: '插件初始化', only_this_floor: '仅该楼层', chat_changed: '切换聊天后' }[task.triggerTiming] || 'AI后';
+    const floorTypeText = { user: '用户楼层', llm: 'LLM楼层' }[task.floorType] || '全部楼层';
+    const triggerTimingText = {
+        before_user: '用户前',
+        any_message: '任意对话',
+        initialization: '角色卡初始化',
+        plugin_init: '插件初始化',
+        only_this_floor: '仅该楼层',
+        chat_changed: '切换聊天后'
+    }[task.triggerTiming] || 'AI后';
 
     let displayName;
-	if (task.interval === 0) displayName = `${task.name} (手动触发)`;
-	else if (task.triggerTiming === 'initialization') displayName = `${task.name} (角色卡初始化)`;
-	else if (task.triggerTiming === 'plugin_init') displayName = `${task.name} (插件初始化)`;
-	else if (task.triggerTiming === 'chat_changed') displayName = `${task.name} (切换聊天后)`;
+    if (task.interval === 0) displayName = `${task.name} (手动触发)`;
+    else if (task.triggerTiming === 'initialization' || task.triggerTiming === 'character_init') displayName = `${task.name} (角色卡初始化)`;
+    else if (task.triggerTiming === 'plugin_init') displayName = `${task.name} (插件初始化)`;
+    else if (task.triggerTiming === 'chat_changed') displayName = `${task.name} (切换聊天后)`;
     else if (task.triggerTiming === 'only_this_floor') displayName = `${task.name} (仅第${task.interval}${floorTypeText})`;
     else displayName = `${task.name} (每${task.interval}${floorTypeText}·${triggerTimingText})`;
 
@@ -521,14 +628,6 @@ function createTaskItem(task, index, isCharacterTask = false) {
     taskElement.find('.task_name').attr('title', task.commands).text(displayName);
     taskElement.find('.disable_task').attr('id', `task_disable_${task.id}`).prop('checked', task.disabled);
     taskElement.find('label.checkbox').attr('for', `task_disable_${task.id}`);
-
-    taskElement.find('.disable_task').on('input', () => {
-        task.disabled = taskElement.find('.disable_task').prop('checked');
-        saveTask(task, index, isCharacterTask);
-    });
-    taskElement.find('.edit_task').on('click', () => editTask(index, taskType));
-    taskElement.find('.export_task').on('click', () => exportSingleTask(index, isCharacterTask));
-    taskElement.find('.delete_task').on('click', () => deleteTask(index, taskType));
 
     return taskElement;
 }
@@ -554,11 +653,70 @@ function refreshTaskLists() {
 
     const $globalList = $('#global_tasks_list');
     const $charList = $('#character_tasks_list');
+
     const globalTasks = getSettings().globalTasks;
     const characterTasks = getCharacterTasks();
 
-    $globalList.empty();
-    globalTasks.forEach((task, i) => $globalList.append(createTaskItem(task, i, false)));
+    $globalList.off('click').off('input');
+    $charList.off('click').off('input');
+
+    const globalFragment = document.createDocumentFragment();
+    globalTasks.forEach((task, i) => {
+        const el = createTaskItemSimple(task, i, false);
+        globalFragment.appendChild(el[0]);
+    });
+    $globalList.empty().append(globalFragment);
+
+    const charFragment = document.createDocumentFragment();
+    characterTasks.forEach((task, i) => {
+        const el = createTaskItemSimple(task, i, true);
+        charFragment.appendChild(el[0]);
+    });
+    $charList.empty().append(charFragment);
+
+    $globalList.on('input', '.disable_task', function() {
+        const $item = $(this).closest('.task-item');
+        const idx = parseInt($item.attr('data-index'));
+        const settings = getSettings();
+        if (settings.globalTasks[idx]) {
+            settings.globalTasks[idx].disabled = $(this).prop('checked');
+            debouncedSave();
+        }
+    });
+    $globalList.on('click', '.edit_task', function() {
+        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+        editTask(idx, 'global');
+    });
+    $globalList.on('click', '.export_task', function() {
+        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+        exportSingleTask(idx, false);
+    });
+    $globalList.on('click', '.delete_task', function() {
+        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+        deleteTask(idx, 'global');
+    });
+
+    $charList.on('input', '.disable_task', function() {
+        const $item = $(this).closest('.task-item');
+        const idx = parseInt($item.attr('data-index'));
+        const tasks = getCharacterTasks();
+        if (tasks[idx]) {
+            tasks[idx].disabled = $(this).prop('checked');
+            saveCharacterTasks(tasks);
+        }
+    });
+    $charList.on('click', '.edit_task', function() {
+        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+        editTask(idx, 'character');
+    });
+    $charList.on('click', '.export_task', function() {
+        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+        exportSingleTask(idx, true);
+    });
+    $charList.on('click', '.delete_task', function() {
+        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+        deleteTask(idx, 'character');
+    });
 
     initSortable($globalList, function () {
         const newOrderIds = $globalList.sortable('toArray');
@@ -570,9 +728,6 @@ function refreshTaskLists() {
         debouncedSave();
         refreshTaskLists();
     });
-
-    $charList.empty();
-    characterTasks.forEach((task, i) => $charList.append(createTaskItem(task, i, true)));
 
     initSortable($charList, async function () {
         const newOrderIds = $charList.sortable('toArray');
@@ -587,64 +742,99 @@ function refreshTaskLists() {
     updateTaskBar();
 }
 
-// ------------- Task bar -------------------
+// ------------- Task bar-------------------
+const cache = { bar: null, btns: null, sig: '', ts: 0 };
+
 const getActivatedTasks = () => allTasks().filter(t => t.buttonActivated && !t.disabled);
 
+const getBar = () => {
+    if (cache.bar?.isConnected) return cache.bar;
+    
+    cache.bar = document.getElementById('qr--bar') || document.getElementById('qr-bar');
+    
+    if (!cache.bar && !(window.quickReplyApi?.settings?.isEnabled || extension_settings?.quickReplyV2?.isEnabled)) {
+        const parent = document.getElementById('send_form') || document.body;
+        cache.bar = parent.insertBefore(
+            Object.assign(document.createElement('div'), {
+                id: 'qr-bar',
+                className: 'flex-container flexGap5',
+                innerHTML: '<div class="qr--buttons" style="display:flex;flex-wrap:wrap;justify-content:center"></div>'
+            }),
+            parent.firstChild
+        );
+    }
+    
+    cache.btns = cache.bar?.querySelector('.qr--buttons');
+    return cache.bar;
+};
+
 function createTaskBar() {
-    const activatedTasks = getActivatedTasks();
-    const signature = state.taskBarVisible ? activatedTasks.map(t => `${t.name}`).join('|') : 'hidden';
-    if (signature === state.taskBarSignature) return;
-    state.taskBarSignature = signature;
-
-    $('#xiaobaix_task_bar').remove();
-    if (activatedTasks.length === 0 || !state.taskBarVisible) return;
-
-    const taskBar = $(`
-        <div id="xiaobaix_task_bar">
-            <div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; border: 1px solid var(--SmartThemeBorderColor); border-bottom:0;">
-            </div>
-        </div>
-    `);
-
-    const buttonContainer = taskBar.find('div').first();
-    activatedTasks.forEach(task => {
-        const button = $(`
-            <button class="menu_button menu_button_icon xiaobaix-task-button"
-                    data-task-name="${task.name}" style="margin:1px;">
-                <span>${task.name}</span>
-            </button>
-        `);
-        button.on('click', async () => {
-            try { await window.xbqte(task.name); }
-            catch (error) { console.error(`执行任务失败: ${error.message}`); }
-        });
-        buttonContainer.append(button);
+    const tasks = getActivatedTasks();
+    const sig = state.taskBarVisible ? tasks.map(t => t.name).join() : '';
+    
+    if (sig === cache.sig && Date.now() - cache.ts < 100) return;
+    
+    const bar = getBar();
+    if (!bar) return;
+    
+    bar.style.display = state.taskBarVisible ? '' : 'none';
+    if (!state.taskBarVisible) return;
+    
+    const btns = cache.btns || bar;
+    const exist = new Map([...btns.querySelectorAll('.xiaobaix-task-button')].map(el => [el.dataset.taskName, el]));
+    const names = new Set(tasks.map(t => t.name));
+    
+    exist.forEach((el, name) => !names.has(name) && el.remove());
+    
+    const frag = document.createDocumentFragment();
+    tasks.forEach(t => {
+        if (!exist.has(t.name)) {
+            const btn = Object.assign(document.createElement('button'), {
+                className: 'menu_button menu_button_icon xiaobaix-task-button interactable',
+                innerHTML: `<span>${t.name}</span>`
+            });
+            btn.dataset.taskName = t.name;
+            frag.appendChild(btn);
+        }
     });
-
-    const sendForm = $('#send_form');
-    if (sendForm.length > 0) sendForm.before(taskBar);
+    
+    frag.childNodes.length && btns.appendChild(frag);
+    cache.sig = sig;
+    cache.ts = Date.now();
 }
 
-const updateTaskBar = () => createTaskBar();
+const updateTaskBar = debounce(createTaskBar, 100);
 
 function toggleTaskBarVisibility() {
     state.taskBarVisible = !state.taskBarVisible;
-    updateTaskBar();
-    const toggleButton = $('#toggle_task_bar');
-    const smallText = toggleButton.find('small');
-    if (state.taskBarVisible) {
-        smallText.css({ 'opacity': '1', 'text-decoration': 'none' });
-        toggleButton.attr('title', '隐藏任务栏');
-    } else {
-        smallText.css({ 'opacity': '0.5', 'text-decoration': 'line-through' });
-        toggleButton.attr('title', '显示任务栏');
+    const bar = getBar();
+    bar && (bar.style.display = state.taskBarVisible ? '' : 'none');
+    createTaskBar();
+    
+    const btn = document.getElementById('toggle_task_bar');
+    const txt = btn?.querySelector('small');
+    if (txt) {
+        txt.style.cssText = state.taskBarVisible ? 
+            'opacity:1;text-decoration:none' : 
+            'opacity:.5;text-decoration:line-through';
+        btn.title = state.taskBarVisible ? '隐藏任务栏' : '显示任务栏';
     }
 }
+
+document.addEventListener('click', e => {
+    const btn = e.target.closest('.xiaobaix-task-button');
+    btn?.dataset.taskName && window.xbqte(btn.dataset.taskName).catch(console.error);
+});
+
+new MutationObserver(updateTaskBar).observe(document.body, { childList: true, subtree: true });
+
 
 // ------------- Editor ---------------------
 function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
     state.currentEditingTask = task;
     state.currentEditingIndex = isEdit ? (isCharacterTask ? getCharacterTasks() : getSettings().globalTasks).indexOf(task) : -1;
+    state.currentEditingId = task?.id || null;
+    state.currentEditingIsCharacterTask = isCharacterTask;
 
     const editorTemplate = $('#task_editor_template').clone().removeAttr('id').show();
     editorTemplate.find('.task_name_edit').val(task?.name || '');
@@ -714,7 +904,6 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
     editorTemplate.find('.task_floor_type_edit').on('change', updateControlStates);
     updateControlStates();
 
-    // 改为 callGenericPopup
     callGenericPopup(editorTemplate, POPUP_TYPE.CONFIRM, '', { okButton: '保存' }).then(result => {
         if (result) {
             const desiredName = (editorTemplate.find('.task_name_edit').val() || '').trim();
@@ -745,18 +934,49 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
 }
 
 function saveTaskFromEditor(task, isCharacterTask) {
-    if (!task.name || !task.commands) return;
+    const isManual = (task?.interval === 0);
+    if (!task.name || (!isManual && !task.commands)) return;
+
+    const isEditingExistingTask = state.currentEditingIndex >= 0 || !!state.currentEditingId;
+    const taskTypeChanged = isEditingExistingTask && (state.currentEditingIsCharacterTask !== isCharacterTask);
+
+    if (taskTypeChanged) {
+        if (state.currentEditingIsCharacterTask) {
+            const charTasks = getCharacterTasks();
+            const removeIdx = state.currentEditingId ? charTasks.findIndex(t => t?.id === state.currentEditingId) : state.currentEditingIndex;
+            if (removeIdx >= 0 && removeIdx < charTasks.length) {
+                charTasks.splice(removeIdx, 1);
+                saveCharacterTasks(charTasks);
+            }
+        } else {
+            const settings = getSettings();
+            const list = settings.globalTasks;
+            const removeIdx = state.currentEditingId ? list.findIndex(t => t?.id === state.currentEditingId) : state.currentEditingIndex;
+            if (removeIdx >= 0 && removeIdx < list.length) {
+                list.splice(removeIdx, 1);
+                debouncedSave();
+            }
+        }
+
+        state.lastTasksHash = '';
+        state.currentEditingIndex = -1;
+        state.currentEditingId = null;
+    }
+
     if (isCharacterTask) {
         const tasks = getCharacterTasks();
-        if (state.currentEditingIndex >= 0) tasks[state.currentEditingIndex] = task;
-        else tasks.push(task);
+        let idx = state.currentEditingId ? tasks.findIndex(t => t?.id === state.currentEditingId) : state.currentEditingIndex;
+        if (idx >= 0 && idx < tasks.length) tasks[idx] = task; else tasks.push(task);
         saveCharacterTasks(tasks);
     } else {
         const settings = getSettings();
-        if (state.currentEditingIndex >= 0) settings.globalTasks[state.currentEditingIndex] = task;
-        else settings.globalTasks.push(task);
+        const list = settings.globalTasks;
+        let idx = state.currentEditingId ? list.findIndex(t => t?.id === state.currentEditingId) : state.currentEditingIndex;
+        if (idx >= 0 && idx < list.length) list[idx] = task; else list.push(task);
         debouncedSave();
     }
+
+    state.lastTasksHash = '';
     refreshUI();
 }
 
@@ -778,49 +998,38 @@ function editTask(index, type) {
     if (task) showTaskEditor(task, true, type === 'character');
 }
 
-function deleteTask(index, type) {
+async function deleteTask(index, type) {
     const task = (type === 'character' ? getCharacterTasks() : getSettings().globalTasks)[index];
     if (!task) return;
 
-    $(document).off('keydown.confirmmodal');
-    $('.xiaobaix-confirm-modal').remove();
-
-    const dialogHtml = `
-    <div class="xiaobaix-confirm-modal">
-        <div class="xiaobaix-confirm-content">
-            <div class="xiaobaix-confirm-message">确定要删除任务 "${task.name}" 吗？</div>
-            <div class="xiaobaix-confirm-buttons">
-                <button class="xiaobaix-confirm-yes">确定</button>
-                <button class="xiaobaix-confirm-no">取消</button>
-            </div>
-        </div>
-    </div>`;
-
-    $('body').append(dialogHtml);
-
-    $('.xiaobaix-confirm-yes').on('click', function() {
-        $('.xiaobaix-confirm-modal').remove();
-        if (type === 'character') {
-            const tasks = getCharacterTasks();
-            tasks.splice(index, 1);
-            saveCharacterTasks(tasks);
-        } else {
-            getSettings().globalTasks.splice(index, 1);
-            debouncedSave();
+    try {
+        const styleId = 'temp-dialog-style';
+        if (!document.getElementById(styleId)) {
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = '#dialogue_popup_ok, #dialogue_popup_cancel { width: auto !important; }';
+            document.head.appendChild(style);
         }
-        refreshUI();
-    });
 
-    $('.xiaobaix-confirm-no, .xiaobaix-confirm-modal').on('click', function(e) {
-        if (e.target === this) $('.xiaobaix-confirm-modal').remove();
-    });
+        const result = await callPopup(`确定要删除任务 "${task.name}" 吗？`, 'confirm');
 
-    $(document).on('keydown.confirmmodal', function(e) {
-        if (e.key === 'Escape') {
-            $('.xiaobaix-confirm-modal').remove();
-            $(document).off('keydown.confirmmodal');
+        document.getElementById(styleId)?.remove();
+
+        if (result) {
+            if (type === 'character') {
+                const tasks = getCharacterTasks();
+                tasks.splice(index, 1);
+                saveCharacterTasks(tasks);
+            } else {
+                getSettings().globalTasks.splice(index, 1);
+                debouncedSave();
+            }
+            refreshUI();
         }
-    });
+    } catch (error) {
+        console.error('删除任务时出错:', error);
+        document.getElementById('temp-dialog-style')?.remove();
+    }
 }
 
 const getAllTaskNames = () => allTasks().filter(t => !t.disabled).map(t => t.name);
@@ -866,6 +1075,119 @@ async function checkEmbeddedTasks() {
     refreshTaskLists();
 }
 
+// ------------- Cloud Tasks ---------------
+const CLOUD_TASKS_API = 'https://task.whitelittlebox.qzz.io/data?force=xbishere';
+
+async function fetchCloudTasks() {
+    try {
+        const response = await fetch(CLOUD_TASKS_API, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'X-Plugin-Key': 'xbaix',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            },
+            cache: 'no-store'
+        });
+        if (!response.ok) throw new Error(`HTTP错误: ${response.status}`);
+        const data = await response.json();
+        return data.items || [];
+    } catch (error) {
+        console.error('获取云端任务失败:', error);
+        throw error;
+    }
+}
+
+
+async function downloadAndImportCloudTask(taskUrl, taskType) {
+    try {
+        const response = await fetch(taskUrl);
+        if (!response.ok) throw new Error(`下载失败: ${response.status}`);
+        const taskData = await response.json();
+
+        const jsonString = JSON.stringify(taskData);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const file = new File([blob], 'cloud_task.json', { type: 'application/json' });
+
+        await importGlobalTasks(file);
+    } catch (error) {
+        console.error('下载并导入云端任务失败:', error);
+        await callGenericPopup(`导入失败: ${error.message}`, POPUP_TYPE.TEXT, '', { okButton: '确定' });
+    }
+}
+
+async function showCloudTasksModal() {
+    const modalTemplate = $('#cloud_tasks_modal_template').children().first().clone();
+    const loadingEl = modalTemplate.find('.cloud-tasks-loading');
+    const contentEl = modalTemplate.find('.cloud-tasks-content');
+    const errorEl = modalTemplate.find('.cloud-tasks-error');
+
+    const popup = callGenericPopup(modalTemplate, POPUP_TYPE.TEXT, '', { okButton: '关闭'});
+
+    try {
+        const cloudTasks = await fetchCloudTasks();
+
+        if (!cloudTasks || cloudTasks.length === 0) {
+            throw new Error('云端没有可用的任务');
+        }
+
+        const globalTasks = cloudTasks.filter(t => t.type === 'global');
+        const characterTasks = cloudTasks.filter(t => t.type === 'character');
+
+        const globalList = modalTemplate.find('.cloud-global-tasks');
+        if (globalTasks.length === 0) {
+            globalList.html('<div style="color: #888; padding: 10px;">暂无全局任务</div>');
+        } else {
+            globalTasks.forEach(task => {
+                const item = createCloudTaskItem(task);
+                globalList.append(item);
+            });
+        }
+
+        const characterList = modalTemplate.find('.cloud-character-tasks');
+        if (characterTasks.length === 0) {
+            characterList.html('<div style="color: #888; padding: 10px;">暂无角色任务</div>');
+        } else {
+            characterTasks.forEach(task => {
+                const item = createCloudTaskItem(task);
+                characterList.append(item);
+            });
+        }
+
+        loadingEl.hide();
+        contentEl.show();
+    } catch (error) {
+        loadingEl.hide();
+        errorEl.text(`加载失败: ${error.message}`).show();
+    }
+}
+
+function createCloudTaskItem(taskInfo) {
+    const item = $('#cloud_task_item_template').children().first().clone();
+    item.find('.cloud-task-name').text(taskInfo.name || '未命名任务');
+    item.find('.cloud-task-intro').text(taskInfo.简介 || '无简介');
+
+    item.find('.cloud-task-download').on('click', async function() {
+        $(this).prop('disabled', true).find('i').removeClass('fa-download').addClass('fa-spinner fa-spin');
+        try {
+            await downloadAndImportCloudTask(taskInfo.url, taskInfo.type);
+            $(this).find('i').removeClass('fa-spinner fa-spin').addClass('fa-check');
+            $(this).find('small').text('已导入');
+            setTimeout(() => {
+                $(this).find('i').removeClass('fa-check').addClass('fa-download');
+                $(this).find('small').text('导入');
+                $(this).prop('disabled', false);
+            }, 2000);
+        } catch (error) {
+            $(this).find('i').removeClass('fa-spinner fa-spin').addClass('fa-download');
+            $(this).prop('disabled', false);
+        }
+    });
+
+    return item;
+}
+
 // ------------- Import/Export --------------
 async function exportGlobalTasks() {
     const tasks = getSettings().globalTasks;
@@ -891,7 +1213,6 @@ async function importGlobalTasks(file) {
         const fileText = await getFileText(file);
         const raw = JSON.parse(fileText);
         let incomingTasks = [];
-        // 识别文件类型（默认全局）
         let fileType = 'global';
         if (Array.isArray(raw)) {
             incomingTasks = raw;
@@ -913,7 +1234,7 @@ async function importGlobalTasks(file) {
             commands: String(task.commands || '').trim(),
             interval: clampInt(task.interval, 0, 99999, 0),
             floorType: ['all', 'user', 'llm'].includes(task.floorType) ? task.floorType : 'all',
-            triggerTiming: ['after_ai','before_user','any_message','initialization','plugin_init','only_this_floor','chat_changed'].includes(task.triggerTiming)
+            triggerTiming: ['after_ai','before_user','any_message','initialization','character_init','plugin_init','only_this_floor','chat_changed'].includes(task.triggerTiming)
                 ? task.triggerTiming : (task.interval === 0 ? 'after_ai' : 'after_ai'),
             disabled: !!task.disabled,
             buttonActivated: !!task.buttonActivated,
@@ -923,7 +1244,7 @@ async function importGlobalTasks(file) {
 
         if (fileType === 'character') {
             if (!this_chid || !characters[this_chid]) {
-                await callGenericPopup('请选择角色导入。', POPUP_TYPE.TEXT, '', { okButton: '确定' });
+                toastr?.warning?.('角色任务请先切换至角色聊天介面中导入。');
                 return;
             }
             const current = getCharacterTasks();
@@ -945,7 +1266,9 @@ function clearProcessedMessages() {
     state.processedMessagesSet.clear();
     debouncedSave();
 }
-function clearTaskCooldown(taskName = null) { taskName ? state.taskLastExecutionTime.delete(taskName) : state.taskLastExecutionTime.clear(); }
+function clearTaskCooldown(taskName = null) {
+    taskName ? state.taskLastExecutionTime.delete(taskName) : state.taskLastExecutionTime.clear();
+}
 function getTaskCooldownStatus() {
     const status = {};
     for (const [taskName, lastTime] of state.taskLastExecutionTime.entries()) {
@@ -966,7 +1289,26 @@ function getMemoryUsage() {
 }
 
 // ------------- UI Refresh/Cleanup --------
-function refreshUI() { refreshTaskLists(); updateTaskBar(); }
+function refreshUI() {
+    refreshTaskLists();
+    updateTaskBar();
+}
+
+function onMessageSwiped() {
+    state.isExecutingTask = state.isCommandGenerated = false;
+}
+
+function onCharacterDeleted({ character }) {
+    const avatar = character?.avatar;
+    const settings = getSettings();
+    if (avatar && settings.character_allowed_tasks?.includes(avatar)) {
+        const index = settings.character_allowed_tasks.indexOf(avatar);
+        if (index !== -1) {
+            settings.character_allowed_tasks.splice(index, 1);
+            debouncedSave();
+        }
+    }
+}
 
 function cleanup() {
     if (state.cleanupTimer) {
@@ -975,14 +1317,36 @@ function cleanup() {
     }
     state.taskLastExecutionTime.clear();
 
-    [event_types.CHARACTER_MESSAGE_RENDERED, event_types.USER_MESSAGE_RENDERED,
-     event_types.CHAT_CHANGED, event_types.CHAT_CREATED, event_types.MESSAGE_DELETED,
-     event_types.MESSAGE_SWIPED, event_types.CHARACTER_DELETED].forEach(eventType => {
-        eventSource.removeListener(eventType);
-    });
+    try {
+        if (state.dynamicCallbacks && state.dynamicCallbacks.size > 0) {
+            for (const [id, entry] of state.dynamicCallbacks.entries()) {
+                try { entry?.abortController?.abort(); } catch {}
+            }
+            state.dynamicCallbacks.clear();
+        }
+    } catch {}
+
+    eventSource.removeListener(event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
+    eventSource.removeListener(event_types.USER_MESSAGE_RENDERED, onUserMessage);
+    eventSource.removeListener(event_types.CHAT_CHANGED, onChatChanged);
+    eventSource.removeListener(event_types.CHAT_CREATED, onChatCreated);
+    eventSource.removeListener(event_types.MESSAGE_DELETED, onMessageDeleted);
+    eventSource.removeListener(event_types.MESSAGE_SWIPED, onMessageSwiped);
+    eventSource.removeListener(event_types.CHARACTER_DELETED, onCharacterDeleted);
 
     window.removeEventListener('message', handleTaskMessage);
     $(window).off('beforeunload', cleanup);
+
+    try {
+        const $qrButtons = $('#qr--bar .qr--buttons, #qr--bar, #qr-bar');
+        $qrButtons.off('click.xb');
+        $qrButtons.find('.xiaobaix-task-button').remove();
+    } catch {}
+
+    try { state.qrObserver?.disconnect(); } catch {}
+    state.qrObserver = null;
+
+    delete window.__XB_TASKS_INITIALIZED__;
 }
 
 // ------------- Public API ----------------
@@ -1060,23 +1424,107 @@ function registerSlashCommands() {
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'xbset',
-            callback: async (args, value) => {
-                const valueStr = String(value || '').trim();
-                const parts = valueStr.split(/\s+/);
-                if (!parts || parts.length < 2) {
-                    return '用法: /xbset 任务名称 间隔数字\n例如: /xbset 我的任务 5\n设为0表示手动激活';
+            callback: async (namedArgs, taskName) => {
+                const name = String(taskName || '').trim();
+                if (!name) throw new Error('请提供任务名称');
+
+                const settings = getSettings();
+                let task = null, isCharacter = false, taskIndex = -1;
+
+                taskIndex = settings.globalTasks.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
+                if (taskIndex !== -1) {
+                    task = settings.globalTasks[taskIndex];
+                } else {
+                    const cts = getCharacterTasks();
+                    taskIndex = cts.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
+                    if (taskIndex !== -1) {
+                        task = cts[taskIndex];
+                        isCharacter = true;
+                    }
                 }
-                const interval = parts.pop();
-                const taskName = parts.join(' ');
-                try { return await window.setScheduledTaskInterval(taskName, interval); }
-                catch (error) { return `错误: ${error.message}`; }
+                if (!task) throw new Error(`找不到任务 "${name}"`);
+
+                const changed = [];
+
+                if (namedArgs.status !== undefined) {
+                    const val = String(namedArgs.status).toLowerCase();
+                    if (val === 'on' || val === 'true') {
+                        task.disabled = false;
+                        changed.push('状态=启用');
+                    } else if (val === 'off' || val === 'false') {
+                        task.disabled = true;
+                        changed.push('状态=禁用');
+                    } else throw new Error('status 仅支持 on/off');
+                }
+
+                if (namedArgs.interval !== undefined) {
+                    const num = parseInt(namedArgs.interval);
+                    if (isNaN(num) || num < 0 || num > 99999) throw new Error('interval 必须为 0-99999');
+                    task.interval = num;
+                    changed.push(`间隔=${num}`);
+                }
+
+                if (namedArgs.timing !== undefined) {
+                    const val = String(namedArgs.timing).toLowerCase();
+                    const valid = ['after_ai', 'before_user', 'any_message', 'initialization', 'character_init', 'plugin_init', 'only_this_floor', 'chat_changed'];
+                    if (!valid.includes(val)) throw new Error(`timing 必须为: ${valid.join(', ')}`);
+                    task.triggerTiming = val;
+                    changed.push(`时机=${val}`);
+                }
+
+                if (namedArgs.floorType !== undefined) {
+                    const val = String(namedArgs.floorType).toLowerCase();
+                    if (!['all', 'user', 'llm'].includes(val)) throw new Error('floorType 必须为: all, user, llm');
+                    task.floorType = val;
+                    changed.push(`楼层=${val}`);
+                }
+
+                if (changed.length === 0) throw new Error('未提供要修改的参数');
+
+                if (isCharacter) await saveCharacterTasks(getCharacterTasks());
+                else debouncedSave();
+                refreshTaskLists();
+
+                return `已更新任务 "${name}": ${changed.join(', ')}`;
             },
-            unnamedArgumentList: [SlashCommandArgument.fromProps({
-                description: '任务名称 间隔数字',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: true
-            })],
-            helpString: '设置定时任务的触发间隔。用法: /xbset 任务名称 间隔数字\n例如: /xbset 我的任务 5 (每5楼层触发)\n设为0表示手动激活'
+            namedArgumentList: [
+                SlashCommandNamedArgument.fromProps({
+                    name: 'status',
+                    description: '启用/禁用',
+                    typeList: [ARGUMENT_TYPE.STRING],
+                    enumList: ['on', 'off'],
+                }),
+                SlashCommandNamedArgument.fromProps({
+                    name: 'interval',
+                    description: '楼层间隔(0=手动)',
+                    typeList: [ARGUMENT_TYPE.NUMBER],
+                }),
+                SlashCommandNamedArgument.fromProps({
+                    name: 'timing',
+                    description: '触发时机',
+                    typeList: [ARGUMENT_TYPE.STRING],
+                    enumList: ['after_ai', 'before_user', 'any_message', 'initialization', 'character_init', 'plugin_init', 'only_this_floor', 'chat_changed'],
+                }),
+                SlashCommandNamedArgument.fromProps({
+                    name: 'floorType',
+                    description: '楼层类型',
+                    typeList: [ARGUMENT_TYPE.STRING],
+                    enumList: ['all', 'user', 'llm'],
+                }),
+            ],
+            unnamedArgumentList: [
+                SlashCommandArgument.fromProps({
+                    description: '任务名称',
+                    typeList: [ARGUMENT_TYPE.STRING],
+                    isRequired: true,
+                    enumProvider: getAllTaskNames
+                })
+            ],
+            helpString: `设置任务属性
+        用法: /xbset status=on/off interval=数字 timing=时机 floorType=类型 任务名
+        示例:
+        /xbset status=off 我的任务
+        /xbset interval=5 timing=before_user 我的任务`
         }));
     } catch (error) {
         console.error("Error registering slash commands:", error);
@@ -1085,6 +1533,12 @@ function registerSlashCommands() {
 
 // ------------- Init -----------------------
 function initTasks() {
+    if (window.__XB_TASKS_INITIALIZED__) {
+        console.log('[小白X任务] 已经初始化，跳过重复注册');
+        return;
+    }
+    window.__XB_TASKS_INITIALIZED__ = true;
+
     hydrateProcessedSetFromSettings();
     scheduleCleanup();
 
@@ -1110,6 +1564,7 @@ function initTasks() {
     $('#add_character_task').on('click', () => showTaskEditor(null, false, true));
     $('#toggle_task_bar').on('click', toggleTaskBarVisibility);
     $('#import_global_tasks').on('click', () => $('#import_tasks_file').trigger('click'));
+    $('#cloud_tasks_button').on('click', () => showCloudTasksModal());
     $('#import_tasks_file').on('change', function(e) {
         const file = e.target.files[0];
         if (file) {
@@ -1121,33 +1576,24 @@ function initTasks() {
     $('#scheduled_tasks_enabled').prop('checked', getSettings().enabled);
     refreshTaskLists();
 
-    setTimeout(() => updateTaskBar(), 1000);
+    setTimeout(() => { ensureQrObserver(); updateTaskBar(); }, 500);
 
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
     eventSource.on(event_types.USER_MESSAGE_RENDERED, onUserMessage);
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
     eventSource.on(event_types.CHAT_CREATED, onChatCreated);
     eventSource.on(event_types.MESSAGE_DELETED, onMessageDeleted);
-    eventSource.on(event_types.MESSAGE_SWIPED, () => {
-        state.isExecutingTask = state.isCommandGenerated = false;
-    });
-    eventSource.on(event_types.CHARACTER_DELETED, ({ character }) => {
-        const avatar = character?.avatar;
-        const settings = getSettings();
-        if (avatar && settings.character_allowed_tasks?.includes(avatar)) {
-            const index = settings.character_allowed_tasks.indexOf(avatar);
-            if (index !== -1) {
-                settings.character_allowed_tasks.splice(index, 1);
-                debouncedSave();
-            }
-        }
-    });
+    eventSource.on(event_types.MESSAGE_SWIPED, onMessageSwiped);
+    eventSource.on(event_types.CHARACTER_DELETED, onCharacterDeleted);
 
     $(window).on('beforeunload', cleanup);
     registerSlashCommands();
     setTimeout(() => checkEmbeddedTasks(), 1000);
 
-    setTimeout(() => { try { checkAndExecuteTasks('plugin_initialized', false, false); } catch (e) { console.debug(e); } }, 0);
+    setTimeout(() => {
+        try { checkAndExecuteTasks('plugin_initialized', false, false); }
+        catch (e) { console.debug(e); }
+    }, 0);
 }
 
 export { initTasks };

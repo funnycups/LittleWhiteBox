@@ -117,9 +117,9 @@
                     </div>
                     <div class="flex-container">
                         <input type="checkbox" id="xiaobaix_recorded_enabled" />
-                        <label for="xiaobaix_recorded_enabled" class="has-tooltip" data-tooltip="每条消息添加小便条纸，点击可看到发送给时AI的记录">Log记录</label>
+                        <label for="xiaobaix_recorded_enabled" class="has-tooltip" data-tooltip="每条消息添加图标，点击可看到发送给时AI的记录">Log记录</label>
                         <input type="checkbox" id="xiaobaix_preview_enabled" />
-                        <label for="xiaobaix_preview_enabled" class="has-tooltip" data-tooltip="在聊天框显示大便条纸，点击可拦截将发送给AI的消息并显示">Log拦截</label>
+                        <label for="xiaobaix_preview_enabled" class="has-tooltip" data-tooltip="在聊天框显示图标，点击可拦截将发送给AI的消息并显示">Log拦截</label>
                     </div>
                     <div class="section-divider">写卡AI
                         <hr class="sysHR" />
@@ -209,6 +209,10 @@
                                     <i class="fa-solid fa-download"></i>
                                     <small>导入</small>
                                 </div>
+                                <div id="cloud_tasks_button" class="menu_button menu_button_icon" title="从云端获取任务脚本">
+                                    <i class="fa-solid fa-cloud"></i>
+                                    <small>任务下载</small>
+                                </div>
                             </div>
                         </div>
                         <small>这些任务在所有角色中的聊天都会执行</small>
@@ -260,96 +264,6 @@
     </div>
 </div>
 
-<div id="task_editor_template" style="display: none;">
-    <div class="task_editor">
-        <h3>任务编辑器</h3>
-        <div class="flex-container flexFlowColumn">
-            <div class="flex1">
-                <label for="task_name_edit">任务名称</label>
-                <input class="task_name_edit text_pole textarea_compact" type="text" placeholder="输入任务名称" />
-            </div>
-            <div class="flex1">
-                <label for="task_commands_edit">脚本命令</label>
-                <textarea class="task_commands_edit text_pole wide100p textarea_compact" placeholder="输入要执行的斜杠命令或js, eg: &#10;&lt;&lt;taskjs&gt;&gt;&#10;count++;&#10;&lt;&lt;/taskjs&gt;&gt;&#10;/echo 已完成脚本！"></textarea>
-            </div>
-            <div class="flex-container">
-                <div class="flex1">
-                    <label for="task_interval_edit">楼层间隔</label>
-                    <input class="task_interval_edit text_pole textarea_compact" type="number" min="0" max="100" />
-                    <small>设为0即只手动激活，非自动执行</small>
-                </div>
-                <div class="flex1">
-                    <label for="task_floor_type_edit">楼层类型</label>
-                    <select class="task_floor_type_edit text_pole textarea_compact">
-                        <option value="all">全部楼层</option>
-                        <option value="user">用户楼层</option>
-                        <option value="llm">LLM楼层</option>
-                    </select>
-                    <small>消息会以第0层开始计算层数</small>
-                </div>
-            </div>
-            <div class="flex-container">
-                <div class="flex1">
-                    <label for="task_type_edit">任务类型</label>
-                    <select class="task_type_edit text_pole textarea_compact">
-                        <option value="global" id="section-font">全局任务</option>
-                        <option value="character" id="section-font">角色任务</option>
-                    </select>
-                    <br>
-                    <div class="flex1">
-                        <label class="checkbox flex-container">
-                            <input type="checkbox" class="task_enabled_edit" />
-                            <span>启用任务</span>
-                        </label>
-                        <label class="checkbox flex-container">
-                            <input type="checkbox" class="task_button_activated_edit" />
-                            <span>注册任务按钮到主界面</span>
-                        </label>
-                    </div>
-                </div>
-                <div class="flex1">
-                    <label for="task_trigger_timing_edit">触发时机</label>
-                    <select class="task_trigger_timing_edit text_pole textarea_compact">
-                        <option value="after_ai">AI消息后</option>
-                        <option value="before_user">用户消息前</option>
-                        <option value="any_message">任意对话</option>
-                        <option value="initialization">角色卡初始化</option>
-                        <option value="plugin_init">插件初始化</option>
-                        <option value="chat_changed">切换聊天后</option>
-                        <option value="only_this_floor">仅在“间隔楼层”的那个楼层执行一次</option>
-                    </select>
-                    <small>选择任务执行的时机</small>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div id="task_item_template" style="display: none;">
-    <div class="task-item flex-container flexnowrap">
-        <span class="drag-handle menu-handle">&#9776;</span>
-        <div class="task_name flexGrow overflow-hidden"></div>
-        <div class="flex-container flexnowrap">
-            <label class="checkbox flex-container">
-                <input type="checkbox" class="disable_task" />
-                <span class="task-toggle-on fa-solid fa-toggle-on" title="禁用任务"></span>
-                <span class="task-toggle-off fa-solid fa-toggle-off" title="启用任务"></span>
-            </label>
-
-            <div class="edit_task menu_button" title="编辑任务"><i class="fa-solid fa-pencil"></i></div>
-            <div class="export_task menu_button" title="导出任务"><i class="fa-solid fa-upload"></i></div>
-            <div class="delete_task menu_button" title="删除任务"><i class="fa-solid fa-trash"></i></div>
-        </div>
-    </div>
-</div>
-
-<div id="task_preview_template" style="display: none;">
-    <div class="task-preview">
-        <strong class="task-preview-name"></strong> <span class="task-preview-interval"></span>
-        <div class="task-commands task-preview-commands"></div>
-    </div>
-</div>
-
 <style>
     .littlewhitebox,
     .littlewhitebox * { font-family: 'ZCOOL KuaiLe', 'ZCOOL XiaoWei', sans-serif !important; }
@@ -387,6 +301,7 @@
     #littlewhitebox-update-extension.updating { color: #007bff; background-color: transparent; transform: scale(1); }
 </style>
 
+<!-- 更新按钮 -->
 <script>
     (function () {
         'use strict';
@@ -521,93 +436,98 @@
         }
     })();
 </script>
+
+<!-- 未完全迁移-index.js的功能保存 -->
+
 <script>
-    (function () {
-        'use strict';
-        const EXT_ID = 'LittleWhiteBox';
-        const KEY_TO_CHECKBOX = {
-            recorded: 'xiaobaix_recorded_enabled',
-            immersive: 'xiaobaix_immersive_enabled',
-            preview: 'xiaobaix_preview_enabled',
-            scriptAssistant: 'xiaobaix_script_assistant',
-            tasks: 'scheduled_tasks_enabled',
-            templateEditor: 'xiaobaix_template_enabled',
-            wallhaven: 'wallhaven_enabled',
-            characterUpdater: 'character_updater_enabled',
-            dynamicPrompt: 'xiaobaix_dynamic_prompt_enabled',
-            variablesPanel: 'xiaobaix_variables_panel_enabled',
-            variablesCore: 'xiaobaix_variables_core_enabled',
-            audio: 'xiaobaix_audio_enabled',
-            sandboxMode: 'xiaobaix_sandbox',
-            useBlob: 'xiaobaix_use_blob',
-            wrapperIframe: 'Wrapperiframe',
-        };
-        const DEFAULTS_ON = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','Wrapperiframe','audio'];
-        const DEFAULTS_OFF = ['recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel'];
-        const MODULE_KEYS = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel','audio'];
-        function setModuleEnabled(key, enabled) {
-            try {
-                if (!extension_settings[EXT_ID][key]) extension_settings[EXT_ID][key] = {};
-                extension_settings[EXT_ID][key].enabled = !!enabled;
-            } catch (e) {}
-            const id = KEY_TO_CHECKBOX[key];
-            const el = id ? document.getElementById(id) : null;
-            if (el) {
-                el.checked = !!enabled;
-                try { $(el).trigger('change'); } catch (e) {}
-            }
+(function () {
+    'use strict';
+    const EXT_ID = 'LittleWhiteBox';
+    const KEY_TO_CHECKBOX = {
+        recorded: 'xiaobaix_recorded_enabled',
+        immersive: 'xiaobaix_immersive_enabled',
+        preview: 'xiaobaix_preview_enabled',
+        scriptAssistant: 'xiaobaix_script_assistant',
+        tasks: 'scheduled_tasks_enabled',
+        templateEditor: 'xiaobaix_template_enabled',
+        wallhaven: 'wallhaven_enabled',
+        characterUpdater: 'character_updater_enabled',
+        dynamicPrompt: 'xiaobaix_dynamic_prompt_enabled',
+        variablesPanel: 'xiaobaix_variables_panel_enabled',
+        variablesCore: 'xiaobaix_variables_core_enabled',
+        audio: 'xiaobaix_audio_enabled',
+        sandboxMode: 'xiaobaix_sandbox',
+        useBlob: 'xiaobaix_use_blob',
+        wrapperIframe: 'Wrapperiframe',
+    };
+    const DEFAULTS_ON = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','Wrapperiframe','audio'];
+    const DEFAULTS_OFF = ['recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel'];
+    const MODULE_KEYS = ['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel','audio'];
+    function setModuleEnabled(key, enabled) {
+        try {
+            if (!extension_settings[EXT_ID][key]) extension_settings[EXT_ID][key] = {};
+            extension_settings[EXT_ID][key].enabled = !!enabled;
+        } catch (e) {}
+        const id = KEY_TO_CHECKBOX[key];
+        const el = id ? document.getElementById(id) : null;
+        if (el) {
+            el.checked = !!enabled;
+            try { $(el).trigger('change'); } catch (e) {}
         }
-        function captureStates() {
-            const out = { modules:{}, sandboxMode:false, useBlob:false, wrapperIframe:false };
-            try { MODULE_KEYS.forEach(k => { out.modules[k] = !!(extension_settings[EXT_ID][k] && extension_settings[EXT_ID][k].enabled); }); } catch (e) {}
-            try { out.sandboxMode = !!extension_settings[EXT_ID].sandboxMode; } catch (e) {}
-            try { out.useBlob = !!extension_settings[EXT_ID].useBlob; } catch (e) {}
-            try { out.wrapperIframe = !!extension_settings[EXT_ID].wrapperIframe; } catch (e) {}
-            return out;
-        }
-        function applyStates(st) {
-            if (!st) return;
-            try { Object.keys(st.modules||{}).forEach(k => setModuleEnabled(k, !!st.modules[k])); } catch (e) {}
-            try {
-                extension_settings[EXT_ID].sandboxMode = !!st.sandboxMode;
-                const el = document.getElementById('xiaobaix_sandbox'); if (el) { el.checked = !!st.sandboxMode; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) {} }
-            } catch (e) {}
-            try {
-                extension_settings[EXT_ID].useBlob = !!st.useBlob;
-                const el = document.getElementById('xiaobaix_use_blob'); if (el) { el.checked = !!st.useBlob; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) {} }
-            } catch (e) {}
-            try {
-                extension_settings[EXT_ID].wrapperIframe = !!st.wrapperIframe;
-                const el = document.getElementById('Wrapperiframe'); if (el) { el.checked = !!st.wrapperIframe; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) {} }
-            } catch (e) {}
-            try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) {}
-        }
-        function applyResetDefaults() {
-            DEFAULTS_ON.forEach(k => setModuleEnabled(k, true));
-            DEFAULTS_OFF.forEach(k => setModuleEnabled(k, false));
-            // render modes default OFF
-            try {
-                extension_settings[EXT_ID].sandboxMode = false;
-                const sb = document.getElementById(KEY_TO_CHECKBOX.sandboxMode);
-                if (sb) { sb.checked = false; try { $(sb).trigger('change'); } catch (e) {} }
-            } catch (e) {}
-            try {
-                extension_settings[EXT_ID].useBlob = false;
-                const bl = document.getElementById(KEY_TO_CHECKBOX.useBlob);
-                if (bl) { bl.checked = false; try { $(bl).trigger('change'); } catch (e) {} }
-            } catch (e) {}
-            try {
-                extension_settings[EXT_ID].wrapperIframe = true;
-                const wp = document.getElementById(KEY_TO_CHECKBOX.wrapperIframe);
-                if (wp) { wp.checked = true; try { $(wp).trigger('change'); } catch (e) {} }
-            } catch (e) {}
-            try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) {}
-        }
-        window.XB_captureAndStoreStates = function(){ try { extension_settings[EXT_ID].prevModuleStatesV2 = captureStates(); if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) {} };
-        window.XB_applyPrevStates = function(){ try { const st = extension_settings[EXT_ID].prevModuleStatesV2; if (st) applyStates(st); } catch (e) {} };
-        try{ $(document).off('click.xbreset','#xiaobaix_reset_btn').on('click.xbreset','#xiaobaix_reset_btn',function(e){ e.preventDefault(); e.stopPropagation(); applyResetDefaults(); }); }catch(e){}
-    })();
-    </script>
+    }
+    function captureStates() {
+        const out = { modules:{}, sandboxMode:false, useBlob:false, wrapperIframe:false };
+        try { MODULE_KEYS.forEach(k => { out.modules[k] = !!(extension_settings[EXT_ID][k] && extension_settings[EXT_ID][k].enabled); }); } catch (e) {}
+        try { out.sandboxMode = !!extension_settings[EXT_ID].sandboxMode; } catch (e) {}
+        try { out.useBlob = !!extension_settings[EXT_ID].useBlob; } catch (e) {}
+        try { out.wrapperIframe = !!extension_settings[EXT_ID].wrapperIframe; } catch (e) {}
+        return out;
+    }
+    function applyStates(st) {
+        if (!st) return;
+        try { Object.keys(st.modules||{}).forEach(k => setModuleEnabled(k, !!st.modules[k])); } catch (e) {}
+        try {
+            extension_settings[EXT_ID].sandboxMode = !!st.sandboxMode;
+            const el = document.getElementById('xiaobaix_sandbox'); if (el) { el.checked = !!st.sandboxMode; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) {} }
+        } catch (e) {}
+        try {
+            extension_settings[EXT_ID].useBlob = !!st.useBlob;
+            const el = document.getElementById('xiaobaix_use_blob'); if (el) { el.checked = !!st.useBlob; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) {} }
+        } catch (e) {}
+        try {
+            extension_settings[EXT_ID].wrapperIframe = !!st.wrapperIframe;
+            const el = document.getElementById('Wrapperiframe'); if (el) { el.checked = !!st.wrapperIframe; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) {} }
+        } catch (e) {}
+        try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) {}
+    }
+    function applyResetDefaults() {
+        DEFAULTS_ON.forEach(k => setModuleEnabled(k, true));
+        DEFAULTS_OFF.forEach(k => setModuleEnabled(k, false));
+        try {
+            extension_settings[EXT_ID].sandboxMode = false;
+            const sb = document.getElementById(KEY_TO_CHECKBOX.sandboxMode);
+            if (sb) { sb.checked = false; try { $(sb).trigger('change'); } catch (e) {} }
+        } catch (e) {}
+        try {
+            extension_settings[EXT_ID].useBlob = false;
+            const bl = document.getElementById(KEY_TO_CHECKBOX.useBlob);
+            if (bl) { bl.checked = false; try { $(bl).trigger('change'); } catch (e) {} }
+        } catch (e) {}
+        try {
+            extension_settings[EXT_ID].wrapperIframe = true;
+            const wp = document.getElementById(KEY_TO_CHECKBOX.wrapperIframe);
+            if (wp) { wp.checked = true; try { $(wp).trigger('change'); } catch (e) {} }
+        } catch (e) {}
+        try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) {}
+    }
+    window.XB_captureAndStoreStates = function(){ try { extension_settings[EXT_ID].prevModuleStatesV2 = captureStates(); if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) {} };
+    window.XB_applyPrevStates = function(){ try { const st = extension_settings[EXT_ID].prevModuleStatesV2; if (st) applyStates(st); } catch (e) {} };
+    try{ $(document).off('click.xbreset','#xiaobaix_reset_btn').on('click.xbreset','#xiaobaix_reset_btn',function(e){ e.preventDefault(); e.stopPropagation(); applyResetDefaults(); }); }catch(e){}
+})();
+</script>
+
+<!-- 预设绑定 -->
+
 <script>
 (function () {
   function go() {
@@ -620,6 +540,9 @@
   }
 })();
 </script>
+
+
+<!-- 功能与更新公告区块 -->
 
 <div id="xiaobaix_info_modal" class="xiaobaix-modal" style="display:none;">
     <div class="xiaobaix-modal-content">
@@ -658,3 +581,140 @@
         .collapsible .toggle:checked~.title h4::after { transform: rotate(-180deg); }
     </style>
 </div>
+
+
+<!-- 循环任务子区块 -->
+
+<style>
+    .cloud-tasks-modal { max-height: 70vh; }
+    .cloud-tasks-modal * { font-family: 'ZCOOL KuaiLe', 'ZCOOL XiaoWei', sans-serif !important; }
+    .cloud-tasks-modal h3 { margin-top: 0; color: var(--SmartThemeBodyColor, #e9e9e9); }
+    .cloud-tasks-modal h4 { color: var(--SmartThemeBodyColor, #cacaca); margin-bottom: 10px; }
+    .cloud-tasks-section { margin-bottom: 15px; }
+    .cloud-tasks-list { max-height: 300px; overflow-y: auto; }
+    .cloud-task-item { transition: background-color 0.2s; }
+    .cloud-task-item:hover { background-color: rgba(255, 255, 255, 0.05); }
+ </style>
+<div id="task_editor_template" style="display: none;">
+    <div class="task_editor">
+        <h3>任务编辑器</h3>
+        <div class="flex-container flexFlowColumn">
+            <div class="flex1">
+                <label for="task_name_edit">任务名称</label>
+                <input class="task_name_edit text_pole textarea_compact" type="text" placeholder="输入任务名称" />
+            </div>
+            <div class="flex1">
+                <label for="task_commands_edit">脚本命令</label>
+                <textarea class="task_commands_edit text_pole wide100p textarea_compact" style="height: 200px;" placeholder="输入要执行的斜杠命令或js, eg: &#10;&lt;&lt;taskjs&gt;&gt;&#10;count++;&#10;&lt;&lt;/taskjs&gt;&gt;&#10;/echo 已完成脚本！"></textarea>
+            </div>
+            <div class="flex-container">
+                <div class="flex1">
+                    <label for="task_interval_edit">楼层间隔</label>
+                    <input class="task_interval_edit text_pole textarea_compact" type="number" min="0" max="100" />
+                    <small>设为0即只手动激活，非自动执行</small>
+                </div>
+                <div class="flex1">
+                    <label for="task_floor_type_edit">楼层类型</label>
+                    <select class="task_floor_type_edit text_pole textarea_compact">
+                        <option value="all">全部楼层</option>
+                        <option value="user">用户楼层</option>
+                        <option value="llm">LLM楼层</option>
+                    </select>
+                    <small>消息会以第0层开始计算层数</small>
+                </div>
+            </div>
+            <div class="flex-container">
+                <div class="flex1">
+                    <label for="task_type_edit">任务类型</label>
+                    <select class="task_type_edit text_pole textarea_compact">
+                        <option value="global" id="section-font">全局任务</option>
+                        <option value="character" id="section-font">角色任务</option>
+                    </select>
+                    <br>
+                    <div class="flex1">
+                        <label class="checkbox flex-container">
+                            <input type="checkbox" class="task_enabled_edit" />
+                            <span>启用任务</span>
+                        </label>
+                        <label class="checkbox flex-container">
+                            <input type="checkbox" class="task_button_activated_edit" />
+                            <span>注册任务按钮到主界面</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="flex1">
+                    <label for="task_trigger_timing_edit">触发时机</label>
+                    <select class="task_trigger_timing_edit text_pole textarea_compact">
+                        <option value="after_ai">AI消息后</option>
+                        <option value="before_user">用户消息前</option>
+                        <option value="any_message">任意对话</option>
+                        <option value="initialization">角色卡初始化</option>
+                        <option value="plugin_init">插件初始化</option>
+                        <option value="chat_changed">切换聊天后</option>
+                        <option value="only_this_floor">仅在“间隔楼层”的那个楼层执行一次</option>
+                    </select>
+                    <small>选择任务执行的时机</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="task_item_template" style="display: none;">
+    <div class="task-item flex-container flexnowrap">
+        <span class="drag-handle menu-handle">&#9776;</span>
+        <div class="task_name flexGrow overflow-hidden"></div>
+        <div class="flex-container flexnowrap">
+            <label class="checkbox flex-container">
+                <input type="checkbox" class="disable_task" />
+                <span class="task-toggle-on fa-solid fa-toggle-on" title="禁用任务"></span>
+                <span class="task-toggle-off fa-solid fa-toggle-off" title="启用任务"></span>
+            </label>
+
+            <div class="edit_task menu_button" title="编辑任务"><i class="fa-solid fa-pencil"></i></div>
+            <div class="export_task menu_button" title="导出任务"><i class="fa-solid fa-upload"></i></div>
+            <div class="delete_task menu_button" title="删除任务"><i class="fa-solid fa-trash"></i></div>
+        </div>
+    </div>
+</div>
+
+<div id="task_preview_template" style="display: none;">
+    <div class="task-preview">
+        <strong class="task-preview-name"></strong> <span class="task-preview-interval"></span>
+        <div class="task-commands task-preview-commands"></div>
+    </div>
+</div>
+
+ <div id="cloud_tasks_modal_template" style="display: none;">
+    <div class="cloud-tasks-modal">
+        <h3>云端任务下载</h3>
+        <div class="cloud-tasks-loading" style="text-align: center; padding: 20px;">
+            <i class="fa-solid fa-spinner fa-spin"></i> 正在加载云端任务...
+        </div>
+        <div class="cloud-tasks-content" style="display: none;">
+            <div class="cloud-tasks-section">
+                <h4>全局任务</h4>
+                <div class="cloud-tasks-list cloud-global-tasks"></div>
+            </div>
+            <hr style="margin: 15px 0;" />
+            <div class="cloud-tasks-section">
+                <h4>角色任务</h4>
+                <div class="cloud-tasks-list cloud-character-tasks"></div>
+            </div>
+        </div>
+        <div class="cloud-tasks-error" style="display: none; color: #ff6b6b; text-align: center; padding: 20px;"></div>
+        <small>云端任务由贡献者提供并经过基础审核。由于脚本具有较高权限，使用前请查看源码并检查安全性，确认适配您的场景。</small>
+    </div>
+ </div>
+
+ <div id="cloud_task_item_template" style="display: none;">
+    <div class="cloud-task-item" style="border: 1px solid var(--SmartThemeBorderColor); padding: 10px; margin: 8px 0; border-radius: 4px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <strong class="cloud-task-name"></strong>
+            <button class="cloud-task-download menu_button menu_button_icon" title="下载并导入此任务">
+                <small>导入</small>
+            </button>
+        </div>
+        <div class="cloud-task-intro" style="color: #888; font-size: 0.9em; text-align: left;"></div>
+    </div>
+ </div>
