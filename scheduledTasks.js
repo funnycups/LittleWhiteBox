@@ -240,7 +240,31 @@ async function executeTaskJS(jsCode, taskName = 'AnonymousTask') {
     const codeSig = __hashStringForKey(String(jsCode || ''));
     const stableKey = (String(taskName || '').trim()) || `js-${codeSig}`;
 
-	await __runTaskSingleInstance(stableKey, async (utils) => {
+    // ✅ 强制清理旧实例（即使代码相同）
+    const old = __taskRunMap.get(stableKey);
+    if (old) {
+        try { 
+            old.abort.abort(); 
+            console.log(`[强制清理旧任务] ${stableKey}`);
+        } catch {}
+        try {
+            old.timers.forEach((id) => clearTimeout(id));
+            old.intervals.forEach((id) => clearInterval(id));
+        } catch {}
+        __taskRunMap.delete(stableKey);
+    }
+    
+    // ✅ 清理该任务的所有动态回调
+    const callbackPrefix = `${stableKey}_fl_`;
+    for (const [id, entry] of state.dynamicCallbacks.entries()) {
+        if (id.startsWith(callbackPrefix)) {
+            try { entry?.abortController?.abort(); } catch {}
+            state.dynamicCallbacks.delete(id);
+            console.log(`[清理旧监听器] ${id}`);
+        }
+    }
+
+    await __runTaskSingleInstance(stableKey, async (utils) => {
         const { addListener, setTimeoutSafe, clearTimeoutSafe, setIntervalSafe, clearIntervalSafe, abortSignal } = utils;
 
         const originalWindowFns = {
@@ -332,33 +356,47 @@ async function executeTaskJS(jsCode, taskName = 'AnonymousTask') {
             } catch {}
         };
 
-		const addFloorListener = (callback, options = {}) => {
-			if (typeof callback !== 'function') throw new Error('callback 必须是函数');
-			const callbackId = `${taskName}_fl_${uuidv4()}`;
-			const entryAbort = new AbortController();
-			try { abortSignal.addEventListener('abort', () => { try { entryAbort.abort(); } catch {} state.dynamicCallbacks.delete(callbackId); }); } catch {}
-			state.dynamicCallbacks.set(callbackId, {
-				callback,
-				options: {
-					interval: Number.isFinite(parseInt(options.interval)) ? parseInt(options.interval) : 0,
-					timing: options.timing || 'after_ai',
-					floorType: options.floorType || 'all'
-				},
-				abortController: entryAbort
-			});
-			return () => { try { entryAbort.abort(); } catch {} state.dynamicCallbacks.delete(callbackId); };
-		};
+        const addFloorListener = (callback, options = {}) => {
+            if (typeof callback !== 'function') throw new Error('callback 必须是函数');
+            
+            const callbackId = `${stableKey}_fl_${uuidv4()}`;
+            const entryAbort = new AbortController();
+            
+            try { 
+                abortSignal.addEventListener('abort', () => { 
+                    try { entryAbort.abort(); } catch {} 
+                    state.dynamicCallbacks.delete(callbackId); 
+                }); 
+            } catch {}
+            
+            state.dynamicCallbacks.set(callbackId, {
+                callback,
+                options: {
+                    interval: Number.isFinite(parseInt(options.interval)) ? parseInt(options.interval) : 0,
+                    timing: options.timing || 'after_ai',
+                    floorType: options.floorType || 'all'
+                },
+                abortController: entryAbort
+            });
+            
+            console.log(`[注册新监听器] ${callbackId}`, options);
+            
+            return () => { 
+                try { entryAbort.abort(); } catch {} 
+                state.dynamicCallbacks.delete(callbackId); 
+            };
+        };
 
-		const runInScope = async (code) => {
+        const runInScope = async (code) => {
             const fn = new Function(
                 'STscript',
-				'addFloorListener',
-				'addListener', 'setTimeoutSafe', 'clearTimeoutSafe', 'setIntervalSafe', 'clearIntervalSafe', 'abortSignal',
+                'addFloorListener',
+                'addListener', 'setTimeoutSafe', 'clearTimeoutSafe', 'setIntervalSafe', 'clearIntervalSafe', 'abortSignal',
                 `return (async () => { ${code} })();`
             );
             return await fn(
                 STscript,
-				addFloorListener,
+                addFloorListener,
                 addListener,
                 setTimeoutSafe,
                 clearTimeoutSafe,
@@ -375,6 +413,7 @@ async function executeTaskJS(jsCode, taskName = 'AnonymousTask') {
         }
     }, codeSig);
 }
+
 
 function handleTaskMessage(event) {
     if (!event.data || event.data.source !== 'xiaobaix-iframe' || event.data.type !== 'executeTaskJS') return;
@@ -1575,8 +1614,6 @@ function initTasks() {
 
     $('#scheduled_tasks_enabled').prop('checked', getSettings().enabled);
     refreshTaskLists();
-
-    setTimeout(() => { ensureQrObserver(); updateTaskBar(); }, 500);
 
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
     eventSource.on(event_types.USER_MESSAGE_RENDERED, onUserMessage);
