@@ -1076,7 +1076,7 @@ async function checkEmbeddedTasks() {
 }
 
 // ------------- Cloud Tasks ---------------
-const CLOUD_TASKS_API = 'https://task.whitelittlebox.qzz.io/data?force=xbishere';
+const CLOUD_TASKS_API = 'https://task.whitelittlebox.qzz.io/';
 
 async function fetchCloudTasks() {
     try {
