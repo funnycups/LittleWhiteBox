@@ -781,14 +781,18 @@ const PRB=(()=>{
 
   function onExportReady(preset){
     try{
-      const name = PresetStore.currentName(); if(!name) return;
+      const name = PresetStore.currentName();
+      if (!name) return;
+
       preset.extensions = preset.extensions || {};
 
       const binding = PRB.read(name);
-      if (binding?.scripts?.length){
+      if (binding && Array.isArray(binding.scripts) && binding.scripts.length){
         preset.extensions.regexBindings = PRB.toPayload(binding);
+      }
+
       const d = PresetAdapter.getLocalData(name);
-      if (d?.uniqueValue && d?.timestamp){
+      if (d && d.uniqueValue && d.timestamp){
         preset.extensions.presetdetailnfo = {
           uniqueValue: d.uniqueValue,
           timestamp: d.timestamp,
@@ -797,9 +801,10 @@ const PRB=(()=>{
           updateNote: d.updateNote || ""
         };
       }
-    }catch{}
+    } catch (e) {
+      console.warn('[PRB.onExportReady] export failed', e);
+    }
   }
-
 
   async function onImportReady({ data, presetName }){
     try{
