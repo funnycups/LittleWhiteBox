@@ -307,23 +307,20 @@ function buildResourceHints(html){
 
 function iframeClientScript(){return `
 (function(){
-    function measureVisibleHeight(){
-      var d = document, b = d.body, de = d.documentElement;
-      if(!b) return 0;
-    
-      var el = b.lastElementChild;
-      while(el){
-        var cs = window.getComputedStyle(el);
-        if(cs.position !== 'fixed' && cs.position !== 'absolute' && (el.offsetHeight || el.offsetWidth)){
-          var mb = parseFloat(cs.marginBottom) || 0;
-          var top = 0, p = el;
-          do{ top += p.offsetTop || 0; p = p.offsetParent; }while(p);
-          return Math.max(0, Math.round(top + el.offsetHeight + mb));
-        }
-        el = el.previousElementSibling;
-      }
-      return Math.max(0, Math.round(b.scrollHeight || de.scrollHeight || 0));
+  function measureVisibleHeight(){
+    try{
+      var root = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+      var h1 = root.scrollHeight || 0;
+      var h2 = root.offsetHeight || 0;
+      var h3 = 0;
+      try{ h3 = root.getBoundingClientRect ? Math.round(root.getBoundingClientRect().height) : 0 }catch(e){}
+      var h = Math.max(h1, h2, h3);
+      return Math.max(0, Math.round(h));
+    }catch(e){
+      var b=document.body;
+      return (b && (b.scrollHeight||b.offsetHeight)) || 0;
     }
+  }
 
   function post(m){ try{ parent.postMessage(m,'*') }catch(e){} }
 
