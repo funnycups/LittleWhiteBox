@@ -307,20 +307,30 @@ function buildResourceHints(html){
 
 function iframeClientScript(){return `
 (function(){
-  function measureVisibleHeight(){
-    try{
-      var root = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
-      var h1 = root.scrollHeight || 0;
-      var h2 = root.offsetHeight || 0;
-      var h3 = 0;
-      try{ h3 = root.getBoundingClientRect ? Math.round(root.getBoundingClientRect().height) : 0 }catch(e){}
-      var h = Math.max(h1, h2, h3);
-      return Math.max(0, Math.round(h));
-    }catch(e){
-      var b=document.body;
-      return (b && (b.scrollHeight||b.offsetHeight)) || 0;
+    function measureVisibleHeight(){
+    var d = document, b = d.body, de = d.documentElement;
+    if(!b) return 0;
+
+    var el = b.lastElementChild;
+    for(; el; el = el.previousElementSibling){
+        if(!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)) continue;
+        var pos = getComputedStyle(el).position;
+        if(pos === 'fixed' || pos === 'absolute') continue;
+        break;
     }
-  }
+    if(!el){
+        var sh = Math.max(b.scrollHeight, de.scrollHeight, b.offsetHeight, de.offsetHeight);
+        return Math.max(0, Math.round(sh));
+    }
+
+    var mb = parseFloat(getComputedStyle(el).marginBottom) || 0;
+
+    var top = 0, p = el;
+    while(p){ top += p.offsetTop || 0; p = p.offsetParent; }
+
+    var h = top + (el.offsetHeight || 0) + mb;
+    return Math.max(0, Math.round(h));
+    }
 
   function post(m){ try{ parent.postMessage(m,'*') }catch(e){} }
 
