@@ -309,7 +309,7 @@ function iframeClientScript(){return `
 (function(){
   function measureVisibleHeight(){
     try{
-      var root = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+      var root = document.body || document.documentElement;
       var h1 = root.scrollHeight || 0;
       var h2 = root.offsetHeight || 0;
       var h3 = 0;
