@@ -401,6 +401,77 @@ class StreamingGeneration {
         }
     }
 
+    async _captureWorldInfoText(prompt) {
+        const addonSet = new Set(['worldInfo']);
+        const context = getContext();
+        let capturedData = null;
+        const dataListener = (data) => {
+            capturedData = (data && typeof data === 'object' && !Array.isArray(data) && Array.isArray(data.prompt))
+                ? { ...data, prompt: data.prompt.slice() }
+                : (Array.isArray(data) ? data.slice() : data);
+        };
+        eventSource.on(event_types.GENERATE_AFTER_DATA, dataListener);
+        const tempKeys = [];
+        try {
+            await this._withTemporaryPromptToggles(addonSet, async () => {
+                const sandboxed = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
+                let chatBackup = null;
+                if (sandboxed) {
+                    try {
+                        chatBackup = chat.slice();
+                        chat.length = 0;
+                        chat.push({ name: name1 || 'User', is_user: true, is_system: false, mes: '[hist]', send_date: new Date().toISOString() });
+                    } catch {}
+                }
+                try {
+                    await context.generate('normal', {
+                        quiet_prompt: String(prompt || '').trim(),
+                        quietToLoud: false,
+                        skipWIAN: false,
+                        force_name2: true
+                    }, true);
+                } finally {
+                    if (sandboxed && Array.isArray(chatBackup)) {
+                        chat.length = 0;
+                        chat.push(...chatBackup);
+                    }
+                }
+            });
+        } finally {
+            eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
+            tempKeys.forEach(k => {});
+        }
+        let src = [];
+        const cd = capturedData;
+        if (Array.isArray(cd)) {
+            src = cd.slice();
+        } else if (cd && typeof cd === 'object' && Array.isArray(cd.prompt)) {
+            src = cd.prompt.slice();
+        }
+        const sandboxedAfter = true;
+        const isFromChat = this._createIsFromChat();
+        const pieces = [];
+        for (const m of src) {
+            if (!m || typeof m.content !== 'string') continue;
+            if (sandboxedAfter) {
+                if (m.role === 'system') {
+                    pieces.push(m.content);
+                } else if ((m.role === 'user' || m.role === 'assistant') && isFromChat(m.content)) {
+                    continue;
+                } else if (m.role !== 'user' && m.role !== 'assistant') {
+                    pieces.push(m.content);
+                }
+            } else {
+                pieces.push(m.content);
+            }
+        }
+        let text = pieces.map(s => String(s || '').trim()).filter(Boolean).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+        // 清理多余标题如 "[Start a new Chat]"，并消除其前后多余空行
+        text = text.replace(/\n{0,2}\s*\[Start a new Chat\]\s*\n?/ig, '\n');
+        text = text.replace(/\n{3,}/g, '\n\n').trim();
+        return text;
+    }
+
     async xbgenrawCommand(args, prompt) {
         const hasScaffolding = Boolean(String(
             args?.top || args?.topsys || args?.topuser || args?.topassistant ||
@@ -499,6 +570,24 @@ class StreamingGeneration {
                 .concat(bottomComposite ? this._parseCompositeParam(bottomComposite) : [])
                 .concat(createMsgs('bottom'))
         );
+
+        // {$worldInfo} 占位符：仅激活世界书进行一次干跑，抓取文本后内联替换
+        try {
+            const needsWI = [...topMsgs, ...bottomMsgs].some(m => m && typeof m.content === 'string' && m.content.includes('{$worldInfo}'));
+            if (needsWI) {
+                const wiText = await this._captureWorldInfoText(prompt || '');
+                const wiRegex = /\{\$worldInfo\}/ig;
+                const applyWI = (arr) => {
+                    for (const m of arr) {
+                        if (m && typeof m.content === 'string') {
+                            m.content = m.content.replace(wiRegex, wiText || '');
+                        }
+                    }
+                };
+                applyWI(topMsgs);
+                applyWI(bottomMsgs);
+            }
+        } catch {}
 
         const buildAddonFinalMessages = async () => {
             const context = getContext();
