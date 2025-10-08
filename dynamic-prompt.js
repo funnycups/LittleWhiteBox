@@ -366,6 +366,35 @@ function _fwDecidePurity(isNSFW) {
     if (isNSFW) return (cfg?.purityWhenNSFW) || FW_IMG.purityWhenNSFW;
     return (cfg?.purityDefault) || FW_IMG.purityDefault;
 }
+function _fwApplyMarkdown(escaped) {
+    let html = String(escaped || '');
+    const codeBlocks = [];
+    html = html.replace(/```([\s\S]*?)```/g, (m, code) => {
+        const idx = codeBlocks.length;
+        codeBlocks.push(code);
+        return `__FW_CODE_BLOCK_${idx}__`;
+    });
+    html = html.replace(/`([^`\n]+?)`/g, '<code style="background: rgba(76, 175, 80, 0.1); padding: 2px 5px; border-radius: 4px; font-family: \'Consolas\', \'Monaco\', monospace; font-size: 11px; color: #558B6E; border: 1px solid rgba(76, 175, 80, 0.2);">$1</code>');
+    html = html.replace(/\*\*([^*\n]+?)\*\*/g, '<strong style="color: #4E769A; font-weight: 600;">$1</strong>');
+    html = html.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<em style="color: #5D8BBA; font-style: italic;">$2</em>');
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer noopener" style="color:#3b82f6; text-decoration: underline;">$1</a>');
+    html = html.replace(/^######\s+(.*?)$/gm, '<h6 style="color: #6A9394; font-size: 12px; margin: 8px 0 6px 0; font-weight: 600;">$1</h6>');
+    html = html.replace(/^#####\s+(.*?)$/gm, '<h5 style="color: #6A9394; font-size: 13px; margin: 8px 0 6px 0; font-weight: 600;">$1</h5>');
+    html = html.replace(/^####\s+(.*?)$/gm, '<h4 style="color: #6A9394; font-size: 14px; margin: 10px 0 6px 0; font-weight: 600;">$1</h4>');
+    html = html.replace(/^###\s+(.*?)$/gm, '<h3 style="color: #5D8BBA; font-size: 15px; margin: 12px 0 8px 0; font-weight: 600;">$1</h3>');
+    html = html.replace(/^##\s+(.*?)$/gm,  '<h2 style="color: #5D8BBA; font-size: 16px; margin: 14px 0 10px 0; font-weight: 600;">$1</h2>');
+    html = html.replace(/^#\s+(.*?)$/gm,   '<h1 style="color: #4E769A; font-size: 18px; margin: 16px 0 12px 0; font-weight: 600;">$1</h1>');
+    html = html.replace(/^>\s?(.*)$/gm, '<blockquote style="border-left: 3px solid rgba(77, 158, 161, 0.5); padding-left: 12px; margin: 8px 0; color: #6A9394; font-style: italic;">$1</blockquote>');
+    html = html.replace(/^- (.*?)(?=\n|$)/gm, '<li style="margin: 4px 0; color: var(--smart-theme-body-color); opacity: 0.85; list-style-type: disc;">$1</li>');
+    html = html.replace(/^(\d+)\. (.*?)(?=\n|$)/gm, '<li style="margin: 4px 0; color: var(--smart-theme-body-color); opacity: 0.85; list-style-type: decimal;">$2</li>');
+    html = html.replace(/(<li style="[^"]*list-style-type:\s*disc[^"]*"[^>]*>.*?<\/li>(?:\s*)*)/gs, '<ul style="margin: 8px 0; padding-left: 20px; color: var(--smart-theme-body-color);">$1</ul>');
+    html = html.replace(/(<li style="[^"]*list-style-type:\s*decimal[^"]*"[^>]*>.*?<\/li>(?:\s*)*)/gs, '<ol style="margin: 8px 0; padding-left: 20px; color: var(--smart-theme-body-color);">$1</ol>');
+    html = html.replace(/__FW_CODE_BLOCK_(\d+)__/g, (m, i) => {
+        const body = String(codeBlocks[+i] || '');
+        return `<pre style="background: rgba(76, 175, 80, 0.08); padding: 12px; border-radius: 6px; font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; line-height: 1.5; color: #558B6E; margin: 10px 0; overflow-x: auto; border: 1px solid rgba(76, 175, 80, 0.15);"><code>${body}</code></pre>`;
+    });
+    return html;
+}
 function _fwRenderMessageContentWithImages(rawText) {
     if (!rawText) return '<div></div>';
     const escaped = String(rawText)
@@ -383,6 +412,7 @@ function _fwRenderMessageContentWithImages(rawText) {
             </div>
         </div>`;
     });
+    html = _fwApplyMarkdown(html);
     html = html.replace(/\n/g,'<br>');
     return html;
 }
@@ -2392,9 +2422,19 @@ function bindPresetAnalysisOptionsEvents() {
     }
 }
 
-// D.2 核心分析逻辑
+/* D.2 核心分析逻辑 */
+function isMeaningfulAnalysis(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    const stripped = raw.replace(/[\s\r\n\t]+/g, '').replace(/[，。、“”———…\.\,\!\?\-\_\(\)\[\]<>：:;'"|｜]/g,'');
+    if (!stripped) return false;
+    if (/^🖊+$/.test(raw)) return false;
+    const hasAnchors = /【第一部分】|【第二部分】|【第三部分】|【第四部分】/.test(raw);
+    return hasAnchors || stripped.length >= 20;
+}
 async function generateUserAnalysisReport(isAutoAnalysis = false) {
     if (dynamicPromptState.isGeneratingUser || dynamicPromptState.analysis?.isStreaming) return;
+    dynamicPromptState.analysis.retryCount = 0;
     clearAnalysisUI();
     dynamicPromptState.isGeneratingUser = true;
     if (dynamicPromptState.isAnalysisOpen) updatePopupUI();
@@ -2591,10 +2631,6 @@ async function saveUserAnalysisToVariable(analysisResult) {
         if (part2) await executeSlashCommand(`/setvar key=prompt2 "${stEscArg(part2)}"`);
         if (part3) await executeSlashCommand(`/setvar key=prompt3 "${stEscArg(part3)}"`);
         if (part4) await executeSlashCommand(`/setvar key=prompt4 "${stEscArg(part4)}"`);
-        const hint = `用户分析完成！\n\n可用变量：\n\n• 第一部分内容\n{{getvar::prompt1}}\n\n• 第二部分内容\n{{getvar::prompt2}}\n\n• 第三部分内容\n{{getvar::prompt3}}\n\n• 第四部分内容\n{{getvar::prompt4}}`;
-        setTimeout(() => {
-            callGenericPopup(hint, POPUP_TYPE.TEXT, '', { okButton: '我知道了', wide: true });
-        }, 600);
     } catch (err) {
         await executeSlashCommand(`/echo severity=warning 解析报告分段失败：${stEscArg(err.message || '未知错误')}`);
     }
@@ -2734,7 +2770,6 @@ function buildXbgenrawCmdStructured(sessionId, apiArgs, { topuser, body, bottomu
         }
     }
     parts.push(`"${stEscArg(body || '')}"`);
-
     return parts.join(' ');
 }
 function braceSafe(s) {
@@ -2868,6 +2903,11 @@ async function finalizeAnalysisStreaming(sessionId) {
     }
 }
 async function onAnalysisFinalText(analysisResult, isAuto) {
+    if (!isMeaningfulAnalysis(analysisResult)) {
+        await scheduleAnalysisRetry('empty', !!isAuto);
+        return;
+    }
+    dynamicPromptState.analysis.retryCount = 0;
     const reportData = {
         timestamp: Date.now(),
         content: analysisResult || '(空)',
@@ -2932,8 +2972,32 @@ function waitForAnalysisCompletion(sessionId = 'xb10', timeoutMs = 600000) {
         }, timeoutMs);
     });
 }
+async function scheduleAnalysisRetry(reason = 'empty', isAuto = false) {
+    const maxRetries = 2;
+    const retryDelayMs = 1200;
+    dynamicPromptState.analysis.retryCount = dynamicPromptState.analysis.retryCount || 0;
+    const attempt = dynamicPromptState.analysis.retryCount;
+    if (attempt < maxRetries) {
+        dynamicPromptState.analysis.retryCount += 1;
+        const tip = `❌ 分析${reason === 'empty' ? '空响应' : '失败'}，正在重试 (${dynamicPromptState.analysis.retryCount}/${maxRetries})...`;
+        await executeSlashCommand(`/echo ${stEscArg(tip)}`);
+        await new Promise(r => setTimeout(r, retryDelayMs));
+        let chatHistory = '';
+        try { chatHistory = await getChatHistory(); } catch {}
+        await startAnalysisByStructure(chatHistory, !!isAuto);
+        return;
+    }
+    dynamicPromptState.analysis.retryCount = 0;
+    if (dynamicPromptState.isAnalysisOpen) {
+        showAnalysisError('分析返回空内容，多次重试失败');
+        updatePopupUI();
+    } else {
+        await executeSlashCommand('/echo ❌ 分析失败：返回空内容，已重试多次未果');
+    }
+    dynamicPromptState.isGeneratingUser = false;
+}
 
-// D.3. 自动分析与队列
+/* D.3. 自动分析与队列 */
 function checkAutoAnalysis() {
     const settings = getSettings();
     if (!settings.autoAnalysis.enabled) return;
@@ -2983,12 +3047,25 @@ async function processAnalysisQueue() {
 async function performBackgroundAnalysis() {
     const chatId = getCurrentChatIdSafe();
     if (!chatId) return { success: false, error: 'chat 未就绪' };
+    const maxRetries = 2;
+    const retryDelayMs = 1200;
     try {
         const chatHistory = await getChatHistory();
         if (!chatHistory || chatHistory.trim() === '') {
             throw new Error('没有找到聊天记录');
         }
-        const analysisResult = await performUserAnalysis(chatHistory);
+        let analysisResult = '';
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            analysisResult = await performUserAnalysis(chatHistory);
+            if (isMeaningfulAnalysis(analysisResult)) break;
+            if (attempt < maxRetries) {
+                await executeSlashCommand(`/echo ❌ 自动分析空响应，重试 (${attempt + 1}/${maxRetries})...`);
+                await new Promise(r => setTimeout(r, retryDelayMs));
+            }
+        }
+        if (!isMeaningfulAnalysis(analysisResult)) {
+            return { success: false, error: '空响应' };
+        }
         const reportData = {
             timestamp: Date.now(),
             content: analysisResult,
