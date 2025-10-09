@@ -126,7 +126,6 @@ class StreamingGeneration {
         if (!source) throw new Error(`不支持的 api: ${opts.api}`);
         const model = String(opts.model || '').trim();
         if (!model) throw new Error('未检测到当前模型，请在聊天面板选择模型或在插件设置中为分析显式指定模型。');
-
         try {
             const provider = String(opts.api || '').toLowerCase();
             const reverseProxyConfigured = String(opts.apiurl || '').trim().length > 0;
@@ -146,7 +145,6 @@ class StreamingGeneration {
                 }
             }
         } catch {}
-
         const body = {
             messages, model, stream,
             chat_completion_source: source,
@@ -156,7 +154,15 @@ class StreamingGeneration {
             frequency_penalty: Number(oai_settings?.freq_pen_openai ?? ''),
             stop: Array.isArray(generateData?.stop) ? generateData.stop : undefined,
         };
-
+        const useNet = !!opts.enableNet;
+        if (source === chat_completion_sources.MAKERSUITE && useNet) {
+            body.tools = Array.isArray(body.tools) ? body.tools : [];
+            if (!body.tools.some(t => t && t.google_search_retrieval)) {
+                body.tools.push({ google_search_retrieval: {} });
+            }
+            body.enable_web_search = true;
+            body.makersuite_use_google_search = true;
+        }
         let reverseProxy = String(opts.apiurl || oai_settings?.reverse_proxy || '').trim();
         let proxyPassword = String(oai_settings?.proxy_password || '').trim();
         const cmdApiUrl = String(opts.apiurl || '').trim();
@@ -167,12 +173,10 @@ class StreamingGeneration {
             reverseProxy = '';
             proxyPassword = '';
         }
-
         if (PROXY_SUPPORTED.has(source) && reverseProxy) {
             body.reverse_proxy = reverseProxy.replace(/\/?$/, '');
             if (proxyPassword) body.proxy_password = proxyPassword;
         }
-
         if (source === chat_completion_sources.CUSTOM) {
             const customUrl = String(cmdApiUrl || oai_settings?.custom_url || '').trim();
             if (customUrl) {
@@ -184,24 +188,20 @@ class StreamingGeneration {
             if (oai_settings?.custom_include_body) body.custom_include_body = oai_settings.custom_include_body;
             if (oai_settings?.custom_exclude_body) body.custom_exclude_body = oai_settings.custom_exclude_body;
         }
-
         if (stream) {
             const response = await fetch('/api/backends/chat-completions/generate', {
                 method: 'POST', body: JSON.stringify(body),
                 headers: getRequestHeaders(), signal: abortSignal,
             });
-
             if (!response.ok) {
                 const txt = await response.text().catch(() => '');
                 throw new Error(txt || `后端响应错误: ${response.status}`);
             }
-
             const eventStream = getEventSourceStream();
             response.body.pipeThrough(eventStream);
             const reader = eventStream.readable.getReader();
             const state = { reasoning: '', image: '' };
             let text = '';
-
             return (async function* () {
                 try {
                     while (true) {
@@ -240,7 +240,6 @@ class StreamingGeneration {
         const session = this._ensureSession(sessionId, prompt);
         const abortController = new AbortController();
         session.abortController = abortController;
-
         try {
             this.isStreaming = true;
             this.activeCount++;
@@ -248,7 +247,6 @@ class StreamingGeneration {
             session.text = '';
             session.updatedAt = Date.now();
             this.tempreply = '';
-
             if (stream) {
                 const generator = await this.callAPI(generateData, abortController.signal, true);
                 for await (const chunk of generator) {
@@ -258,13 +256,11 @@ class StreamingGeneration {
                 const result = await this.callAPI(generateData, abortController.signal, false);
                 this.updateTempReply(result, session.id);
             }
-
             const payload = {
                 finalText: session.text,
                 originalPrompt: prompt,
                 sessionId: session.id
             };
-
             try { eventSource?.emit?.(EVT_DONE, payload); } catch {}
             this.postToFrames(EVT_DONE, payload);
             try { window?.postMessage?.({ type: EVT_DONE, payload, from: 'xiaobaix' }, '*'); } catch {}
@@ -466,7 +462,6 @@ class StreamingGeneration {
             }
         }
         let text = pieces.map(s => String(s || '').trim()).filter(Boolean).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
-        // 清理多余标题如 "[Start a new Chat]"，并消除其前后多余空行
         text = text.replace(/\n{0,2}\s*\[Start a new Chat\]\s*\n?/ig, '\n');
         text = text.replace(/\n{3,}/g, '\n\n').trim();
         return text;
@@ -485,7 +480,8 @@ class StreamingGeneration {
         const lock = lockArg === 'on' || lockArg === 'true' || lockArg === '1';
         const apiOptions = {
             api: args?.api, apiurl: args?.apiurl,
-            apipassword: args?.apipassword, model: args?.model
+            apipassword: args?.apipassword, model: args?.model,
+            enableNet: ['on','true','1','yes'].includes(String(args?.net ?? '').toLowerCase())
         };
         let parsedStop;
         try {
@@ -570,8 +566,6 @@ class StreamingGeneration {
                 .concat(bottomComposite ? this._parseCompositeParam(bottomComposite) : [])
                 .concat(createMsgs('bottom'))
         );
-
-        // {$worldInfo} 占位符：仅激活世界书进行一次干跑，抓取文本后内联替换
         try {
             const needsWI = [...topMsgs, ...bottomMsgs].some(m => m && typeof m.content === 'string' && m.content.includes('{$worldInfo}'));
             if (needsWI) {
@@ -588,7 +582,6 @@ class StreamingGeneration {
                 applyWI(bottomMsgs);
             }
         } catch {}
-
         const buildAddonFinalMessages = async () => {
             const context = getContext();
             let capturedData = null;
@@ -684,7 +677,6 @@ class StreamingGeneration {
             }
             return finalMessages;
         };
-
         if (addonSet.size === 0) {
             const messages = [].concat(topMsgs);
             if (prompt?.trim()) messages.push({ role, content: prompt.trim() });
@@ -742,7 +734,6 @@ class StreamingGeneration {
         const lockArg = String(args?.lock || '').toLowerCase();
         const lock = lockArg === 'on' || lockArg === 'true' || lockArg === '1';
         const nonstream = String(args?.nonstream || '').toLowerCase() === 'true';
-
         const buildGenDataWithOptions = async () => {
             const context = getContext();
             const tempMessage = {
@@ -785,7 +776,8 @@ class StreamingGeneration {
             }
             const apiOptions = {
                 api: args?.api, apiurl: args?.apiurl,
-                apipassword: args?.apipassword, model: args?.model
+                apipassword: args?.apipassword, model: args?.model,
+                enableNet: ['on','true','1','yes'].includes(String(args?.net ?? '').toLowerCase())
             };
             const cd = capturedData;
             let finalPromptMessages = [];
@@ -830,7 +822,6 @@ class StreamingGeneration {
             }
             return dataWithOptions;
         };
-
         if (nonstream) {
             try { if (lock) deactivateSendButtons(); } catch {}
             try {
@@ -865,6 +856,7 @@ class StreamingGeneration {
         const commonArgs = [
             { name: 'id', description: '会话ID', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'api', description: '后端: openai/claude/gemini/cohere/deepseek/custom', typeList: [ARGUMENT_TYPE.STRING] },
+            { name: 'net', description: '联网 on/off', typeList: [ARGUMENT_TYPE.STRING], enumList: ['on','off'] },
             { name: 'apiurl', description: '自定义后端URL', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'apipassword', description: '后端密码', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'model', description: '模型名', typeList: [ARGUMENT_TYPE.STRING] },
