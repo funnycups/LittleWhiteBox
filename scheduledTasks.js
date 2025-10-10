@@ -696,9 +696,6 @@ function refreshTaskLists() {
     const globalTasks = getSettings().globalTasks;
     const characterTasks = getCharacterTasks();
 
-    $globalList.off('click').off('input');
-    $charList.off('click').off('input');
-
     const globalFragment = document.createDocumentFragment();
     globalTasks.forEach((task, i) => {
         const el = createTaskItemSimple(task, i, false);
@@ -712,50 +709,6 @@ function refreshTaskLists() {
         charFragment.appendChild(el[0]);
     });
     $charList.empty().append(charFragment);
-
-    $globalList.on('input', '.disable_task', function() {
-        const $item = $(this).closest('.task-item');
-        const idx = parseInt($item.attr('data-index'));
-        const settings = getSettings();
-        if (settings.globalTasks[idx]) {
-            settings.globalTasks[idx].disabled = $(this).prop('checked');
-            debouncedSave();
-        }
-    });
-    $globalList.on('click', '.edit_task', function() {
-        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
-        editTask(idx, 'global');
-    });
-    $globalList.on('click', '.export_task', function() {
-        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
-        exportSingleTask(idx, false);
-    });
-    $globalList.on('click', '.delete_task', function() {
-        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
-        deleteTask(idx, 'global');
-    });
-
-    $charList.on('input', '.disable_task', function() {
-        const $item = $(this).closest('.task-item');
-        const idx = parseInt($item.attr('data-index'));
-        const tasks = getCharacterTasks();
-        if (tasks[idx]) {
-            tasks[idx].disabled = $(this).prop('checked');
-            saveCharacterTasks(tasks);
-        }
-    });
-    $charList.on('click', '.edit_task', function() {
-        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
-        editTask(idx, 'character');
-    });
-    $charList.on('click', '.export_task', function() {
-        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
-        exportSingleTask(idx, true);
-    });
-    $charList.on('click', '.delete_task', function() {
-        const idx = parseInt($(this).closest('.task-item').attr('data-index'));
-        deleteTask(idx, 'character');
-    });
 
     initSortable($globalList, function () {
         const newOrderIds = $globalList.sortable('toArray');
@@ -956,8 +909,10 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
                 }
             }
 
+            const base = task ? structuredClone(task) : {};
             const newTask = {
-                id: task?.id || `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                ...base,
+                id: base.id || `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
                 name: uniqueName,
                 commands: editorTemplate.find('.task_commands_edit').val().trim(),
                 interval: parseInt(editorTemplate.find('.task_interval_edit').val()) || 0,
@@ -965,7 +920,7 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
                 triggerTiming: editorTemplate.find('.task_trigger_timing_edit').val() || 'after_ai',
                 disabled: !editorTemplate.find('.task_enabled_edit').prop('checked'),
                 buttonActivated: editorTemplate.find('.task_button_activated_edit').prop('checked'),
-                createdAt: task?.createdAt || new Date().toISOString()
+                createdAt: base.createdAt || new Date().toISOString(),
             };
             saveTaskFromEditor(newTask, editorTemplate.find('.task_type_edit').val() === 'character');
         }
@@ -1245,7 +1200,6 @@ function exportSingleTask(index, isCharacterTask) {
     const fileData = JSON.stringify({ type, exportDate: new Date().toISOString(), tasks: [task] }, null, 4);
     download(fileData, fileName, 'application/json');
 }
-
 async function importGlobalTasks(file) {
     if (!file) return;
     try {
@@ -1253,37 +1207,54 @@ async function importGlobalTasks(file) {
         const raw = JSON.parse(fileText);
         let incomingTasks = [];
         let fileType = 'global';
+
         if (Array.isArray(raw)) {
             incomingTasks = raw;
             fileType = 'global';
-        } else if (Array.isArray(raw?.tasks)) {
+        } else if (raw && Array.isArray(raw.tasks)) {
             incomingTasks = raw.tasks;
-            if (raw?.type === 'character' || raw?.type === 'global') fileType = raw.type;
+            if (raw.type === 'character' || raw.type === 'global') {
+                fileType = raw.type;
+            }
         } else if (raw && typeof raw === 'object' && raw.name && (raw.commands || raw.interval !== undefined)) {
             incomingTasks = [raw];
-            if (raw?.type === 'character' || raw?.type === 'global') fileType = raw.type;
+            if (raw.type === 'character' || raw.type === 'global') {
+                fileType = raw.type;
+            }
+        } else {
+            throw new Error('无效的任务文件格式');
         }
 
-        if (!Array.isArray(incomingTasks) || incomingTasks.length === 0) throw new Error('无效的任务文件格式');
+        const VALID_FLOOR = ['all', 'user', 'llm'];
+        const VALID_TIMING = [
+            'after_ai', 'before_user', 'any_message',
+            'initialization', 'character_init', 'plugin_init',
+            'only_this_floor', 'chat_changed'
+        ];
+        const deepClone = (o) => JSON.parse(JSON.stringify(o || {}));
+        const tasksToImport = incomingTasks
+            .filter(t => (t?.name || '').trim() && (String(t?.commands || '').trim() || t.interval === 0))
+            .map(src => ({
+                id: uuidv4(),
+                name: String(src.name || '').trim(),
+                commands: String(src.commands || '').trim(),
+                interval: clampInt(src.interval, 0, 99999, 0),
+                floorType: VALID_FLOOR.includes(src.floorType) ? src.floorType : 'all',
+                triggerTiming: VALID_TIMING.includes(src.triggerTiming) ? src.triggerTiming : 'after_ai',
+                disabled: !!src.disabled,
+                buttonActivated: !!src.buttonActivated,
+                createdAt: src.createdAt || new Date().toISOString(),
+                importedAt: new Date().toISOString(),
+                x: (src.x && typeof src.x === 'object') ? deepClone(src.x) : {}
+            }));
 
-        incomingTasks = incomingTasks.filter(t => (t?.name || '').trim() && (String(t?.commands || '').trim() || t.interval === 0));
-        const tasksToImport = incomingTasks.map(task => ({
-            id: uuidv4(),
-            name: String(task.name || '').trim(),
-            commands: String(task.commands || '').trim(),
-            interval: clampInt(task.interval, 0, 99999, 0),
-            floorType: ['all', 'user', 'llm'].includes(task.floorType) ? task.floorType : 'all',
-            triggerTiming: ['after_ai','before_user','any_message','initialization','character_init','plugin_init','only_this_floor','chat_changed'].includes(task.triggerTiming)
-                ? task.triggerTiming : (task.interval === 0 ? 'after_ai' : 'after_ai'),
-            disabled: !!task.disabled,
-            buttonActivated: !!task.buttonActivated,
-            createdAt: task.createdAt || new Date().toISOString(),
-            importedAt: new Date().toISOString(),
-        }));
+        if (!tasksToImport.length) {
+            throw new Error('没有可导入的任务');
+        }
 
         if (fileType === 'character') {
             if (!this_chid || !characters[this_chid]) {
-                toastr?.warning?.('角色任务请先切换至角色聊天介面中导入。');
+                toastr?.warning?.('角色任务请先在角色聊天界面导入。');
                 return;
             }
             const current = getCharacterTasks();
@@ -1293,9 +1264,12 @@ async function importGlobalTasks(file) {
             settings.globalTasks = [...settings.globalTasks, ...tasksToImport];
             debouncedSave();
         }
+
         refreshTaskLists();
+        toastr?.success?.(`已导入 ${tasksToImport.length} 个任务`);
     } catch (error) {
         console.error('任务导入失败:', error);
+        toastr?.error?.(`导入失败：${error.message}`);
     }
 }
 
@@ -1389,6 +1363,97 @@ function cleanup() {
 }
 
 // ------------- Public API ----------------
+(function(){
+  if (window.__XB_TASKS_FACADE__) return;
+
+  const norm = s => String(s ?? '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .toLowerCase();
+
+  function list(scope='all'){
+    const g = getSettings().globalTasks || [];
+    const c = getCharacterTasks() || [];
+    const map = t => ({
+      id: t.id, name: t.name, interval: t.interval,
+      floorType: t.floorType, timing: t.triggerTiming, disabled: !!t.disabled
+    });
+    if (scope === 'global') return g.map(map);
+    if (scope === 'character') return c.map(map);
+    return { global: g.map(map), character: c.map(map) };
+  }
+
+  function find(name, scope='all'){
+    const n = norm(name);
+    const g = getSettings().globalTasks || [];
+    const gi = g.findIndex(t => norm(t?.name) === n);
+    if (scope !== 'character' && gi !== -1) return { scope: 'global', list: g, index: gi, task: g[gi] };
+
+    const c = getCharacterTasks() || [];
+    const ci = c.findIndex(t => norm(t?.name) === n);
+    if (scope !== 'global' && ci !== -1) return { scope: 'character', list: c, index: ci, task: c[ci] };
+
+    return null;
+  }
+
+  async function setCommands(name, commands, opts = {}){
+    const { mode='replace', scope='all' } = opts;
+    const hit = find(name, scope);
+    if (!hit) throw new Error(`任务未找到: ${name}`);
+    const old = String(hit.task.commands || '');
+    const body = String(commands ?? '');
+    if (mode === 'append') hit.task.commands = old ? (old + '\n' + body) : body;
+    else if (mode === 'prepend') hit.task.commands = old ? (body + '\n' + old) : body;
+    else hit.task.commands = body;
+
+    if (hit.scope === 'character') await saveCharacterTasks(hit.list);
+    else debouncedSave();
+    refreshTaskLists();
+    return { ok: true, scope: hit.scope, name: hit.task.name };
+  }
+
+  async function setJS(name, jsCode, opts = {}){
+    const commands = `<<taskjs>>${jsCode}<</taskjs>>`;
+    return await setCommands(name, commands, opts);
+  }
+
+  async function setProps(name, props, scope='all'){
+    const hit = find(name, scope);
+    if (!hit) throw new Error(`任务未找到: ${name}`);
+    Object.assign(hit.task, props || {});
+    if (hit.scope === 'character') await saveCharacterTasks(hit.list);
+    else debouncedSave();
+    refreshTaskLists();
+    return { ok: true, scope: hit.scope, name: hit.task.name };
+  }
+
+  async function exec(name){
+    const hit = find(name, 'all');
+    if (!hit) throw new Error(`任务未找到: ${name}`);
+    return await executeCommands(hit.task.commands, hit.task.name);
+  }
+
+  function dump(scope='all'){
+    const g = structuredClone(getSettings().globalTasks || []);
+    const c = structuredClone(getCharacterTasks() || []);
+    if (scope === 'global') return g;
+    if (scope === 'character') return c;
+    return { global: g, character: c };
+  }
+
+  window.XBTasks = {
+    list, dump, find,
+    setCommands, setJS, setProps, exec,
+    get global(){ return getSettings().globalTasks; },
+    get character(){ return getCharacterTasks(); },
+  };
+  
+
+  try { if (window.top && window.top !== window) window.top.XBTasks = window.XBTasks; } catch {}
+  window.__XB_TASKS_FACADE__ = true;
+})();
+
 window.xbqte = async (name) => {
     try {
         if (!name?.trim()) throw new Error('请提供任务名称');
@@ -1611,6 +1676,54 @@ function initTasks() {
             $(this).val('');
         }
     });
+
+    // ✅ 全局任务列表事件委托（只绑定一次）
+    $('#global_tasks_list')
+        .on('input', '.disable_task', function() {
+            const $item = $(this).closest('.task-item');
+            const idx = parseInt($item.attr('data-index'));
+            const settings = getSettings();
+            if (settings.globalTasks[idx]) {
+                settings.globalTasks[idx].disabled = $(this).prop('checked');
+                debouncedSave();
+            }
+        })
+        .on('click', '.edit_task', function() {
+            const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+            editTask(idx, 'global');
+        })
+        .on('click', '.export_task', function() {
+            const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+            exportSingleTask(idx, false);
+        })
+        .on('click', '.delete_task', function() {
+            const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+            deleteTask(idx, 'global');
+        });
+
+    // ✅ 角色任务列表事件委托（只绑定一次）
+    $('#character_tasks_list')
+        .on('input', '.disable_task', function() {
+            const $item = $(this).closest('.task-item');
+            const idx = parseInt($item.attr('data-index'));
+            const tasks = getCharacterTasks();
+            if (tasks[idx]) {
+                tasks[idx].disabled = $(this).prop('checked');
+                saveCharacterTasks(tasks);
+            }
+        })
+        .on('click', '.edit_task', function() {
+            const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+            editTask(idx, 'character');
+        })
+        .on('click', '.export_task', function() {
+            const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+            exportSingleTask(idx, true);
+        })
+        .on('click', '.delete_task', function() {
+            const idx = parseInt($(this).closest('.task-item').attr('data-index'));
+            deleteTask(idx, 'character');
+        });
 
     $('#scheduled_tasks_enabled').prop('checked', getSettings().enabled);
     refreshTaskLists();

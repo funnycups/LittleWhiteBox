@@ -61,23 +61,20 @@ class TemplateSettings {
     static get() {
         const settings = extension_settings[EXT_ID] = extension_settings[EXT_ID] || {};
         settings.templateEditor = settings.templateEditor || { enabled: false, characterBindings: {} };
+        settings.templateEditor.characterBindings = settings.templateEditor.characterBindings || {};
         return settings.templateEditor;
     }
+    
     static getCurrentChar() {
         if (this_chid === undefined || !characters[this_chid]) return DEFAULT_CHAR_SETTINGS;
         const character = characters[this_chid];
         const embeddedSettings = character.data?.extensions?.[TEMPLATE_MODULE_NAME];
-        return embeddedSettings || { ...DEFAULT_CHAR_SETTINGS, ...(this.get().characterBindings[character.avatar] || {}) };
+        return embeddedSettings || { 
+            ...DEFAULT_CHAR_SETTINGS, 
+            ...(this.get().characterBindings?.[character.avatar] || {}) 
+        };
     }
-    static async saveCurrentChar(charSettings) {
-        if (this_chid === undefined || !characters[this_chid]) return;
-        const avatar = characters[this_chid].avatar;
-        state.caches.template.clear();
-        await writeExtensionField(Number(this_chid), TEMPLATE_MODULE_NAME, charSettings);
-        const globalSettings = this.get();
-        globalSettings.characterBindings[avatar] = { ...globalSettings.characterBindings[avatar], ...charSettings };
-        saveSettingsDebounced();
-    }
+    
     static getCharTemplate(avatar) {
         if (!avatar || !utils.isEnabled()) return null;
         if (state.caches.template.has(avatar)) return state.caches.template.get(avatar);
@@ -86,8 +83,8 @@ class TemplateSettings {
             const embeddedSettings = characters[this_chid].data?.extensions?.[TEMPLATE_MODULE_NAME];
             if (embeddedSettings?.enabled) result = embeddedSettings;
         }
-        result = result || (this.get().characterBindings[avatar]?.enabled ? this.get().characterBindings[avatar] : null);
-        // 只緩存有效結果，避免將 null 緩存黏住
+        const bindings = this.get().characterBindings;
+        result = result || (bindings?.[avatar]?.enabled ? bindings[avatar] : null);
         if (result) state.caches.template.set(avatar, result);
         return result;
     }
