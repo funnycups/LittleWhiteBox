@@ -145,15 +145,45 @@ class StreamingGeneration {
                 }
             }
         } catch {}
+        const num = (v) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : undefined;
+        };
+        const isUnset = (k) => baseOptions?.[k] === '__unset__';
+        const tUser = num(baseOptions?.temperature);
+        const ppUser = num(baseOptions?.presence_penalty);
+        const fpUser = num(baseOptions?.frequency_penalty);
+        const tpUser = num(baseOptions?.top_p);
+        const tkUser = num(baseOptions?.top_k);
+        const mtUser = num(baseOptions?.max_tokens);
+        const tUI = num(oai_settings?.temp_openai);
+        const ppUI = num(oai_settings?.pres_pen_openai);
+        const fpUI = num(oai_settings?.freq_pen_openai);
+        const tpUI_OpenAI = num(oai_settings?.top_p_openai ?? oai_settings?.top_p);
+        const mtUI_OpenAI = num(oai_settings?.openai_max_tokens ?? oai_settings?.max_tokens);
+        const tpUI_Gemini = num(oai_settings?.makersuite_top_p ?? oai_settings?.top_p);
+        const tkUI_Gemini = num(oai_settings?.makersuite_top_k ?? oai_settings?.top_k);
+        const mtUI_Gemini = num(oai_settings?.makersuite_max_tokens ?? oai_settings?.max_output_tokens ?? oai_settings?.openai_max_tokens ?? oai_settings?.max_tokens);
+        const effectiveTemperature = isUnset('temperature') ? undefined : (tUser ?? tUI);
+        const effectivePresence = isUnset('presence_penalty') ? undefined : (ppUser ?? ppUI);
+        const effectiveFrequency = isUnset('frequency_penalty') ? undefined : (fpUser ?? fpUI);
+        const effectiveTopP = isUnset('top_p') ? undefined : (tpUser ?? (source === chat_completion_sources.MAKERSUITE ? tpUI_Gemini : tpUI_OpenAI));
+        const effectiveTopK = isUnset('top_k') ? undefined : (tkUser ?? (source === chat_completion_sources.MAKERSUITE ? tkUI_Gemini : undefined));
+        const effectiveMaxT = isUnset('max_tokens') ? undefined : (mtUser ?? (source === chat_completion_sources.MAKERSUITE ? (mtUI_Gemini ?? mtUI_OpenAI) : mtUI_OpenAI) ?? 1024);
         const body = {
             messages, model, stream,
             chat_completion_source: source,
-            max_tokens: Number(oai_settings?.openai_max_tokens ?? 0) || 1024,
-            temperature: Number(oai_settings?.temp_openai ?? ''),
-            presence_penalty: Number(oai_settings?.pres_pen_openai ?? ''),
-            frequency_penalty: Number(oai_settings?.freq_pen_openai ?? ''),
+            temperature: effectiveTemperature,
+            presence_penalty: effectivePresence,
+            frequency_penalty: effectiveFrequency,
+            top_p: effectiveTopP,
+            max_tokens: effectiveMaxT,
             stop: Array.isArray(generateData?.stop) ? generateData.stop : undefined,
         };
+        if (source === chat_completion_sources.MAKERSUITE) {
+            if (effectiveTopK !== undefined) body.top_k = effectiveTopK;
+            body.max_output_tokens = effectiveMaxT;
+        }
         const useNet = !!opts.enableNet;
         if (source === chat_completion_sources.MAKERSUITE && useNet) {
             body.tools = Array.isArray(body.tools) ? body.tools : [];
@@ -288,7 +318,7 @@ class StreamingGeneration {
         let depth = 0;
         for (let i = 0; i < input.length; i++) {
             const ch = input[i];
-            if (ch === '{') depth++;
+                       if (ch === '{') depth++;
             if (ch === '}') depth = Math.max(0, depth - 1);
             if (ch === ';' && depth === 0) {
                 parts.push(buf);
@@ -467,6 +497,15 @@ class StreamingGeneration {
         return text;
     }
 
+    parseOpt(args, key) {
+        const v = args?.[key];
+        if (v === undefined) return undefined;
+        const s = String(v).trim().toLowerCase();
+        if (s === 'undefined' || s === 'none' || s === 'null' || s === 'off') return '__unset__';
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+    }
+
     async xbgenrawCommand(args, prompt) {
         const hasScaffolding = Boolean(String(
             args?.top || args?.topsys || args?.topuser || args?.topassistant ||
@@ -481,7 +520,13 @@ class StreamingGeneration {
         const apiOptions = {
             api: args?.api, apiurl: args?.apiurl,
             apipassword: args?.apipassword, model: args?.model,
-            enableNet: ['on','true','1','yes'].includes(String(args?.net ?? '').toLowerCase())
+            enableNet: ['on','true','1','yes'].includes(String(args?.net ?? '').toLowerCase()),
+            top_p: this.parseOpt(args, 'top_p'),
+            top_k: this.parseOpt(args, 'top_k'),
+            max_tokens: this.parseOpt(args, 'max_tokens'),
+            temperature: this.parseOpt(args, 'temperature'),
+            presence_penalty: this.parseOpt(args, 'presence_penalty'),
+            frequency_penalty: this.parseOpt(args, 'frequency_penalty'),
         };
         let parsedStop;
         try {
@@ -777,7 +822,13 @@ class StreamingGeneration {
             const apiOptions = {
                 api: args?.api, apiurl: args?.apiurl,
                 apipassword: args?.apipassword, model: args?.model,
-                enableNet: ['on','true','1','yes'].includes(String(args?.net ?? '').toLowerCase())
+                enableNet: ['on','true','1','yes'].includes(String(args?.net ?? '').toLowerCase()),
+                top_p: this.parseOpt(args, 'top_p'),
+                top_k: this.parseOpt(args, 'top_k'),
+                max_tokens: this.parseOpt(args, 'max_tokens'),
+                temperature: this.parseOpt(args, 'temperature'),
+                presence_penalty: this.parseOpt(args, 'presence_penalty'),
+                frequency_penalty: this.parseOpt(args, 'frequency_penalty'),
             };
             const cd = capturedData;
             let finalPromptMessages = [];
@@ -861,6 +912,12 @@ class StreamingGeneration {
             { name: 'apipassword', description: '后端密码', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'model', description: '模型名', typeList: [ARGUMENT_TYPE.STRING] },
             { name: 'position', description: '插入位置：bottom/history', typeList: [ARGUMENT_TYPE.STRING], enumList: ['bottom', 'history'] },
+            { name: 'temperature', description: '温度', typeList: [ARGUMENT_TYPE.STRING] },
+            { name: 'presence_penalty', description: '存在惩罚', typeList: [ARGUMENT_TYPE.STRING] },
+            { name: 'frequency_penalty', description: '频率惩罚', typeList: [ARGUMENT_TYPE.STRING] },
+            { name: 'top_p', description: 'Top P', typeList: [ARGUMENT_TYPE.STRING] },
+            { name: 'top_k', description: 'Top K', typeList: [ARGUMENT_TYPE.STRING] },
+            { name: 'max_tokens', description: '最大回复长度', typeList: [ARGUMENT_TYPE.STRING] },
         ];
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'xbgen',
