@@ -54,7 +54,14 @@ const Server={
       else { opt.headers["Content-Type"]="application/json"; opt.body=JSON.stringify(data); }
     }
     const res=await fetch(`${serverUrl.replace(/\/$/,"")}${endpoint}?${auth}`,opt);
-    if(!res.ok){ const errJson=await res.json().catch(()=>({})); const msg=errJson.error||`服务器错误: ${res.status}`; const e=new Error(msg); e.status=res.status; e.isPasswordError=res.status===401||(""+msg).includes("密码"); throw e; }
+    if(!res.ok){
+      const errJson=await res.json().catch(()=>({}));
+      const msg=errJson.error||`服务器错误: ${res.status}`;
+      const err=/** @type {any} */(new Error(msg));
+      err.status=res.status;
+      err.isPasswordError=res.status===401||(""+msg).includes("密码");
+      throw err;
+    }
     return await res.json();
   },
   create(d){ return Server.req("/create","POST",d,true); },
@@ -95,7 +102,8 @@ const Press={
 function UpdaterFactory(adapter){
   async function bind(id, form){
     const local=adapter.getLocalData(id);
-    const uuid=Tools.uuid(), timestamp=new Date().toISOString();
+  const uuid=Tools.uuid();
+  const timestamp=new Date().toISOString();
     const rawName=form?.name?.trim()||adapter.getDisplayName(id)||"Unnamed";
     const nameGroup=Tools.nameToServer(rawName,adapter.fallbackName||"Item");
     try{
@@ -233,53 +241,121 @@ const CharacterAdapter={
 const CharacterUpdater=UpdaterFactory(CharacterAdapter);
 
 const PresetStore=(()=>{
-  function ensure(){ const parent=extension_settings[EXT_ID]=extension_settings[EXT_ID]||{}; const cu=parent.characterUpdater=parent.characterUpdater||{}; cu.presetBindings=cu.presetBindings||{}; return cu.presetBindings; }
+  const DEFAULT_CHARACTER_ID=100000;
+  const BINDING_KEY="binding";
+  const REGEX_KEY="regexBindings";
+
+  const deepClone=(obj)=>{
+    if(obj==null) return obj;
+    try{ return structuredClone(obj); }catch{ try{ return JSON.parse(JSON.stringify(obj)); }catch{ return obj; } }
+  };
+
+  const isPlainObject=(value)=>!!value&&typeof value==="object"&&!Array.isArray(value);
+
+  const sanitizeBinding=(raw)=>{
+    if(!isPlainObject(raw)) return null;
+    const payload={
+      uniqueValue:String(raw.uniqueValue||""),
+      timestamp:String(raw.timestamp||""),
+      nameGroup:String(raw.nameGroup||""),
+      linkAddress:String(raw.linkAddress||""),
+      updateNote:String(raw.updateNote||""),
+    };
+    if(!payload.uniqueValue && !payload.timestamp) return null;
+    return payload;
+  };
+
   const PM=()=>{ try{return getPresetManager("openai");}catch{return null;} };
-  function readFromPreset(name){
+
+  const getPreset=(name)=>{
+    const pm=PM();
+    if(!pm||!name) return null;
+    try{ return pm.getCompletionPresetByName(name)||null; }
+    catch{ return null; }
+  };
+
+  const ensurePromptOrderEntry=(preset,create=false)=>{
+    if(!preset) return null;
+    if(!Array.isArray(preset.prompt_order)){
+      if(!create) return null;
+      preset.prompt_order=[];
+    }
+    let entry=preset.prompt_order.find(item=>Number(item?.character_id)===DEFAULT_CHARACTER_ID);
+    if(!entry && create){
+      entry={ character_id:DEFAULT_CHARACTER_ID, order:[] };
+      preset.prompt_order.push(entry);
+    }
+    return entry||null;
+  };
+
+  const readExt=(name)=>{
+    const preset=getPreset(name);
+    if(!preset) return {};
+    const entry=ensurePromptOrderEntry(preset,false);
+    if(!entry||!isPlainObject(entry.xiaobai_ext)) return {};
+    return deepClone(entry.xiaobai_ext);
+  };
+
+  const readLegacyBinding=(name)=>{
     try{
-      const pm = PM();
-      if (!pm || !name) return null;
-      const extVal = pm.readPresetExtensionField?.({ path: 'extensions.presetdetailnfo', name });
-      const val = (extVal === undefined || extVal === null)
-        ? pm.readPresetExtensionField?.({ path: 'presetdetailnfo', name })
-        : extVal;
-      if (!val || typeof val !== 'object') return null;
-      return {
-        uniqueValue: String(val.uniqueValue || ''),
-        timestamp: String(val.timestamp || ''),
-        nameGroup: String(val.nameGroup || ''),
-        linkAddress: String(val.linkAddress || ''),
-        updateNote: String(val.updateNote || ''),
-      };
-    }catch{ return null; }
-  }
-  function readMerged(name){ const local=ensure()[name]||{}; const fromPreset=readFromPreset(name)||{}; return { ...local, ...fromPreset }; }
-  function readLocalOnly(name){ try{ const parent=extension_settings[EXT_ID]||{}; const cu=parent.characterUpdater||{}; const map=cu.presetBindings||{}; return map[name]||null; }catch{ return null; } }
+      const pm=PM(); if(!pm||!name) return null;
+      const extVal=pm.readPresetExtensionField?.({ path:"extensions.presetdetailnfo", name });
+      const val=(extVal===undefined||extVal===null)?pm.readPresetExtensionField?.({ path:"presetdetailnfo", name }):extVal;
+      return sanitizeBinding(val);
+    }catch{return null;}
+  };
+
+  const syncTarget=(target,source)=>{
+    if(!target||!source) return;
+    Object.keys(target).forEach(k=>{ if(!Object.prototype.hasOwnProperty.call(source,k)) delete target[k]; });
+    Object.assign(target,source);
+  };
+
+  const updateExt=async(name,mutator)=>{
+    const pm=PM(); if(!pm||!name) return false;
+    const preset=getPreset(name); if(!preset) return false;
+    const clone=deepClone(preset);
+    const entry=ensurePromptOrderEntry(clone,true);
+    entry.xiaobai_ext=isPlainObject(entry.xiaobai_ext)?entry.xiaobai_ext:{};
+    const ctx=entry.xiaobai_ext;
+    mutator(ctx);
+    if(!isPlainObject(ctx)||!Object.keys(ctx).length) delete entry.xiaobai_ext;
+    try{
+      await pm.savePreset(name,clone,{ skipUpdate:true });
+      syncTarget(preset,clone);
+      return entry.xiaobai_ext?deepClone(entry.xiaobai_ext):null;
+    }catch(err){ console.error("[PresetStore] 保存失败",err); throw err; }
+  };
+
   return {
     getPM:PM,
     currentName(){ try{return PM()?.getSelectedPresetName?.()||"";}catch{return"";} },
-    read(name){ return ensure()[name]||null; },
-    readMerged,
-    readLocal: readLocalOnly,
-    async write(name,data){ const s=ensure(); s[name]=data||{}; saveSettingsDebounced(); return true; },
-    remove(name){ try{ const s=ensure(); if(Object.prototype.hasOwnProperty.call(s,name)){ delete s[name]; saveSettingsDebounced(); } }catch{} },
-    isBound(name){
-      try{
-        const d = PresetStore.readMerged(name);
-        return !!(d && d.uniqueValue && d.timestamp);
-      }catch{ return false; }
+    read(name){
+      const ext=readExt(name);
+      return sanitizeBinding(ext[BINDING_KEY])||readLegacyBinding(name);
     },
-    cleanupOrphans(){
-      try{
-        const pm=PM(); const current=new Set(pm?.getAllPresets?.()||[]); const s=ensure(); let removed=0;
-        Object.keys(s).forEach(k=>{ if(!current.has(k)){ delete s[k]; try{ Cache.remove(`preset:${k}`);}catch{} removed++; }});
-        if(removed) saveSettingsDebounced(); return removed;
-      }catch{return 0;}
+    readMerged(name){ return this.read(name); },
+    readLocal(name){ const ext=readExt(name); return sanitizeBinding(ext[BINDING_KEY]); },
+    async write(name,data){
+      const payload=sanitizeBinding(data);
+      await updateExt(name,ext=>{
+        if(payload) ext[BINDING_KEY]=payload;
+        else delete ext[BINDING_KEY];
+      });
+      return true;
     },
+    remove(name){ return updateExt(name,ext=>{ delete ext[BINDING_KEY]; }); },
+    isBound(name){ const d=this.read(name); return !!(d?.uniqueValue&&d?.timestamp); },
+    cleanupOrphans(){ return 0; },
     allBound(){
-      try{ const pm=PM(); const pmNames=pm?.getAllPresets?.()||[]; const unique=Array.from(new Set(pmNames)); return unique.filter(n=>n&&this.isBound(n)); }
-      catch{ return []; }
+      try{
+        const pm=PM(); const names=pm?.getAllPresets?.()||[];
+        return names.filter(n=>n&&this.isBound(n));
+      }catch{ return []; }
     },
+    updateExt,
+    readExt(name){ return readExt(name); },
+    REGEX_KEY,
   };
 })();
 
@@ -322,39 +398,6 @@ const PresetAdapter={
 };
 const PresetUpdater=UpdaterFactory(PresetAdapter);
 
-async function savePresetDetailInfo(name){
-  try{
-    const d=PresetStore.readMerged(name);
-    if(!name||!d?.uniqueValue||!d?.timestamp) return;
-    const pm=PresetStore.getPM();
-    const payload={ uniqueValue:String(d.uniqueValue||''), timestamp:String(d.timestamp||''), nameGroup:String(d.nameGroup||''), linkAddress:String(d.linkAddress||''), updateNote:String(d.updateNote||'') };
-    await pm?.writePresetExtensionField?.({ path: 'extensions.presetdetailnfo', value: payload, name });
-    await PresetStore.write(name, payload);
-  }catch(e){ console.error("savePresetDetailInfo failed",e); }
-}
-let _presetDetailSyncTimer=null;
-async function _presetDetailDoSync(name){
-  try{
-    const d=PresetStore.readMerged(name); if(!name||!d?.uniqueValue||!d?.timestamp) return;
-    const pm=PresetStore.getPM();
-    const payload={ uniqueValue:String(d.uniqueValue||''), timestamp:String(d.timestamp||''), nameGroup:String(d.nameGroup||''), linkAddress:String(d.linkAddress||''), updateNote:String(d.updateNote||'') };
-    await pm?.writePresetExtensionField?.({ path: 'extensions.presetdetailnfo', value: payload, name });
-    await PresetStore.write(name, payload);
-  }catch(e){ console.error("[PresetDetail] auto-sync presetdetailnfo failed",e); }
-}
-function schedulePresetDetailSync(name){
-  try{
-    if(!name || !Settings.get().enabled) return;
-    if(_presetDetailSyncTimer) clearTimeout(_presetDetailSyncTimer);
-    _presetDetailSyncTimer=setTimeout(()=>{
-      try{
-        const guard= (typeof window!=='undefined' && window.__LWB_PresetHookGuard) || { injecting:false, ignoreUntil:0 };
-        if(guard.injecting || Date.now() < (guard.ignoreUntil||0)) { console.debug('[小白X][PresetHook] 跳过 presetdetailnfo 同步：注入/冷却中'); return; }
-        _presetDetailDoSync(name);
-      }catch{}
-    },500);
-  }catch{}
-}
 
 const Popup={
   fmt(ts){ return ts?new Date(ts).toLocaleDateString():"未知"; },
@@ -394,13 +437,15 @@ Popup.showPresetOverview=async function(){
   $popup.append("<h3>预设更新总览</h3>");
   ordered.forEach((name,idx)=>{
     if(!name) return;
-    const localMerged=PresetAdapter.getLocalData(name)||{};
+  const localMerged=PresetAdapter.getLocalData(name)||{};
+  /** @type {any} */
+  const localDetail=localMerged;
     const localTs=PresetAdapter.getLocalTimestampForCompare(name)||"";
     const cloud=Cache.getCloud(PresetAdapter.toCacheKey(name))||null;
     const hasUpdate=!!(cloud?.timestamp&&cloud.timestamp!==localTs);
-    const url=(cloud?.link_address ?? localMerged?.linkAddress) || "";
+  const url=(cloud?.link_address ?? localDetail?.linkAddress) || "";
     const okUrl=url&&Tools.validUrl(url); const urlShow=okUrl?Tools.sanitize(url):"";
-    const ann=Tools.sanitize((cloud?.update_notice ?? localMerged?.updateNote) || "");
+  const ann=Tools.sanitize((cloud?.update_notice ?? localDetail?.updateNote) || "");
     const $section=$('<div class="preset-item" style="border-bottom:1px solid var(--SmartThemeBorderColor,var(--SmartThemeBodyColor,#444))"></div>');
     const $header=$(`
       <div class="preset-item-header" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;">
@@ -527,11 +572,15 @@ const Menu={
     })[type]?.();
   },
   form(type){
+    const readValue=(selector)=>{
+      const raw=$(selector).val();
+      return typeof raw==="string"?raw.trim():"";
+    };
     return {
-      password: $(`#${type}-password`).val().trim(),
-      updateNote: $(`#${type}-update-note`).val().trim() || (type==="bind"?"初始版本": type==="rebind"?"重新绑定":"版本更新"),
-      pngUrl: $(`#${type}-png-url`).val().trim(),
-      name: $(`#${type}-name`).length ? $(`#${type}-name`).val().trim() : ""
+      password: readValue(`#${type}-password`),
+      updateNote: readValue(`#${type}-update-note`) || (type==="bind"?"初始版本": type==="rebind"?"重新绑定":"版本更新"),
+      pngUrl: readValue(`#${type}-png-url`),
+      name: $(`#${type}-name`).length ? readValue(`#${type}-name`) : ""
     };
   },
   validate(type,data){
@@ -601,7 +650,7 @@ const Menu={
       try{
         $btn.prop("disabled",true).text("处理中...");
         const r=await PresetUpdater.bind(name,form);
-        if(r.success){ Tools.toast("预设绑定成功！","success","预设更新"); await savePresetDetailInfo(name); Menu.close("bind"); setTimeout(()=>PresetAdapter.onHeaderBoundState(),300); }
+  if(r.success){ Tools.toast("预设绑定成功！","success","预设更新"); Menu.close("bind"); setTimeout(()=>PresetAdapter.onHeaderBoundState(),300); }
         else Tools.toast(`操作失败: ${r.error}`,"error","预设更新");
       }finally{ $btn.prop("disabled",false).text(old); }
     })
@@ -614,7 +663,7 @@ const Menu={
         $btn.prop("disabled",true).text("处理中...");
         await PresetAdapter.setLocalData(name,{});
         const r=await PresetUpdater.bind(name,form);
-        if(r.success){ Tools.toast("预设重新绑定成功！","success","预设更新"); await savePresetDetailInfo(name); Menu.close("rebind"); setTimeout(()=>PresetAdapter.onHeaderBoundState(),300); }
+  if(r.success){ Tools.toast("预设重新绑定成功！","success","预设更新"); Menu.close("rebind"); setTimeout(()=>PresetAdapter.onHeaderBoundState(),300); }
         else Tools.toast(`操作失败: ${r.error}`,"error","预设更新");
       }finally{ $btn.prop("disabled",false).text(old); }
     })
@@ -626,7 +675,7 @@ const Menu={
       try{
         $btn.prop("disabled",true).text("处理中...");
         const r=await PresetUpdater.update(name,form,false);
-        if(r.success){ Tools.toast("预设公开更新成功！","success","预设更新"); await savePresetDetailInfo(name); Menu.close("update"); setTimeout(()=>{ PresetAdapter.onHeaderBoundState(); PresetUI.checkCurrent(); },300); }
+  if(r.success){ Tools.toast("预设公开更新成功！","success","预设更新"); Menu.close("update"); setTimeout(()=>{ PresetAdapter.onHeaderBoundState(); PresetUI.checkCurrent(); },300); }
         else Tools.toast(`操作失败: ${r.error}`,"error","预设更新");
       }finally{ $btn.prop("disabled",false).text(old); }
     })
@@ -638,7 +687,7 @@ const Menu={
       try{
         $btn.prop("disabled",true).text("静默更新中...");
         const r=await PresetUpdater.update(name,form,true);
-        if(r.success){ Tools.toast("预设静默更新成功！","success","预设更新"); await savePresetDetailInfo(name); Menu.close("update"); setTimeout(()=>{ PresetAdapter.onHeaderBoundState(); PresetUI.checkCurrent(); },300); }
+  if(r.success){ Tools.toast("预设静默更新成功！","success","预设更新"); Menu.close("update"); setTimeout(()=>{ PresetAdapter.onHeaderBoundState(); PresetUI.checkCurrent(); },300); }
         else Tools.toast(`操作失败: ${r.error}`,"error","预设更新");
       }finally{ $btn.prop("disabled",false).text(old); }
     });
@@ -652,10 +701,11 @@ const Menu={
 };
 
 const PRB=(()=>{
-  const STORAGE_KEY="presetRegexBindings";
-  function ensure(){ const parent=extension_settings[EXT_ID]=extension_settings[EXT_ID]||{}; const cu=parent.characterUpdater=parent.characterUpdater||{}; cu[STORAGE_KEY]=cu[STORAGE_KEY]||{}; return cu; }
   const pm=()=>{ try{return getPresetManager("openai");}catch{return null;} };
   const curName=()=>{ try{return pm()?.getSelectedPresetName?.()||"";}catch{return"";} };
+  /** @type {any} */
+  const toaster=globalThis.toastr;
+  const popupFn=typeof globalThis.callGenericPopup==="function"?globalThis.callGenericPopup:null;
 
   function readRegexBindingsFromBPrompt(data){
     try{
@@ -682,19 +732,38 @@ const PRB=(()=>{
     return null;
   }
 
-  const read=name=>{
-    const store = ensure()[name];
-    if (store && (Array.isArray(store.scripts) ? store.scripts.length : 0)) return store;
+  const hasScripts=(binding)=>Array.isArray(binding?.scripts) && binding.scripts.length>0;
 
-    const bCompat = readRegexBindingsFromRuntimePrompt(name);
-    if (bCompat && Array.isArray(bCompat.scripts) && bCompat.scripts.length){
-      write(name, bCompat);
-      return bCompat;
+  const read=name=>{
+    const ext=PresetStore.readExt(name);
+    let binding=fromPayload(ext?.[PresetStore.REGEX_KEY]);
+    if(hasScripts(binding)) return binding;
+
+    const runtime=readRegexBindingsFromRuntimePrompt(name);
+    if(hasScripts(runtime)){
+      PresetStore.updateExt(name,extData=>{ extData[PresetStore.REGEX_KEY]=toPayload(runtime); }).catch(()=>{});
+      return runtime;
     }
+
+    try{
+      const presetData=pm()?.getCompletionPresetByName?.(name);
+      const fallback=readRegexBindingsFromBPrompt(presetData);
+      if(hasScripts(fallback)){
+        PresetStore.updateExt(name,extData=>{ extData[PresetStore.REGEX_KEY]=toPayload(fallback); }).catch(()=>{});
+        return fallback;
+      }
+    }catch{}
 
     return { strategy:"byEmbed", scripts:[] };
   };
-  const write=(name,val)=>{ const s=ensure(); s[name]=val; saveSettingsDebounced(); };
+
+  const write=async(name,val)=>{
+    const payload=toPayload(val);
+    await PresetStore.updateExt(name,ext=>{
+      if(payload && hasScripts(fromPayload(payload))) ext[PresetStore.REGEX_KEY]=payload;
+      else delete ext[PresetStore.REGEX_KEY];
+    });
+  };
   const allRegex=()=>Array.isArray(extension_settings.regex)?extension_settings.regex:[];
   const filtered=()=>allRegex().filter(s=>/\[.+?\]-/.test(String(s?.scriptName||"")));
   const uniqMerge=(scripts)=>{
@@ -710,9 +779,36 @@ const PRB=(()=>{
   const toPayload=b=>!b?null:(b.strategy==="byName"?{ strategy:"byName", scripts:(b.scripts||[]).map(String) }:{ strategy:"byEmbed", scripts:Array.isArray(b.scripts)?b.scripts:[] });
   const fromPayload=p=>!p||typeof p!=="object"?{ strategy:"byEmbed", scripts:[] }:(p.strategy==="byName"?{ strategy:"byName", scripts:(p.scripts||[]).map(String) }:{ strategy:"byEmbed", scripts:Array.isArray(p.scripts)?p.scripts:[] });
 
-  let _prbSyncTimer=null;
-  async function _prbDoSync(name){ try{ const payload=toPayload(read(name)); write(name, fromPayload(payload)); }catch(e){ console.error("[PRB] auto-sync regexBindings failed",e); } }
-  function scheduleSync(name){ try{ if(!name || !Settings.get().enabled) return; if(_prbSyncTimer) clearTimeout(_prbSyncTimer); _prbSyncTimer=setTimeout(()=>{ _prbDoSync(name); },800);}catch{} }
+  function cloneScript(script){
+    if(script==null) return script;
+    try{ return structuredClone(script); }
+    catch{ try{ return JSON.parse(JSON.stringify(script)); }catch{ return script; } }
+  }
+
+  function refreshBindingScripts(binding){
+    if(!binding || binding.strategy!=="byEmbed") return { binding, changed:false };
+    const current=allRegex(); if(!Array.isArray(current)||!current.length) return { binding, changed:false };
+    const norm=s=>String(s??"").trim().toLowerCase();
+    const latest=new Map();
+    current.forEach(script=>{
+      const name=script?.scriptName; if(!name) return;
+      latest.set(norm(name), cloneScript(script));
+    });
+    let changed=false;
+    const refreshed=binding.scripts.map(item=>{
+      const name=typeof item==="string"?item:(item?.scriptName||"");
+      const key=norm(name); if(!key) return item;
+      const fresh=latest.get(key); if(!fresh) return item;
+      const preservedId=typeof item==="object" && item?.id ? item.id : fresh.id;
+      if(preservedId && preservedId!==fresh.id){ fresh.id=preservedId; }
+      const itemString=JSON.stringify(item);
+      const freshString=JSON.stringify(fresh);
+      if(itemString!==freshString) changed=true;
+      return fresh;
+    });
+    if(!changed) return { binding, changed:false };
+    return { binding:{ ...binding, scripts:refreshed }, changed:true };
+  }
 
   function refreshUI(){
     const name=curName(); const bind=read(name);
@@ -724,20 +820,27 @@ const PRB=(()=>{
       const chip=$('<span class="prb-chip"></span>');
       $('<span/>').text(n).appendTo(chip);
       $('<span class="remove">✕</span>').appendTo(chip);
-      chip.find(".remove").on("click",()=>{ const idx=bind.scripts.indexOf(item); if(idx>=0){ bind.scripts.splice(idx,1); write(name,bind); scheduleSync(name); refreshUI(); } });
+      chip.find(".remove").on("click",async()=>{
+        const idx=bind.scripts.indexOf(item);
+        if(idx>=0){
+          bind.scripts.splice(idx,1);
+          await write(name,bind);
+          refreshUI();
+        }
+      });
       list.append(chip);
     }
   }
   function bindUI(){
     $(document)
     .off("click.prb","#prb-header-row").on("click.prb","#prb-header-row",()=>{
-      const name=curName(); if(!name) return window.toastr?.info("请先选择一个 OpenAI 预设");
+      const name=curName(); if(!name) return toaster?.info?.("请先选择一个 OpenAI 预设");
       const bc=$("#prb-bound-container"), ac=$("#prb-actions"); const hide=bc.css("display")==="none";
       bc.css("display",hide?"block":"none"); ac.css("display",hide?"flex":"none");
     })
     .off("click.prb","#prb-add").on("click.prb","#prb-add", async ()=>{
-      const all=filtered(); if(!all.length) return window.toastr?.info("请将需要绑定的全局正则改名为该格式:[xyz]-xyz");
-      const name=curName(); if(!name) return window.toastr?.info("请先选择一个 OpenAI 预设");
+      const all=filtered(); if(!all.length) return toaster?.info?.("请将需要绑定的全局正则改名为该格式:[xyz]-xyz");
+      const name=curName(); if(!name) return toaster?.info?.("请先选择一个 OpenAI 预设");
       const bind=read(name); bind.strategy="byEmbed";
       const dlg=$("<div/>");
       dlg.append("<div><b>选择要为预设绑定的正则名称：</b><br>(限制格式为[前缀]-名称)</div>");
@@ -755,26 +858,36 @@ const PRB=(()=>{
         list.append(label);
       }
       cont.append(list); dlg.append(cont);
-      const result=await (window.callGenericPopup||callGenericPopup)?.(dlg[0],POPUP_TYPE.CONFIRM,"",{ okButton:"确定", cancelButton:"取消", wide:false, allowVerticalScrolling:true });
+      const generic=popupFn||callGenericPopup;
+      const result=await generic?.(dlg[0],POPUP_TYPE.CONFIRM,"",{ okButton:"确定", cancelButton:"取消", wide:false, allowVerticalScrolling:true });
       if(result===POPUP_RESULT.AFFIRMATIVE){
-        const checked=Array.from(dlg.find("input:checked")).map(cb=>cb.value);
+        const checked=Array.from(dlg.find("input:checked"))
+          .map(cb=>{
+            const val=$(cb).val();
+            return typeof val==="string"?val:"";
+          })
+          .filter(Boolean);
         const target=new Set(checked);
         bind.scripts=bind.scripts.filter(x=>target.has(typeof x==="string"?x:x?.scriptName));
         const existing=new Set(bind.scripts.map(x=>(typeof x==="string"?x:x?.scriptName)).filter(Boolean));
-        for(const s of all){ const n=s.scriptName||"(未命名)"; if(target.has(n)&&!existing.has(n)) bind.scripts.push(structuredClone(s)); }
-        write(name,bind); scheduleSync(name); refreshUI();
+        for(const s of all){
+          const n=s.scriptName||"(未命名)";
+          if(target.has(n)&&!existing.has(n)) bind.scripts.push(structuredClone(s));
+        }
+        await write(name,bind);
+        refreshUI();
       }
     })
     .off("click.prb","#prb-clear").on("click.prb","#prb-clear", async ()=>{
-      const name=curName(); if(!name) return window.toastr?.info("请先选择一个 OpenAI 预设");
+      const name=curName(); if(!name) return toaster?.info?.("请先选择一个 OpenAI 预设");
       const payload=read(name);
-      const binding=fromPayload(payload); if(!binding?.scripts?.length) return window.toastr?.info("该预设没有已保存的全局正则绑定");
+      const binding=fromPayload(payload); if(!binding?.scripts?.length) return toaster?.info?.("该预设没有已保存的全局正则绑定");
       const norm=s=>String(s??"").trim().toLowerCase();
       const names=new Set((binding.strategy==="byName"?binding.scripts:binding.scripts.map(x=>x?.scriptName)).filter(Boolean).map(norm));
       const before=Array.isArray(extension_settings.regex)?extension_settings.regex.length:0;
       extension_settings.regex=(extension_settings.regex||[]).filter(s=>!names.has(norm(s?.scriptName)));
       saveSettingsDebounced();
-      window.toastr?.success(`已清理全局正则：删除 ${before-(extension_settings.regex.length)} 条`);
+      toaster?.success?.(`已清理全局正则：删除 ${before-(extension_settings.regex.length)} 条`);
     });
     refreshUI();
   }
@@ -784,23 +897,21 @@ const PRB=(()=>{
       const name = PresetStore.currentName();
       if (!name) return;
 
-      preset.extensions = preset.extensions || {};
+      if(!Array.isArray(preset.prompt_order)) preset.prompt_order=[];
+      let entry=preset.prompt_order.find(item=>Number(item?.character_id)===100000);
+      if(!entry){ entry={ character_id:100000, order:[] }; preset.prompt_order.push(entry); }
+      entry.xiaobai_ext=entry.xiaobai_ext||{};
 
-      const binding = PRB.read(name);
-      if (binding && Array.isArray(binding.scripts) && binding.scripts.length){
-        preset.extensions.regexBindings = PRB.toPayload(binding);
+      let binding = PRB.read(name);
+      const refreshed = refreshBindingScripts(binding);
+      if(refreshed.changed){
+        binding = refreshed.binding;
+        PresetStore.updateExt(name,ext=>{ ext[PresetStore.REGEX_KEY]=toPayload(binding); }).catch(()=>{});
       }
+      if (hasScripts(binding)) entry.xiaobai_ext[PresetStore.REGEX_KEY]=toPayload(binding);
 
-      const d = PresetAdapter.getLocalData(name);
-      if (d && d.uniqueValue && d.timestamp){
-        preset.extensions.presetdetailnfo = {
-          uniqueValue: d.uniqueValue,
-          timestamp: d.timestamp,
-          nameGroup: d.nameGroup || "",
-          linkAddress: d.linkAddress || "",
-          updateNote: d.updateNote || ""
-        };
-      }
+      const detail = PresetAdapter.getLocalData(name);
+      if (detail && detail.uniqueValue && detail.timestamp){ entry.xiaobai_ext.binding={ ...detail }; }
     } catch (e) {
       console.warn('[PRB.onExportReady] export failed', e);
     }
@@ -808,7 +919,13 @@ const PRB=(()=>{
 
   async function onImportReady({ data, presetName }){
     try{
-      let binding = fromPayload(data?.extensions?.regexBindings);
+      const promptOrder=Array.isArray(data?.prompt_order)?data.prompt_order:[];
+      let entry=promptOrder.find(item=>Number(item?.character_id)===100000);
+      if(!entry){ entry={ character_id:100000, order:[] }; promptOrder.push(entry); }
+      entry.xiaobai_ext=entry.xiaobai_ext||{};
+      data.prompt_order=promptOrder;
+
+      let binding = fromPayload(entry.xiaobai_ext?.[PresetStore.REGEX_KEY] ?? data?.extensions?.regexBindings);
       if(!binding || !Array.isArray(binding.scripts) || binding.scripts.length===0){
         const bCompat = readRegexBindingsFromBPrompt(data);
         if(bCompat) binding = bCompat;
@@ -819,21 +936,22 @@ const PRB=(()=>{
           : binding.scripts;
         const result=uniqMerge(scripts)||{ added:0, replaced:0 };
         try{ await eventSource.emit?.(event_types.CHAT_CHANGED); }catch{}
-        if(presetName) write(presetName,binding);
-        window.toastr?.success(`已更新全局正则：新增 ${Number(result.added)||0}，替换 ${Number(result.replaced)||0}`);
+        if(presetName){ entry.xiaobai_ext[PresetStore.REGEX_KEY]=toPayload(binding); await write(presetName,binding); }
+        toaster?.success?.(`已更新全局正则：新增 ${Number(result.added)||0}，替换 ${Number(result.replaced)||0}`);
       }
       const detail=data?.extensions?.presetdetailnfo;
       if(detail && presetName){
         const current = PresetStore.read(presetName) || {};
         const merged = { ...current, uniqueValue:detail.uniqueValue||"", timestamp:detail.timestamp||"", nameGroup:detail.nameGroup||"", linkAddress:detail.linkAddress||"", updateNote:detail.updateNote||"" };
+        entry.xiaobai_ext.binding=merged;
         await PresetStore.write(presetName, merged);
         try{ PresetAdapter.onHeaderBoundState(); }catch{}
       }
     }catch{}
   }
 
-  try{ window.PRB_bindUI=bindUI; }catch{}
-  function remove(name){ try{ const s=ensure(); if(Object.prototype.hasOwnProperty.call(s,name)){ delete s[name]; saveSettingsDebounced(); } }catch{} }
+  try{ globalThis.PRB_bindUI=bindUI; }catch{}
+  async function remove(name){ await PresetStore.updateExt(name,ext=>{ delete ext[PresetStore.REGEX_KEY]; }); }
   return { bindUI, refreshUI, onExportReady, onImportReady, read, write, remove, toPayload };
 })();
 
@@ -938,23 +1056,25 @@ async function addMenusAndBind(){
   CharacterAdapter.onHeaderBoundState(); PresetAdapter.onHeaderBoundState();
   wireCharacter(); wireEvents();
   try{ cleanPresetDropdown(); }catch{}
-  try{ wirePresetCopyHooks(); }catch(e){ console.warn("[小白X] 预设扩展字段钩子初始化失败", e); }
 }
 
 function cleanup(){
-  try{ Object.entries(moduleState.eventHandlers).forEach(([evt,fn])=>{ try{ eventSource.off?.(evt,fn); }catch{} }); }catch{}
+  try{
+    const emitter=/** @type {any} */(eventSource);
+    Object.entries(moduleState.eventHandlers).forEach(([evt,fn])=>{
+      try{
+        if(typeof emitter.off==="function") emitter.off(evt,fn);
+        else if(typeof emitter.removeListener==="function") emitter.removeListener(evt,fn);
+        else emitter.removeEventListener?.(evt,fn);
+      }catch{}
+    });
+  }catch{}
   moduleState.eventHandlers={};
   try{ $(document.body).off(".cu").off(".cuClose").off(".cuOverlay").off(".cuContent").off(".preset").off(".presetClose").off(".prb"); }catch{}
   try{ $(document).off(".lwbPreset"); }catch{}
   try{ if(moduleState.observers?.presetButton){ try{ moduleState.observers.presetButton.disconnect(); }catch{} moduleState.observers.presetButton=null; } }catch{}
   try{ if(moduleState.timers?.presetAddButtonTimer){ clearTimeout(moduleState.timers.presetAddButtonTimer); moduleState.timers.presetAddButtonTimer=null; } }catch{}
   try{ if(typeof Cooldown?.stop==="function") Cooldown.stop(); }catch{}
-  try{ if(_presetDetailSyncTimer){ clearTimeout(_presetDetailSyncTimer); _presetDetailSyncTimer=null; } }catch{}
-
-  try{
-    const guard=(typeof window!=="undefined" && window.__LWB_PresetHookGuard) || null;
-    if(guard){ try{ if(guard.rebindTimer) clearTimeout(guard.rebindTimer); }catch{}; try{ if(guard.handler) eventSource.off?.(event_types.SETTINGS_UPDATED, guard.handler); }catch{}; try{ delete window.__LWB_PresetHookGuard; }catch{} }
-  }catch{}
   try{ $(".character-menu-overlay, #character-updater-edit-button, .character-update-notification, .xiaobaix-confirm-modal").remove(); }catch{}
   try{ $("#preset-updater-edit-button, #preset-updater-green-style").remove(); }catch{}
   try{ cleanPresetDropdown(); }catch{}
@@ -964,277 +1084,12 @@ function cleanup(){
 
 async function initCharacterUpdater(){
   if(moduleState.isInitialized) return;
-  try{ window.registerModuleCleanup && window.registerModuleCleanup(MODULE_NAME,cleanup); }catch{}
+  try{
+    const registrar=/** @type {any} */ (globalThis).registerModuleCleanup;
+    if(typeof registrar==="function") registrar(MODULE_NAME,cleanup);
+  }catch{}
   await addMenusAndBind();
   moduleState.isInitialized=true;
 }
 
 export { initCharacterUpdater };
-
-function wirePresetCopyHooks(){
-  const pm = PresetStore.getPM();
-  if(!pm){ console.debug('[小白X] 未找到 OpenAI 预设管理器，跳过扩展字段钩子'); return; }
-
-  const HookState = {
-    pending:null, injecting:false, ignoreUntil:0, lastTarget:null, lastAt:0, handler:null, rebindTimer:null,
-    beforeSet:null,
-    snapshot:null,
-  };
-  try{ if(typeof window!=='undefined'){ window.__LWB_PresetHookGuard = HookState; } }catch{}
-
-  const getAllNames = ()=> {
-    try{ return new Set(pm?.getAllPresets?.() || []); }catch{ return new Set(); }
-  };
-  const diffNames = (aSet, bSet)=>{
-    const add=[], del=[];
-    for(const n of bSet) if(!aSet.has(n)) add.push(n);
-    for(const n of aSet) if(!bSet.has(n)) del.push(n);
-    return { add, del };
-  };
-  const deep = (x)=>{ try{ return structuredClone(x); }catch{ try{ return JSON.parse(JSON.stringify(x)); }catch{ return x; } } };
-
-  const setPending = (op)=>{
-    const now = Date.now();
-
-    if (HookState.pending?.op === 'rename' && op !== 'delete') {
-      console.debug('[小白X][PresetHook] 忽略：rename pending 中，丢弃', op);
-      return;
-    }
-
-    if (HookState.pending && now - HookState.pending.at < 2500) {
-      if (HookState.pending.op === 'rename' && op !== 'delete') {
-        console.debug('[小白X][PresetHook] 忽略：窗口内 rename 优先，丢弃', op);
-        return;
-      }
-    }
-
-    const before = PresetStore.currentName();
-    HookState.pending = { op, before, at: now };
-
-    if (op === 'rename') {
-      HookState.beforeSet = getAllNames();
-      const d = PresetStore.readMerged(before) || {};
-      HookState.snapshot = {
-        nameFrom: before,
-        regexBindings: deep(PRB.read(before)),
-        presetDetail: {
-          uniqueValue: String(d.uniqueValue || ''),
-          timestamp: String(d.timestamp || ''),
-          nameGroup: String(d.nameGroup || ''),
-          linkAddress: String(d.linkAddress || ''),
-          updateNote: String(d.updateNote || ''),
-        },
-      };
-    }
-
-    console.debug('[小白X][PresetHook] 捕获操作', op, 'before=', before);
-  };
-
-  $(document)
-    .off('click.lwbPreset', '#update_oai_preset')
-    .on('click.lwbPreset', '#update_oai_preset', () => {
-      if (HookState.pending?.op === 'rename') {
-        console.debug('[小白X][PresetHook] 忽略 save：rename pending 中');
-        return;
-      }
-      setPending('save');
-    })
-    .off('click.lwbPreset', '#new_oai_preset')
-    .on('click.lwbPreset', '#new_oai_preset', () => {
-      if (HookState.pending?.op === 'rename') {
-        console.debug('[小白X][PresetHook] 忽略 saveAs：rename pending 中');
-        return;
-      }
-      setPending('saveAs');
-    })
-    .off('click.lwbPreset', '[data-preset-manager-rename="openai"]')
-    .on('click.lwbPreset', '[data-preset-manager-rename="openai"]', () => setPending('rename'))
-    .off('click.lwbPreset', '#delete_oai_preset')
-    .on('click.lwbPreset', '#delete_oai_preset', () => setPending('delete'));
-
-  async function injectTo(nameFrom, nameTo, snapshot) {
-    try {
-      if (!nameTo) return;
-
-      let binding = snapshot?.regexBindings ?? PRB.read(nameFrom);
-      if (binding && (Array.isArray(binding.scripts) ? binding.scripts.length : 0)) {
-        try {
-          PRB.write(nameTo, binding);
-        } catch (err) {
-          console.warn('[小白X][PresetHook] 注入 regexBindings 失败', err);
-        }
-      } else {
-        console.debug('[小白X][PresetHook] 源无 regexBindings 可复制:', nameFrom);
-      }
-
-      let detail = snapshot?.presetDetail;
-      if (!detail) {
-        const d = PresetStore.readMerged(nameFrom);
-        if (d && (d.uniqueValue || d.timestamp)) {
-          detail = {
-            uniqueValue: String(d.uniqueValue || ''),
-            timestamp: String(d.timestamp || ''),
-            nameGroup: String(d.nameGroup || ''),
-            linkAddress: String(d.linkAddress || ''),
-            updateNote: String(d.updateNote || ''),
-          };
-        }
-      }
-      if (detail) {
-        try {
-          await PresetStore.write(nameTo, detail);
-        } catch {}
-        const pmInst = PresetStore.getPM?.();
-        if (pmInst?.writePresetExtensionField) {
-          try {
-            await pmInst.writePresetExtensionField({ path: 'extensions.presetdetailnfo', value: detail, name: nameTo });
-          } catch (e) {
-            console.warn('[小白X][PresetHook] 写回 presetdetailnfo 到文件失败', e);
-          }
-        }
-      } else {
-        console.debug('[小白X][PresetHook] 源无 presetdetailnfo 可复制:', nameFrom);
-      }
-    } catch (e) {
-      console.error('[小白X][PresetHook] 注入异常', e);
-    }
-  }
-
-  function cleanupOld(name) {
-    try {
-      PRB.remove(name);
-    } catch {}
-    try {
-      PresetStore.remove(name);
-    } catch {}
-    try {
-      Cache.remove(`preset:${name}`);
-    } catch {}
-    console.debug('[小白X][PresetHook] 已清理旧预设扩展存储:', name);
-  }
-
-  const afterHandler = async () => {
-    try {
-      const now = Date.now();
-      if (HookState.injecting) return;
-      if (now < HookState.ignoreUntil) return;
-      if (!HookState.pending) return;
-
-      const op = HookState.pending.op;
-      const before = HookState.pending.before;
-      const after = PresetStore.currentName();
-
-      if (op === 'rename') {
-        const beforeSet = HookState.beforeSet || getAllNames();
-        const afterSet = getAllNames();
-        const { add, del } = diffNames(beforeSet, afterSet);
-
-        if (add.length === 1 && del.length === 1) {
-          console.debug('[小白X][PresetHook] 识别为重命名:', del[0], '=>', add[0]);
-          HookState.injecting = true;
-          try {
-            eventSource.off?.(event_types.SETTINGS_UPDATED, HookState.handler);
-          } catch {}
-          setTimeout(async () => {
-            try {
-              await injectTo(del[0], add[0], HookState.snapshot);
-              cleanupOld(del[0]);
-              try {
-                PRB.refreshUI();
-              } catch {}
-              try {
-                PresetAdapter.onHeaderBoundState();
-              } catch {}
-              try {
-                PresetUI.checkCurrent();
-              } catch {}
-              HookState.lastTarget = add[0];
-              HookState.lastAt = Date.now();
-              try {
-                if (add[0]) setTimeout(() => { try { savePresetDetailInfo(add[0]); } catch {} }, 200);
-              } catch {}
-            } finally {
-              HookState.pending = null;
-              HookState.beforeSet = null;
-              HookState.snapshot = null;
-              HookState.injecting = false;
-              HookState.ignoreUntil = Date.now() + 1500;
-              if (HookState.rebindTimer) clearTimeout(HookState.rebindTimer);
-              HookState.rebindTimer = setTimeout(() => {
-                try {
-                  eventSource.on(event_types.SETTINGS_UPDATED, HookState.handler);
-                } catch {}
-              }, 800);
-            }
-          }, 300);
-          return;
-        }
-
-        console.debug('[小白X][PresetHook] rename 差异未锁定，回退到 before/after 名:', before, '=>', after);
-      }
-
-      if ((op === 'saveAs' || op === 'rename') && before === after) {
-        HookState.pending = null;
-        HookState.beforeSet = null;
-        HookState.snapshot = null;
-        return;
-      }
-      if (HookState.lastTarget === after && (now - HookState.lastAt) < 2000) {
-        HookState.pending = null;
-        HookState.beforeSet = null;
-        HookState.snapshot = null;
-        return;
-      }
-
-      HookState.injecting = true;
-      try {
-        eventSource.off?.(event_types.SETTINGS_UPDATED, HookState.handler);
-      } catch {}
-      setTimeout(async () => {
-        try {
-          if (op === 'delete') {
-            if (before) cleanupOld(before);
-          } else {
-            await injectTo(before, after, op === 'rename' ? HookState.snapshot : null);
-            if (op === 'rename' && before && after && before !== after) {
-              cleanupOld(before);
-            }
-          }
-          try {
-            PRB.refreshUI();
-          } catch {}
-          try {
-            PresetAdapter.onHeaderBoundState();
-          } catch {}
-          try {
-            PresetUI.checkCurrent();
-          } catch {}
-          HookState.lastTarget = after;
-          HookState.lastAt = Date.now();
-          try {
-            if (after) { setTimeout(() => { try { savePresetDetailInfo(after); } catch {} }, 200); }
-          } catch {}
-        } finally {
-          HookState.pending = null;
-          HookState.beforeSet = null;
-          HookState.snapshot = null;
-          HookState.injecting = false;
-          HookState.ignoreUntil = Date.now() + 1500;
-          if (HookState.rebindTimer) clearTimeout(HookState.rebindTimer);
-          HookState.rebindTimer = setTimeout(() => {
-            try {
-              eventSource.on(event_types.SETTINGS_UPDATED, HookState.handler);
-            } catch {}
-          }, 800);
-        }
-      }, 700);
-    } catch (e) {
-      console.warn('[小白X][PresetHook] AFTER 处理失败', e);
-    }
-  };
-
-  HookState.handler = afterHandler;
-  try {
-    eventSource.on(event_types.SETTINGS_UPDATED, HookState.handler);
-  } catch {}
-}
