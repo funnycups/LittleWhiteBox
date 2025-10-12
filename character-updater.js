@@ -396,7 +396,7 @@ const PresetAdapter={
     }catch{}
     $name.text(displayName);
     let bound=false; try{ const local=PresetStore.readMerged(name); bound=!!(local?.uniqueValue && local?.timestamp); }catch{}
-    $status.removeClass().addClass(bound?"bound":"unbound").text(bound?"已绑定":"未绑定");
+    $status.removeClass().addClass(bound?"bound":"unbound").text(bound?"已绑定":"未提醒");
     if(!bound) this.onUpdateIndicator(name,false);
   },
   afterBatch(updates){
@@ -537,7 +537,7 @@ const PresetUI={
     btn.on("click",async ()=>{
       const name=PresetAdapter.getCurrentId();
       if(!name) return Tools.toast("未选择预设","warning","预设更新");
-      if(!PresetAdapter.isBound(name)) return Tools.toast("该预设尚未绑定，请长按“当前预设”3秒绑定","info","预设更新");
+      if(!PresetAdapter.isBound(name)) return Tools.toast("该预设尚未有更新提醒，请长按“当前预设”3秒绑定","info","预设更新");
       try{ await Popup.showPresetOverview(); }catch(e){ console.error("显示预设信息失败",e); Tools.toast("显示预设信息失败","error","预设更新"); }
     });
     $c.append(btn); this.ensureGreenCSS();
@@ -650,7 +650,7 @@ const Menu={
     }
     Press.bind(t,
       (e)=>{ e.stopPropagation(); const name=PresetAdapter.getCurrentId(); if(!name) return Tools.toast("未选择预设","warning","预设更新"); presetHeader(PresetAdapter.isBound(name)?"rebind":"bind"); },
-      (e)=>{ e.stopPropagation(); const name=PresetAdapter.getCurrentId(); if(!name) return Tools.toast("未选择预设","warning","预设更新"); if(PresetAdapter.isBound(name)) presetHeader("update"); else Tools.toast("预设尚未绑定，请长按3秒进行绑定","info","预设更新"); }
+      (e)=>{ e.stopPropagation(); const name=PresetAdapter.getCurrentId(); if(!name) return Tools.toast("未选择预设","warning","预设更新"); if(PresetAdapter.isBound(name)) presetHeader("update"); else Tools.toast("预设尚未设置更新提醒，请长按3秒进行绑定设置","info","预设更新"); }
     );
 
     $(document.body)

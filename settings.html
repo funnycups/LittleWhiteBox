@@ -1,511 +1,767 @@
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
 <div class="inline-drawer">
-    <div class="inline-drawer-toggle inline-drawer-header">
-        <b>小白X</b>
-        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-    </div>
-    <div class="inline-drawer-content">
-        <div class="littlewhitebox settings-grid">
-            <div class="settings-menu-vertical">
-                <div class="menu-tab active" data-target="js-memory" style="border-bottom:1px solid #303030;"><span class="vertical-text">渲染交互</span></div>
-                <div class="menu-tab" data-target="task" style="border-bottom:1px solid #303030;"><span class="vertical-text">循环任务</span></div>
-                <div class="menu-tab" data-target="template" style="border-bottom:1px solid #303030;"><span class="vertical-text">数据互动</span></div>
-                <div class="menu-tab" data-target="wallhaven" style="border-bottom:1px solid #303030;"><span class="vertical-text">辅助工具</span></div>
-            </div>
-            <div class="settings-content">
-                <div class="js-memory settings-section" style="display:block;">
-                    <div class="section-divider" style="margin-bottom:0;margin-top:0;">总开关</div>
-                    <hr class="sysHR" />
-                    <div class="flex-container alignItemsCenter" style="gap:8px;flex-wrap:wrap;">
-                        <input type="checkbox" id="xiaobaix_enabled" />
-                        <label for="xiaobaix_enabled" class="has-tooltip" data-tooltip="渲染被```包裹的html、!DOCTYPE、script的代码块内容为交互式界面
+  <div class="inline-drawer-toggle inline-drawer-header">
+    <b>小白X</b>
+    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+  </div>
+  <div class="inline-drawer-content">
+    <div class="littlewhitebox settings-grid">
+      <div class="settings-menu-vertical">
+        <div class="menu-tab active" data-target="js-memory" style="border-bottom:1px solid #303030;"><span
+            class="vertical-text">渲染交互</span></div>
+        <div class="menu-tab" data-target="task" style="border-bottom:1px solid #303030;"><span
+            class="vertical-text">循环任务</span></div>
+        <div class="menu-tab" data-target="template" style="border-bottom:1px solid #303030;"><span
+            class="vertical-text">数据互动</span></div>
+        <div class="menu-tab" data-target="wallhaven" style="border-bottom:1px solid #303030;"><span
+            class="vertical-text">辅助工具</span></div>
+      </div>
+      <div class="settings-content">
+        <div class="js-memory settings-section" style="display:block;">
+          <div class="section-divider" style="margin-bottom:0;margin-top:0;">总开关</div>
+          <hr class="sysHR" />
+          <div class="flex-container alignItemsCenter" style="gap:8px;flex-wrap:wrap;">
+            <input type="checkbox" id="xiaobaix_enabled" />
+            <label for="xiaobaix_enabled" class="has-tooltip" data-tooltip="渲染被```包裹的html、!DOCTYPE、script的代码块内容为交互式界面
 
                         提供STscript(command)异步函数执行酒馆命令:
 
                         await STscript('/echo 你好世界！')">启用小白X</label>
-                        <button id="xiaobaix_info_btn" class="menu_button menu_button_icon" type="button" title="查看功能与更新公告">
-                            <i class="fa-solid fa-circle-info"></i>
-                            <small>公告</small>
-                        </button>
-                    </div>
-                    <div class="section-divider">渲染模式
-                        <hr class="sysHR" />
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_sandbox" />
-                        <label for="xiaobaix_sandbox">沙盒模式</label>
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_use_blob" />
-                        <label for="xiaobaix_use_blob" class="has-tooltip" data-tooltip="可以常开，尤其是超大型html（1mb以上）也能极速完成渲染">启用Blob渲染</label>
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="Wrapperiframe" />
-                        <label for="Wrapperiframe" class="has-tooltip" data-tooltip="按需在 iframe 中注入 Wrapperiframe.js">启用封装函数</label>
-                    </div>
-                    <div class="flex-container alignItemsCenter" style="gap:8px;flex-wrap:wrap;">
-                        <input type="checkbox" id="xiaobaix_audio_enabled" />
-                        <label for="xiaobaix_audio_enabled" style="margin-top:0;">启用音频</label>
-                    </div>
-                    <br>
-                    <div class="section-divider">流式，非基础的渲染
-                        <hr class="sysHR" />
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_template_enabled" />
-                        <label for="xiaobaix_template_enabled" class="has-tooltip" data-tooltip="流式多楼层动态渲染">启用沉浸式模板</label>
-                    </div>
-                    <div id="current_template_settings">
-                        <div class="template-replacer-header">
-                            <div class="template-replacer-title">当前角色模板设置</div>
-                            <div class="template-replacer-controls">
-                                <button id="open_template_editor" class="menu_button menu_button_icon">
-                                    <i class="fa-solid fa-pen-to-square"></i>
-                                    <small>编辑模板</small>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="template-replacer-status" id="template_character_status">
-                            请选择一个角色
-                        </div>
-                    </div>
-                    <div class="section-divider">功能说明
-                        <hr class="sysHR" />
-                    </div>
-                    <div class="flex-container alignItemsCenter" style="gap:8px;flex-wrap:wrap;">
-                        <div><a href="https://docs.littlewhitebox.qzz.io/" class="download-link" target="_blank">功能文档</a></div>
-                        <button id="xiaobaix_reset_btn" class="menu_button menu_button_icon" type="button" title="把小白X的功能按钮重置回默认功能设定">
-                            <small>默认开关</small>
-                        </button>
-                        <button id="xiaobaix_xposition_btn" class="menu_button menu_button_icon" type="button" title="切换X按钮的位置，仅两种">
-                            <small>X按钮:右</small>
-                        </button>
-                    </div>
-                </div>
-                <div class="wallhaven settings-section" style="display:none;">
-                    <div class="section-divider">提示更新及绑定对应角色卡
-                        <hr class="sysHR" />
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="character_updater_enabled" />
-                        <label for="character_updater_enabled" class="has-tooltip" data-tooltip="启用预设/角色卡推送通知及更新提示功能">启用预设/角色卡更新提示</label>
-                    </div>
-                    <div class="current-character-info" id="current-character-info-trigger" title="单击更新角色，长按3秒绑定/重绑定">
-                        <span>角色：</span><span id="current-character-name" class="current-character-name">未选择角色</span>
-                        <span id="current-character-status" class="character-status"></span>
-                    </div>
-                    <div class="current-character-info" id="current-preset-info-trigger" title="单击更新预设，长按3秒绑定/重绑定">
-                        <span>预设：</span><span id="prb-current-preset" class="current-character-name" style="font-size:0.8em;">未选择预设</span>
-                        <span id="current-preset-status" class="preset-status"></span>
-                    </div>
-                    <div class="marginTop" style="border:5px inset var(--SmartThemeBorderColor);padding-bottom:3px;cursor:pointer;justify-content:center;">
-                        <div id="prb-header-row" class="flex-container alignItemsCenter" style="justify-content:center;margin-bottom:3px;">
-                            <label style="cursor:pointer;">展开预设绑定正则设置</label>
-                        </div>
-                        <div id="prb-bound-container" style="display:none;align-items:center;border:1px solid var(--SmartThemeBorderColor);padding-bottom:3px;">
-                            <div class="marginTopSmall" style="padding:5px;">已绑定正则：</div>
-                            <div id="prb-bound-list" class="prb-list" style="line-height:1.5;"></div>
-                        </div>
-                        <div id="prb-actions" class="prb-actions" style="display:none;">
-                            <button id="prb-add" class="menu_button">绑定<br></button>
-                            <button id="prb-clear" class="menu_button danger">删除REGEX插件正则</button>
-                        </div>
-                    </div>
-                    <br>
-                    <div class="section-divider">消息日志与拦截
-                        <hr class="sysHR">
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_recorded_enabled" />
-                        <label for="xiaobaix_recorded_enabled" class="has-tooltip" data-tooltip="每条消息添加图标，点击可看到发送给时AI的记录">Log记录</label>
-                        <input type="checkbox" id="xiaobaix_preview_enabled" />
-                        <label for="xiaobaix_preview_enabled" class="has-tooltip" data-tooltip="在聊天框显示图标，点击可拦截将发送给AI的消息并显示">Log拦截</label>
-                    </div>
-                    <div class="section-divider">写卡AI
-                        <hr class="sysHR" />
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_script_assistant" />
-                        <label for="xiaobaix_script_assistant" class="has-tooltip" data-tooltip="勾选后，AI将获取小白X功能和ST脚本语言知识，内置 STscript 语法与示例，帮助您创作角色卡">启用写卡助手</label>
-                    </div>
-                    <div class="section-divider">视觉增强
-                        <hr class="sysHR" />
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_immersive_enabled" />
-                        <label for="xiaobaix_immersive_enabled" class="has-tooltip" data-tooltip="重构界面布局与细节优化">沉浸布局显示(边框窄化)</label>
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="wallhaven_enabled" />
-                        <label for="wallhaven_enabled" class="has-tooltip" data-tooltip="AI回复时自动提取消息内容，转换为标签并获取Wallhaven图片作为聊天背景">自动消息配背景图</label>
-                    </div>
-                    <div id="wallhaven_settings_container" style="display:none;">
-                        <div class="flex-container">
-                            <input type="checkbox" id="wallhaven_bg_mode" />
-                            <label for="wallhaven_bg_mode">背景图模式（纯场景）</label>
-                        </div>
-                        <div class="flex-container">
-                            <label for="wallhaven_category" id="section-font">图片分类:</label>
-                            <select id="wallhaven_category" class="text_pole">
-                                <option value="010">动漫漫画</option>
-                                <option value="111">全部类型</option>
-                                <option value="001">人物写真</option>
-                                <option value="100">综合壁纸</option>
-                            </select>
-                        </div>
-                        <div class="flex-container">
-                            <label for="wallhaven_purity" id="section-font">内容分级:</label>
-                            <select id="wallhaven_purity" class="text_pole">
-                                <option value="100">仅 SFW</option>
-                                <option value="010">仅 Sketchy (轻微)</option>
-                                <option value="110">SFW + Sketchy</option>
-                                <option value="001">仅 NSFW</option>
-                                <option value="011">Sketchy + NSFW</option>
-                                <option value="111">全部内容</option>
-                            </select>
-                        </div>
-                        <div class="flex-container">
-                            <label for="wallhaven_opacity" id="section-font">黑纱透明度: <span id="wallhaven_opacity_value">30%</span></label>
-                            <input type="range" id="wallhaven_opacity" min="0" max="0.8" step="0.1" value="0.3" class="wide50p" />
-                        </div>
-                        <hr class="sysHR">
-                        <div class="flex-container">
-                            <input type="text" id="wallhaven_custom_tag_input" placeholder="输入英文标签，如: beautiful girl" class="text_pole wide50p" />
-                            <button id="wallhaven_add_custom_tag" class="menu_button" type="button" style="width:auto;">+自定义TAG</button>
-                        </div>
-                        <div id="wallhaven_custom_tags_container" class="custom-tags-container">
-                            <div id="wallhaven_custom_tags_list" class="custom-tags-list"></div>
-                        </div>
-                    </div>
-                </div>
-                <div class="task settings-section" style="display:none;">
-                    <div class="section-divider">循环任务
-                        <hr class="sysHR" />
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="scheduled_tasks_enabled" />
-                        <label for="scheduled_tasks_enabled" class="has-tooltip" data-tooltip="自动执行设定好的斜杠命令
+            <button id="xiaobaix_info_btn" class="menu_button menu_button_icon" type="button" title="查看功能与更新公告">
+              <i class="fa-solid fa-circle-info"></i>
+              <small>公告</small>
+            </button>
+          </div>
+          <div class="section-divider">渲染模式
+            <hr class="sysHR" />
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_sandbox" />
+            <label for="xiaobaix_sandbox">沙盒模式</label>
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_use_blob" />
+            <label for="xiaobaix_use_blob" class="has-tooltip"
+              data-tooltip="可以常开，尤其是超大型html（1mb以上）也能极速完成渲染">启用Blob渲染</label>
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="Wrapperiframe" />
+            <label for="Wrapperiframe" class="has-tooltip" data-tooltip="按需在 iframe 中注入 Wrapperiframe.js">启用封装函数</label>
+          </div>
+          <div class="flex-container alignItemsCenter" style="gap:8px;flex-wrap:wrap;">
+            <input type="checkbox" id="xiaobaix_audio_enabled" />
+            <label for="xiaobaix_audio_enabled" style="margin-top:0;">启用音频</label>
+          </div>
+          <br>
+          <div class="section-divider">流式，非基础的渲染
+            <hr class="sysHR" />
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_template_enabled" />
+            <label for="xiaobaix_template_enabled" class="has-tooltip" data-tooltip="流式多楼层动态渲染">启用沉浸式模板</label>
+          </div>
+          <div id="current_template_settings">
+            <div class="template-replacer-header">
+              <div class="template-replacer-title">当前角色模板设置</div>
+              <div class="template-replacer-controls">
+                <button id="open_template_editor" class="menu_button menu_button_icon">
+                  <i class="fa-solid fa-pen-to-square"></i>
+                  <small>编辑模板</small>
+                </button>
+              </div>
+            </div>
+            <div class="template-replacer-status" id="template_character_status">
+              请选择一个角色
+            </div>
+          </div>
+          <div class="section-divider">功能说明
+            <hr class="sysHR" />
+          </div>
+          <div class="flex-container alignItemsCenter" style="gap:8px;flex-wrap:wrap;">
+            <div><a href="https://docs.littlewhitebox.qzz.io/" class="download-link" target="_blank">功能文档</a></div>
+            <button id="xiaobaix_reset_btn" class="menu_button menu_button_icon" type="button"
+              title="把小白X的功能按钮重置回默认功能设定">
+              <small>默认开关</small>
+            </button>
+            <button id="xiaobaix_xposition_btn" class="menu_button menu_button_icon" type="button" title="切换X按钮的位置，仅两种">
+              <small>X按钮:右</small>
+            </button>
+          </div>
+        </div>
+        <div class="wallhaven settings-section" style="display:none;">
+          <div class="section-divider">提示更新及绑定对应角色卡
+            <hr class="sysHR" />
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="character_updater_enabled" />
+            <label for="character_updater_enabled" class="has-tooltip"
+              data-tooltip="启用预设/角色卡推送通知及更新提示功能">启用预设/角色卡更新提醒</label>
+          </div>
+          <div class="current-character-info" id="current-character-info-trigger" title="单击更新角色提醒，长按3秒绑定/重绑定">
+            <span>角色：</span><span id="current-character-name" class="current-character-name">未选择角色</span>
+            <span id="current-character-status" class="character-status"></span>
+          </div>
+          <div class="current-character-info" id="current-preset-info-trigger" title="单击设置预设更新提醒，长按3秒绑定预设提醒/重绑定预设提醒">
+            <span>预设：</span><span id="prb-current-preset" class="current-character-name"
+              style="font-size:0.8em;">该预设无更新状态</span>
+            <span id="current-preset-status" class="preset-status"></span>
+          </div>
+          <div class="section-divider">预设正则绑定区
+          </div>
+          <div class="marginTop"
+            style="border:5px inset var(--SmartThemeBorderColor);padding-bottom:3px;cursor:pointer;justify-content:center;">
+            <div id="prb-header-row" class="flex-container alignItemsCenter"
+              style="justify-content:center;margin-bottom:3px;">
+              <label style="cursor:pointer;">展开预设绑定正则设置</label>
+            </div>
+            <div id="prb-bound-container"
+              style="display:none;align-items:center;border:1px solid var(--SmartThemeBorderColor);padding-bottom:3px;">
+              <div class="marginTopSmall" style="padding:5px;">已绑定正则：</div>
+              <div id="prb-bound-list" class="prb-list" style="line-height:1.5;"></div>
+            </div>
+            <div id="prb-actions" class="prb-actions" style="display:none;">
+              <button id="prb-add" class="menu_button">绑定<br></button>
+              <button id="prb-clear" class="menu_button danger">删除REGEX插件正则</button>
+            </div>
+          </div>
+          <br>
+          <div class="section-divider">消息日志与拦截
+            <hr class="sysHR">
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_recorded_enabled" />
+            <label for="xiaobaix_recorded_enabled" class="has-tooltip"
+              data-tooltip="每条消息添加图标，点击可看到发送给时AI的记录">Log记录</label>
+            <input type="checkbox" id="xiaobaix_preview_enabled" />
+            <label for="xiaobaix_preview_enabled" class="has-tooltip"
+              data-tooltip="在聊天框显示图标，点击可拦截将发送给AI的消息并显示">Log拦截</label>
+          </div>
+          <div class="section-divider">写卡AI
+            <hr class="sysHR" />
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_script_assistant" />
+            <label for="xiaobaix_script_assistant" class="has-tooltip"
+              data-tooltip="勾选后，AI将获取小白X功能和ST脚本语言知识，内置 STscript 语法与示例，帮助您创作角色卡">启用写卡助手</label>
+          </div>
+          <div class="section-divider">视觉增强
+            <hr class="sysHR" />
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_immersive_enabled" />
+            <label for="xiaobaix_immersive_enabled" class="has-tooltip" data-tooltip="重构界面布局与细节优化">沉浸布局显示(边框窄化)</label>
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="wallhaven_enabled" />
+            <label for="wallhaven_enabled" class="has-tooltip"
+              data-tooltip="AI回复时自动提取消息内容，转换为标签并获取Wallhaven图片作为聊天背景">自动消息配背景图</label>
+          </div>
+          <div id="wallhaven_settings_container" style="display:none;">
+            <div class="flex-container">
+              <input type="checkbox" id="wallhaven_bg_mode" />
+              <label for="wallhaven_bg_mode">背景图模式（纯场景）</label>
+            </div>
+            <div class="flex-container">
+              <label for="wallhaven_category" id="section-font">图片分类:</label>
+              <select id="wallhaven_category" class="text_pole">
+                <option value="010">动漫漫画</option>
+                <option value="111">全部类型</option>
+                <option value="001">人物写真</option>
+                <option value="100">综合壁纸</option>
+              </select>
+            </div>
+            <div class="flex-container">
+              <label for="wallhaven_purity" id="section-font">内容分级:</label>
+              <select id="wallhaven_purity" class="text_pole">
+                <option value="100">仅 SFW</option>
+                <option value="010">仅 Sketchy (轻微)</option>
+                <option value="110">SFW + Sketchy</option>
+                <option value="001">仅 NSFW</option>
+                <option value="011">Sketchy + NSFW</option>
+                <option value="111">全部内容</option>
+              </select>
+            </div>
+            <div class="flex-container">
+              <label for="wallhaven_opacity" id="section-font">黑纱透明度: <span
+                  id="wallhaven_opacity_value">30%</span></label>
+              <input type="range" id="wallhaven_opacity" min="0" max="0.8" step="0.1" value="0.3" class="wide50p" />
+            </div>
+            <hr class="sysHR">
+            <div class="flex-container">
+              <input type="text" id="wallhaven_custom_tag_input" placeholder="输入英文标签，如: beautiful girl"
+                class="text_pole wide50p" />
+              <button id="wallhaven_add_custom_tag" class="menu_button" type="button"
+                style="width:auto;">+自定义TAG</button>
+            </div>
+            <div id="wallhaven_custom_tags_container" class="custom-tags-container">
+              <div id="wallhaven_custom_tags_list" class="custom-tags-list"></div>
+            </div>
+          </div>
+        </div>
+        <div class="task settings-section" style="display:none;">
+          <div class="section-divider">循环任务
+            <hr class="sysHR" />
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="scheduled_tasks_enabled" />
+            <label for="scheduled_tasks_enabled" class="has-tooltip" data-tooltip="自动执行设定好的斜杠命令
                         输入/xbqte {{任务名称}}可以手动激活任务
                         导出/入角色卡时, 角色任务会随角色卡一起导出/入">启用循环任务</label>
-                    </div>
-                    <div class="flex-container">
-                        <div id="add_global_task" class="menu_button menu_button_icon" title="添加全局任务">
-                            <i class="fa-solid fa-plus"></i>
-                            <small>+全局</small>
-                        </div>
-                        <div id="add_character_task" class="menu_button menu_button_icon" title="添加角色任务">
-                            <i class="fa-solid fa-user-plus"></i>
-                            <small>+角色</small>
-                        </div>
-                        <div id="toggle_task_bar" class="menu_button menu_button_icon" title="显示/隐藏任务栏">
-                            <small>任务栏</small>
-                        </div>
-                    </div>
-                    <div id="global_tasks_block" class="padding5">
-                        <div class="flex-container alignItemsCenter">
-                            <strong>全局任务</strong>
-                            <div class="flex-container">
-                                <div id="import_global_tasks" class="menu_button menu_button_icon" title="导入全局任务">
-                                    <i class="fa-solid fa-download"></i>
-                                    <small>导入</small>
-                                </div>
-                                <div id="cloud_tasks_button" class="menu_button menu_button_icon" title="从云端获取任务脚本">
-                                    <i class="fa-solid fa-cloud"></i>
-                                    <small>任务下载</small>
-                                </div>
-                            </div>
-                        </div>
-                        <small>这些任务在所有角色中的聊天都会执行</small>
-                        <div id="global_tasks_list" class="flex-container task-container flexFlowColumn"></div>
-                    </div>
-                    <hr />
-                    <div id="character_tasks_block" class="padding5">
-                        <div><strong>角色任务</strong></div>
-                        <small>这些任务只在当前角色的聊天中执行</small>
-                        <div id="character_tasks_list" class="flex-container task-container flexFlowColumn"></div>
-                    </div>
-                    <input type="file" id="import_tasks_file" accept=".json" style="display:none;" />
-                    <hr class="sysHR">
-                </div>
-                <div class="template settings-section" style="display:none;">
-                    <div class="section-divider">角色好感度统计及设定</div>
-                    <hr class="sysHR" />
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_memory_enabled" />
-                        <label for="xiaobaix_memory_enabled" class="has-tooltip" data-tooltip="启用后将统计消息数据">启用好感度统计</label>
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_memory_inject" />
-                        <label for="xiaobaix_memory_inject" class="has-tooltip" data-tooltip="将统计信息注入到提示词中">注入到提示词 深度</label><input type="number" id="xiaobaix_memory_depth" min="1" max="20" class="dark-number-input" />
-                    </div>
-                    <br>
-                    <div class="section-divider">分析/改善AI回复</div>
-                    <hr class="sysHR" />
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_dynamic_prompt_enabled" />
-                        <label for="xiaobaix_dynamic_prompt_enabled" class="has-tooltip" data-tooltip="对用户和AI的文字指纹分析，并注入改进提示词">动态提示词</label>
-                    </div>
-                    <br>
-                    <div class="section-divider">变量控制､世界书执行</div>
-                    <hr class="sysHR" />
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_variables_core_enabled" />
-                        <label for="xiaobaix_variables_core_enabled">剧情管理</label>
-                    </div>
-                    <div class="flex-container">
-                        <input type="checkbox" id="xiaobaix_variables_panel_enabled" />
-                        <label for="xiaobaix_variables_panel_enabled">变量面板</label>
-                    </div>
-                </div>
+          <div id="toggle_task_bar" class="menu_button menu_button_icon" style="margin: 0px; margin-left: auto;" title="显示/隐藏按钮栏">
+            <small>按钮栏</small>
+          </div>
+          </div>
+          <hr class="sysHR" />
+          <div class="flex-container task-tab-bar">
+            <div class="task-tab active" data-target="global_tasks_block">全局任务</div>
+            <div class="task-tab" data-target="character_tasks_block">角色任务</div>
+            <div class="task-tab" data-target="preset_tasks_block">预设任务</div>
+          </div>
+          <div class="flex-container" style="justify-content: flex-end; flex-wrap: nowrap; gap: 0px; ">
+            <div id="add_global_task" class="menu_button menu_button_icon" title="添加全局任务">
+              <small>+全局</small>
             </div>
+            <div id="add_character_task" class="menu_button menu_button_icon" title="添加角色任务">
+              <small>+角色</small>
+            </div>
+            <div id="add_preset_task" class="menu_button menu_button_icon" title="添加预设任务">
+              <small>+预设</small>
+            </div>
+            <div id="cloud_tasks_button" class="menu_button menu_button_icon" title="从云端获取任务脚本">
+              <i class="fa-solid fa-cloud-arrow-down"></i>
+              <small>任务下载</small>
+            </div>
+            <div id="import_global_tasks" class="menu_button menu_button_icon" title="导入任务">
+              <i class="fa-solid fa-download"></i>
+              <small>导入</small>
+            </div>
+          </div>
+          <hr class="sysHR">
+          <div class="task-panel-group">
+            <div id="global_tasks_block" class="padding5 task-panel" data-panel="global_tasks_block">
+              <small>这些任务在所有角色中的聊天都会执行</small>
+              <div id="global_tasks_list" class="flex-container task-container flexFlowColumn"></div>
+            </div>
+            <div id="character_tasks_block" class="padding5 task-panel" data-panel="character_tasks_block"
+              style="display:none;">
+              <small>这些任务只在当前角色的聊天中执行</small>
+              <div id="character_tasks_list" class="flex-container task-container flexFlowColumn"></div>
+            </div>
+            <div id="preset_tasks_block" class="padding5 task-panel" data-panel="preset_tasks_block"
+              style="display:none;">
+              <small>这些任务会在使用<small id="preset_tasks_hint" class="preset-task-hint">未选择</small>预设时执行</small>
+              <div id="preset_tasks_list" class="flex-container task-container flexFlowColumn"></div>
+            </div>
+          </div>
+          <input type="file" id="import_tasks_file" accept=".json" style="display:none;" />
         </div>
+        <div class="template settings-section" style="display:none;">
+          <div class="section-divider">角色好感度统计及设定</div>
+          <hr class="sysHR" />
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_memory_enabled" />
+            <label for="xiaobaix_memory_enabled" class="has-tooltip" data-tooltip="启用后将统计消息数据">启用好感度统计</label>
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_memory_inject" />
+            <label for="xiaobaix_memory_inject" class="has-tooltip" data-tooltip="将统计信息注入到提示词中">注入到提示词 深度</label><input
+              type="number" id="xiaobaix_memory_depth" min="1" max="20" class="dark-number-input" />
+          </div>
+          <br>
+          <div class="section-divider">分析/改善AI回复</div>
+          <hr class="sysHR" />
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_dynamic_prompt_enabled" />
+            <label for="xiaobaix_dynamic_prompt_enabled" class="has-tooltip"
+              data-tooltip="对用户和AI的文字指纹分析，并注入改进提示词">动态提示词</label>
+          </div>
+          <br>
+          <div class="section-divider">变量控制､世界书执行</div>
+          <hr class="sysHR" />
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_variables_core_enabled" />
+            <label for="xiaobaix_variables_core_enabled">剧情管理</label>
+          </div>
+          <div class="flex-container">
+            <input type="checkbox" id="xiaobaix_variables_panel_enabled" />
+            <label for="xiaobaix_variables_panel_enabled">变量面板</label>
+          </div>
+        </div>
+      </div>
     </div>
+  </div>
 </div>
 
 <style>
-    .littlewhitebox,.littlewhitebox *{font-family:'ZCOOL KuaiLe','ZCOOL XiaoWei',sans-serif!important}
-    .littlewhitebox i,.littlewhitebox .fa,.littlewhitebox .fa-solid,.littlewhitebox .fa-regular,.littlewhitebox .fa-brands{font-family:'Font Awesome 6 Free','FontAwesome','Font Awesome 5 Free','Font Awesome 5 Brands',sans-serif!important;font-weight:900!important}
-    .littlewhitebox{display:flex;gap:1px}
-    .settings-menu-vertical{display:flex;flex-direction:column;flex:.5}
-    .settings-content{flex:19;margin-left:1%;width:89%}
-    .menu-tab{flex:none;padding:8px 6px;text-align:center;cursor:pointer;color:#696969;border:none;transition:color .2s;font-weight:500;writing-mode:vertical-rl;text-orientation:mixed}
-    .menu-tab:hover{color:#fff}
-    .menu-tab.active{color:#e9e9e9;border-bottom:none;border-left:2px solid #e9e9e9}
-    .settings-section{padding:1% 2%}
-    .template-replacer-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-    .template-replacer-title{font-weight:bold;color:#cacaca}
-    .template-replacer-status{padding:5px 10px;background:#2a2a2a;border-radius:4px;margin-bottom:10px;font-size:.9em}
-    .template-replacer-status.has-settings{background:#1a4a1a;color:#90ee90}
-    .template-replacer-status.no-character{background:#4a1a1a;color:#ffb3b3}
-    .dark-number-input{background-color:rgba(0,0,0,.3)!important;color:var(--SmartThemeText)!important;border-color:var(--SmartThemeBorderColor)!important;width:8vw!important}
-    .littlewhitebox input[type="checkbox"]{width:1.2rem;height:1.2rem;background:var(--black30a);border-radius:.25em;position:relative}
-    .littlewhitebox input[type="checkbox"]:checked::after{content:"";display:block;position:absolute;top:18%;left:18%;width:64%;height:64%;background:#999;border-radius:.13em}
-    .littlewhitebox input[type="checkbox"]+label{color:#888;transition:color .2s}
-    .littlewhitebox input[type="checkbox"]:checked+label{color:#dbdbdb}
-    .section-divider{font-size:.75em;color:#8f8f8f;margin:.5em 0 .2em;letter-spacing:.05em;font-weight:400;text-align:left;user-select:none}
-    #section-font{color:#979797}
-    .has-tooltip{position:relative;cursor:pointer}
-    .has-tooltip::after{content:attr(data-tooltip);position:absolute;left:50%;bottom:120%;transform:translate(-50%,-50%);background:#222;color:#e4e4e4;padding:6px 12px;border-radius:4px;white-space:pre-line;font-size:.9em;opacity:0;pointer-events:none;transition:opacity .2s;z-index:10;min-width:180px;max-width:300px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-    .has-tooltip:hover::after{opacity:1}
-    label{margin-top:.3em}
-    .littlewhitebox-update-text{color:green;margin-left:5px}
-    #littlewhitebox-update-extension{color:#28a745;cursor:pointer;margin:0 0 0 5px;transition:.2s}
-    #littlewhitebox-update-extension:hover{background-color:rgba(40,167,69,.1);transform:scale(1.1)}
-    #littlewhitebox-update-extension.updating{color:#007bff;background-color:transparent;transform:scale(1)}
+  .littlewhitebox,
+  .littlewhitebox * {
+    font-family: 'ZCOOL KuaiLe', 'ZCOOL XiaoWei', sans-serif !important
+  }
+
+  .littlewhitebox i,
+  .littlewhitebox .fa,
+  .littlewhitebox .fa-solid,
+  .littlewhitebox .fa-regular,
+  .littlewhitebox .fa-brands {
+    font-family: 'Font Awesome 6 Free', 'FontAwesome', 'Font Awesome 5 Free', 'Font Awesome 5 Brands', sans-serif !important;
+    font-weight: 900 !important
+  }
+
+  .littlewhitebox {
+    display: flex;
+    gap: 1px
+  }
+
+  .settings-menu-vertical {
+    display: flex;
+    flex-direction: column;
+    flex: .5
+  }
+
+  .settings-content {
+    flex: 19;
+    margin-left: 1%;
+    width: 89%
+  }
+
+  .menu-tab {
+    flex: none;
+    padding: 8px 6px;
+    text-align: center;
+    cursor: pointer;
+    color: #696969;
+    border: none;
+    transition: color .2s;
+    font-weight: 500;
+    writing-mode: vertical-rl;
+    text-orientation: mixed
+  }
+
+  .menu-tab:hover {
+    color: #fff
+  }
+
+  .menu-tab.active {
+    color: #e9e9e9;
+    border-bottom: none;
+    border-left: 2px solid #e9e9e9
+  }
+
+  .settings-section {
+    padding: 1% 2%
+  }
+
+  .template-replacer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px
+  }
+
+  .template-replacer-title {
+    font-weight: bold;
+    color: #cacaca
+  }
+
+  .template-replacer-status {
+    padding: 5px 10px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    font-size: .9em
+  }
+
+  .template-replacer-status.has-settings {
+    background: #1a4a1a;
+    color: #90ee90
+  }
+
+  .template-replacer-status.no-character {
+    background: #4a1a1a;
+    color: #ffb3b3
+  }
+
+  .dark-number-input {
+    background-color: rgba(0, 0, 0, .3) !important;
+    color: var(--SmartThemeText) !important;
+    border-color: var(--SmartThemeBorderColor) !important;
+    width: 8vw !important
+  }
+
+  .littlewhitebox input[type="checkbox"] {
+    width: 1.2rem;
+    height: 1.2rem;
+    background: var(--black30a);
+    border-radius: .25em;
+    position: relative
+  }
+
+  .littlewhitebox input[type="checkbox"]:checked::after {
+    content: "";
+    display: block;
+    position: absolute;
+    top: 18%;
+    left: 18%;
+    width: 64%;
+    height: 64%;
+    background: #999;
+    border-radius: .13em
+  }
+
+  .littlewhitebox input[type="checkbox"]+label {
+    color: #888;
+    transition: color .2s
+  }
+
+  .littlewhitebox input[type="checkbox"]:checked+label {
+    color: #dbdbdb
+  }
+
+  .section-divider {
+    font-size: .75em;
+    color: #8f8f8f;
+    margin: .5em 0 .2em;
+    letter-spacing: .05em;
+    font-weight: 400;
+    text-align: left;
+    user-select: none
+  }
+
+  #section-font {
+    color: #979797
+  }
+
+  .preset-task-hint {
+    color: #888;
+  }
+
+  .preset-task-hint.no-preset {
+    color: #a66;
+  }
+
+  .task-tab-bar {
+    gap: 12px;
+    flex-wrap: nowrap;
+    margin-top: 6px;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .task-tab {
+    padding: 2px 0;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    color: #9c9c9c;
+    white-space: nowrap;
+    flex: 1 1 0;
+    text-align: center;
+  }
+
+  .task-tab:hover {
+    color: var(--SmartThemeBodyColor, #e9e9e9);
+  }
+
+  .task-tab.active {
+    border-bottom-color: var(--SmartThemeAccentColor, #e9e9e9);
+    color: var(--SmartThemeBodyColor, #e9e9e9);
+  }
+
+  .has-tooltip {
+    position: relative;
+    cursor: pointer
+  }
+
+  .has-tooltip::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 50%;
+    bottom: 120%;
+    transform: translate(-50%, -50%);
+    background: #222;
+    color: #e4e4e4;
+    padding: 6px 12px;
+    border-radius: 4px;
+    white-space: pre-line;
+    font-size: .9em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s;
+    z-index: 10;
+    min-width: 180px;
+    max-width: 300px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .2)
+  }
+
+  .has-tooltip:hover::after {
+    opacity: 1
+  }
+
+  label {
+    margin-top: .3em
+  }
+
+  .littlewhitebox-update-text {
+    color: green;
+    margin-left: 5px
+  }
+
+  #littlewhitebox-update-extension {
+    color: #28a745;
+    cursor: pointer;
+    margin: 0 0 0 5px;
+    transition: .2s
+  }
+
+  #littlewhitebox-update-extension:hover {
+    background-color: rgba(40, 167, 69, .1);
+    transform: scale(1.1)
+  }
+
+  #littlewhitebox-update-extension.updating {
+    color: #007bff;
+    background-color: transparent;
+    transform: scale(1)
+  }
 </style>
 
 <script>
-!function(){
-  'use strict';
-  const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s), $id=id=>document.getElementById(id);
-  const onReady=fn=>{ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fn,{once:true}); else fn(); };
+  !function () {
+    'use strict';
+    const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s), $id = id => document.getElementById(id);
+    const onReady = fn => { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn, { once: true }); else fn(); };
 
-  function setupUpdateButtonHandlers(){
-    const btn=$id('littlewhitebox-update-extension'); if(!btn) return;
-    const b=btn.cloneNode(true); btn.parentNode.replaceChild(b,btn);
-    b.addEventListener('mouseenter',function(){ if(!this.classList.contains('updating')){ this.style.backgroundColor='rgba(40,167,69,.1)'; this.style.transform='scale(1.1)'; }});
-    b.addEventListener('mouseleave',function(){ if(!this.classList.contains('updating')){ this.style.backgroundColor='transparent'; this.style.transform='scale(1)'; }});
-    b.addEventListener('click',async function(e){
-      e.preventDefault(); e.stopPropagation();
-      this.className='menu_button fa-solid fa-spinner fa-spin interactable updating';
-      this.style.color='#007bff'; this.style.backgroundColor='transparent'; this.style.transform='scale(1)'; this.title='正在更新...';
-      try{
-        let ok=false;
-        if(window.updateLittleWhiteBoxExtension) ok=await window.updateLittleWhiteBoxExtension();
-        else console.error('[小白X] 更新函数不可用');
-        if(ok){ if(window.removeAllUpdateNotices) window.removeAllUpdateNotices(); }
-        else{
-          this.className='menu_button fa-solid fa-cloud-arrow-down interactable has-update';
-          this.classList.remove('updating'); this.style.color='#28a745'; this.title='下載並安裝小白x的更新';
+    function setupUpdateButtonHandlers() {
+      const btn = $id('littlewhitebox-update-extension'); if (!btn) return;
+      const b = btn.cloneNode(true); btn.parentNode.replaceChild(b, btn);
+      b.addEventListener('mouseenter', function () { if (!this.classList.contains('updating')) { this.style.backgroundColor = 'rgba(40,167,69,.1)'; this.style.transform = 'scale(1.1)'; } });
+      b.addEventListener('mouseleave', function () { if (!this.classList.contains('updating')) { this.style.backgroundColor = 'transparent'; this.style.transform = 'scale(1)'; } });
+      b.addEventListener('click', async function (e) {
+        e.preventDefault(); e.stopPropagation();
+        this.className = 'menu_button fa-solid fa-spinner fa-spin interactable updating';
+        this.style.color = '#007bff'; this.style.backgroundColor = 'transparent'; this.style.transform = 'scale(1)'; this.title = '正在更新...';
+        try {
+          let ok = false;
+          if (window.updateLittleWhiteBoxExtension) ok = await window.updateLittleWhiteBoxExtension();
+          else console.error('[小白X] 更新函数不可用');
+          if (ok) { if (window.removeAllUpdateNotices) window.removeAllUpdateNotices(); }
+          else {
+            this.className = 'menu_button fa-solid fa-cloud-arrow-down interactable has-update';
+            this.classList.remove('updating'); this.style.color = '#28a745'; this.title = '下載並安裝小白x的更新';
+          }
+        } catch {
+          this.className = 'menu_button fa-solid fa-cloud-arrow-down interactable has-update';
+          this.classList.remove('updating'); this.style.color = '#28a745'; this.title = '下載並安裝小白x的更新';
         }
-      }catch{
-        this.className='menu_button fa-solid fa-cloud-arrow-down interactable has-update';
-        this.classList.remove('updating'); this.style.color='#28a745'; this.title='下載並安裝小白x的更新';
-      }
-    });
-  }
-  window.setupUpdateButtonInSettings=setupUpdateButtonHandlers;
-
-  async function openInfoModal(){
-    const modal=$id('xiaobaix_info_modal'); if(!modal) return;
-    modal.style.display='flex';
-    const container=$id('xiaobaix_info_content'); if(!container||container.dataset.loaded==='true') return;
-    try{
-      const r=await fetch('/scripts/extensions/third-party/LittleWhiteBox/info&upda.html',{cache:'no-store'});
-      if(r.ok){
-        const html=await r.text(), doc=new DOMParser().parseFromString(html,'text/html');
-        const sections=doc.querySelectorAll('main > .section, .section'); container.innerHTML='';
-        sections.forEach(s=>container.appendChild(s.cloneNode(true)));
-      }
-    }catch{}
-    try{
-      const p=new URLSearchParams(location.search), repo=p.get('repo')||'RT15548/LittleWhiteBox', path=p.get('path')||'info&upda.html', branch=p.get('branch')||'main';
-      const url=`https://raw.githubusercontent.com/${repo}/${branch}/${path}`;
-      const r=await fetch(url,{cache:'no-store'});
-      if(r.ok){
-        const remoteHtml=await r.text(), remoteDoc=new DOMParser().parseFromString(remoteHtml,'text/html');
-        const remoteLatest=remoteDoc.getElementById('LATESTUPDATE'), localLatest=container.querySelector('#LATESTUPDATE');
-        if(remoteLatest&&localLatest){
-          const keepTitle=localLatest.querySelector('h2')?.outerHTML||'<h2>最新更新</h2>';
-          const children=[...remoteLatest.children].filter(el=>el.tagName.toLowerCase()!=='h2');
-          if(children.length>0) localLatest.innerHTML=keepTitle+children.map(el=>el.outerHTML).join('');
-        }
-      }
-    }catch{}
-    container.dataset.loaded='true';
-  }
-  function closeInfoModal(){ const m=$id('xiaobaix_info_modal'); if(m) m.style.display='none'; }
-  function initInfoAnnouncement(){
-    const btn=$id('xiaobaix_info_btn'); if(btn){ const n=btn.cloneNode(true); btn.parentNode.replaceChild(n,btn); n.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();openInfoModal();}); }
-    const closeBtn=$id('xiaobaix_info_close'), modal=$id('xiaobaix_info_modal');
-    if(closeBtn) closeBtn.addEventListener('click',closeInfoModal);
-    if(modal) modal.addEventListener('click',e=>{ if(e.target===modal) closeInfoModal(); });
-    document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeInfoModal(); });
-  }
-
-// X 按鈕位置
-  function setupXBtnPositionButton() {
-    const KEY = 'xiaobaix_x_btn_position';
-    const LABEL = { 'edit-right': 'X按钮:左', 'name-left': 'X按钮:右' };
-
-    const readLS = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
-    const writeLS = (v) => { try { localStorage.setItem(KEY, v); } catch {} };
-
-    let cur = window?.extension_settings?.LittleWhiteBox?.xBtnPosition || readLS() || 'name-left';
-
-    const write = (v) => {
-      cur = v;
-      try {
-        const es = (window.extension_settings ||= {});
-        const box = (es.LittleWhiteBox ||= {});
-        box.xBtnPosition = v;
-        window.saveSettingsDebounced?.();
-      } catch {}
-      writeLS(v);
-    };
-
-    const applyLabelTo = (el) => {
-      if (!el) return;
-      const sm = el.querySelector?.('small') || el;
-      const txt = LABEL[cur] || LABEL['name-left'];
-      if (sm.textContent !== txt) sm.textContent = txt;
-    };
-
-    document.querySelectorAll('#xiaobaix_xposition_btn').forEach(applyLabelTo);
-
-    if (!document.getElementById('xiaobaix_xposition_btn')) {
-      const mo = new MutationObserver((_, obs) => {
-        const el = document.getElementById('xiaobaix_xposition_btn');
-        if (el) { applyLabelTo(el); obs.disconnect(); }
       });
-      try { mo.observe(document.body, { childList: true, subtree: true }); } catch {}
+    }
+    window.setupUpdateButtonInSettings = setupUpdateButtonHandlers;
+
+    async function openInfoModal() {
+      const modal = $id('xiaobaix_info_modal'); if (!modal) return;
+      modal.style.display = 'flex';
+      const container = $id('xiaobaix_info_content'); if (!container || container.dataset.loaded === 'true') return;
+      try {
+        const r = await fetch('/scripts/extensions/third-party/LittleWhiteBox/info&upda.html', { cache: 'no-store' });
+        if (r.ok) {
+          const html = await r.text(), doc = new DOMParser().parseFromString(html, 'text/html');
+          const sections = doc.querySelectorAll('main > .section, .section'); container.innerHTML = '';
+          sections.forEach(s => container.appendChild(s.cloneNode(true)));
+        }
+      } catch { }
+      try {
+        const p = new URLSearchParams(location.search), repo = p.get('repo') || 'RT15548/LittleWhiteBox', path = p.get('path') || 'info&upda.html', branch = p.get('branch') || 'main';
+        const url = `https://raw.githubusercontent.com/${repo}/${branch}/${path}`;
+        const r = await fetch(url, { cache: 'no-store' });
+        if (r.ok) {
+          const remoteHtml = await r.text(), remoteDoc = new DOMParser().parseFromString(remoteHtml, 'text/html');
+          const remoteLatest = remoteDoc.getElementById('LATESTUPDATE'), localLatest = container.querySelector('#LATESTUPDATE');
+          if (remoteLatest && localLatest) {
+            const keepTitle = localLatest.querySelector('h2')?.outerHTML || '<h2>最新更新</h2>';
+            const children = [...remoteLatest.children].filter(el => el.tagName.toLowerCase() !== 'h2');
+            if (children.length > 0) localLatest.innerHTML = keepTitle + children.map(el => el.outerHTML).join('');
+          }
+        }
+      } catch { }
+      container.dataset.loaded = 'true';
+    }
+    function closeInfoModal() { const m = $id('xiaobaix_info_modal'); if (m) m.style.display = 'none'; }
+    function initInfoAnnouncement() {
+      const btn = $id('xiaobaix_info_btn'); if (btn) { const n = btn.cloneNode(true); btn.parentNode.replaceChild(n, btn); n.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); openInfoModal(); }); }
+      const closeBtn = $id('xiaobaix_info_close'), modal = $id('xiaobaix_info_modal');
+      if (closeBtn) closeBtn.addEventListener('click', closeInfoModal);
+      if (modal) modal.addEventListener('click', e => { if (e.target === modal) closeInfoModal(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') closeInfoModal(); });
     }
 
-    const onClick = (ev) => {
-      const el = ev.target?.closest?.('#xiaobaix_xposition_btn');
-      if (!el) return;
-      ev.preventDefault(); ev.stopPropagation();
-      write(cur === 'edit-right' ? 'name-left' : 'edit-right');
-      applyLabelTo(el);
+    // X 按鈕位置
+    function setupXBtnPositionButton() {
+      const KEY = 'xiaobaix_x_btn_position';
+      const LABEL = { 'edit-right': 'X按钮:左', 'name-left': 'X按钮:右' };
+
+      const readLS = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
+      const writeLS = (v) => { try { localStorage.setItem(KEY, v); } catch { } };
+
+      let cur = window?.extension_settings?.LittleWhiteBox?.xBtnPosition || readLS() || 'name-left';
+
+      const write = (v) => {
+        cur = v;
+        try {
+          const es = (window.extension_settings ||= {});
+          const box = (es.LittleWhiteBox ||= {});
+          box.xBtnPosition = v;
+          window.saveSettingsDebounced?.();
+        } catch { }
+        writeLS(v);
+      };
+
+      const applyLabelTo = (el) => {
+        if (!el) return;
+        const sm = el.querySelector?.('small') || el;
+        const txt = LABEL[cur] || LABEL['name-left'];
+        if (sm.textContent !== txt) sm.textContent = txt;
+      };
+
+      document.querySelectorAll('#xiaobaix_xposition_btn').forEach(applyLabelTo);
+
+      if (!document.getElementById('xiaobaix_xposition_btn')) {
+        const mo = new MutationObserver((_, obs) => {
+          const el = document.getElementById('xiaobaix_xposition_btn');
+          if (el) { applyLabelTo(el); obs.disconnect(); }
+        });
+        try { mo.observe(document.body, { childList: true, subtree: true }); } catch { }
+      }
+
+      const onClick = (ev) => {
+        const el = ev.target?.closest?.('#xiaobaix_xposition_btn');
+        if (!el) return;
+        ev.preventDefault(); ev.stopPropagation();
+        write(cur === 'edit-right' ? 'name-left' : 'edit-right');
+        applyLabelTo(el);
+      };
+      document.addEventListener('click', onClick, { passive: false });
+
+      window?.registerModuleCleanup?.('xbPosBtn', () => {
+        document.removeEventListener('click', onClick);
+      });
+    }
+    const EXT_ID = 'LittleWhiteBox';
+    const KEY_TO_CHECKBOX = {
+      recorded: 'xiaobaix_recorded_enabled',
+      immersive: 'xiaobaix_immersive_enabled',
+      preview: 'xiaobaix_preview_enabled',
+      scriptAssistant: 'xiaobaix_script_assistant',
+      tasks: 'scheduled_tasks_enabled',
+      templateEditor: 'xiaobaix_template_enabled',
+      wallhaven: 'wallhaven_enabled',
+      characterUpdater: 'character_updater_enabled',
+      dynamicPrompt: 'xiaobaix_dynamic_prompt_enabled',
+      variablesPanel: 'xiaobaix_variables_panel_enabled',
+      variablesCore: 'xiaobaix_variables_core_enabled',
+      audio: 'xiaobaix_audio_enabled',
+      sandboxMode: 'xiaobaix_sandbox',
+      useBlob: 'xiaobaix_use_blob',
+      wrapperIframe: 'Wrapperiframe',
     };
-    document.addEventListener('click', onClick, { passive: false });
+    const DEFAULTS_ON = ['templateEditor', 'tasks', 'dynamicPrompt', 'variablesCore', 'characterUpdater', 'audio'];
+    const DEFAULTS_OFF = ['recorded', 'preview', 'scriptAssistant', 'immersive', 'wallhaven', 'variablesPanel'];
+    const MODULE_KEYS = ['templateEditor', 'tasks', 'dynamicPrompt', 'variablesCore', 'characterUpdater', 'recorded', 'preview', 'scriptAssistant', 'immersive', 'wallhaven', 'variablesPanel', 'audio'];
 
-    window?.registerModuleCleanup?.('xbPosBtn', () => {
-      document.removeEventListener('click', onClick);
-    });
-  }
-  const EXT_ID='LittleWhiteBox';
-  const KEY_TO_CHECKBOX={
-    recorded:'xiaobaix_recorded_enabled',
-    immersive:'xiaobaix_immersive_enabled',
-    preview:'xiaobaix_preview_enabled',
-    scriptAssistant:'xiaobaix_script_assistant',
-    tasks:'scheduled_tasks_enabled',
-    templateEditor:'xiaobaix_template_enabled',
-    wallhaven:'wallhaven_enabled',
-    characterUpdater:'character_updater_enabled',
-    dynamicPrompt:'xiaobaix_dynamic_prompt_enabled',
-    variablesPanel:'xiaobaix_variables_panel_enabled',
-    variablesCore:'xiaobaix_variables_core_enabled',
-    audio:'xiaobaix_audio_enabled',
-    sandboxMode:'xiaobaix_sandbox',
-    useBlob:'xiaobaix_use_blob',
-    wrapperIframe:'Wrapperiframe',
-  };
-  const DEFAULTS_ON=['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','audio'];
-  const DEFAULTS_OFF=['recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel'];
-  const MODULE_KEYS=['templateEditor','tasks','dynamicPrompt','variablesCore','characterUpdater','recorded','preview','scriptAssistant','immersive','wallhaven','variablesPanel','audio'];
-
-  function setModuleEnabled(key,enabled){
-    try{
-      if(!extension_settings[EXT_ID][key]) extension_settings[EXT_ID][key]={};
-      extension_settings[EXT_ID][key].enabled=!!enabled;
-    }catch(e){}
-    const id=KEY_TO_CHECKBOX[key], el=id?$id(id):null;
-    if(el){ el.checked=!!enabled; try{$(el).trigger('change');}catch(e){} }
-  }
-  function captureStates(){
-    const out={modules:{},sandboxMode:false,useBlob:false,wrapperIframe:false};
-    try{ MODULE_KEYS.forEach(k=>{ out.modules[k]=!!(extension_settings[EXT_ID][k]&&extension_settings[EXT_ID][k].enabled); }); }catch(e){}
-    try{ out.sandboxMode=!!extension_settings[EXT_ID].sandboxMode; }catch(e){}
-    try{ out.useBlob=!!extension_settings[EXT_ID].useBlob; }catch(e){}
-    try{ out.wrapperIframe=!!extension_settings[EXT_ID].wrapperIframe; }catch(e){}
-    return out;
-  }
-  function applyStates(st){
-    if(!st) return;
-    try{ Object.keys(st.modules||{}).forEach(k=>setModuleEnabled(k,!!st.modules[k])); }catch(e){}
-    try{
-      extension_settings[EXT_ID].sandboxMode=!!st.sandboxMode;
-      const el=$id('xiaobaix_sandbox'); if(el){ el.checked=!!st.sandboxMode; if(window.isXiaobaixEnabled) try{$(el).trigger('change');}catch(e){} }
-    }catch(e){}
-    try{
-      extension_settings[EXT_ID].useBlob=!!st.useBlob;
-      const el=$id('xiaobaix_use_blob'); if(el){ el.checked=!!st.useBlob; if(window.isXiaobaixEnabled) try{$(el).trigger('change');}catch(e){} }
-    }catch(e){}
-    try{
-      extension_settings[EXT_ID].wrapperIframe=!!st.wrapperIframe;
-      const el=$id('Wrapperiframe'); if(el){ el.checked=!!st.wrapperIframe; if(window.isXiaobaixEnabled) try{$(el).trigger('change');}catch(e){} }
-    }catch(e){}
-    try{ if(window.saveSettingsDebounced) window.saveSettingsDebounced(); }catch(e){}
-  }
-  function applyResetDefaults(){
-    DEFAULTS_ON.forEach(k=>setModuleEnabled(k,true));
-    DEFAULTS_OFF.forEach(k=>setModuleEnabled(k,false));
-    try{
-      extension_settings[EXT_ID].sandboxMode=false; const sb=$id(KEY_TO_CHECKBOX.sandboxMode);
-      if(sb){ sb.checked=false; try{$(sb).trigger('change');}catch(e){} }
-    }catch(e){}
-    try{
-      extension_settings[EXT_ID].useBlob=false; const bl=$id(KEY_TO_CHECKBOX.useBlob);
-      if(bl){ bl.checked=false; try{$(bl).trigger('change');}catch(e){} }
-    }catch(e){}
-    try{
-      extension_settings[EXT_ID].wrapperIframe=true; const wp=$id(KEY_TO_CHECKBOX.wrapperIframe);
-      if(wp){ wp.checked=true; try{$(wp).trigger('change');}catch(e){} }
-    }catch(e){}
-    try{ if(window.saveSettingsDebounced) window.saveSettingsDebounced(); }catch(e){}
-  }
-  window.XB_captureAndStoreStates=function(){ try{ extension_settings[EXT_ID].prevModuleStatesV2=captureStates(); if(window.saveSettingsDebounced) window.saveSettingsDebounced(); }catch(e){} };
-  window.XB_applyPrevStates=function(){ try{ const st=extension_settings[EXT_ID].prevModuleStatesV2; if(st) applyStates(st); }catch(e){} };
-  onReady(()=>{
-    setupUpdateButtonHandlers();
-    initInfoAnnouncement();
-    setupXBtnPositionButton();
-    try{ $(document).off('click.xbreset','#xiaobaix_reset_btn').on('click.xbreset','#xiaobaix_reset_btn',e=>{ e.preventDefault(); e.stopPropagation(); applyResetDefaults(); }); }catch(e){
-      const btn=$id('xiaobaix_reset_btn'); if(btn){ btn.addEventListener('click',e=>{ e.preventDefault(); e.stopPropagation(); applyResetDefaults(); },{once:false}); }
+    function setModuleEnabled(key, enabled) {
+      try {
+        if (!extension_settings[EXT_ID][key]) extension_settings[EXT_ID][key] = {};
+        extension_settings[EXT_ID][key].enabled = !!enabled;
+      } catch (e) { }
+      const id = KEY_TO_CHECKBOX[key], el = id ? $id(id) : null;
+      if (el) { el.checked = !!enabled; try { $(el).trigger('change'); } catch (e) { } }
     }
-  });
-}();
+    function captureStates() {
+      const out = { modules: {}, sandboxMode: false, useBlob: false, wrapperIframe: false };
+      try { MODULE_KEYS.forEach(k => { out.modules[k] = !!(extension_settings[EXT_ID][k] && extension_settings[EXT_ID][k].enabled); }); } catch (e) { }
+      try { out.sandboxMode = !!extension_settings[EXT_ID].sandboxMode; } catch (e) { }
+      try { out.useBlob = !!extension_settings[EXT_ID].useBlob; } catch (e) { }
+      try { out.wrapperIframe = !!extension_settings[EXT_ID].wrapperIframe; } catch (e) { }
+      return out;
+    }
+    function applyStates(st) {
+      if (!st) return;
+      try { Object.keys(st.modules || {}).forEach(k => setModuleEnabled(k, !!st.modules[k])); } catch (e) { }
+      try {
+        extension_settings[EXT_ID].sandboxMode = !!st.sandboxMode;
+        const el = $id('xiaobaix_sandbox'); if (el) { el.checked = !!st.sandboxMode; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) { } }
+      } catch (e) { }
+      try {
+        extension_settings[EXT_ID].useBlob = !!st.useBlob;
+        const el = $id('xiaobaix_use_blob'); if (el) { el.checked = !!st.useBlob; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) { } }
+      } catch (e) { }
+      try {
+        extension_settings[EXT_ID].wrapperIframe = !!st.wrapperIframe;
+        const el = $id('Wrapperiframe'); if (el) { el.checked = !!st.wrapperIframe; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) { } }
+      } catch (e) { }
+      try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) { }
+    }
+    function applyResetDefaults() {
+      DEFAULTS_ON.forEach(k => setModuleEnabled(k, true));
+      DEFAULTS_OFF.forEach(k => setModuleEnabled(k, false));
+      try {
+        extension_settings[EXT_ID].sandboxMode = false; const sb = $id(KEY_TO_CHECKBOX.sandboxMode);
+        if (sb) { sb.checked = false; try { $(sb).trigger('change'); } catch (e) { } }
+      } catch (e) { }
+      try {
+        extension_settings[EXT_ID].useBlob = false; const bl = $id(KEY_TO_CHECKBOX.useBlob);
+        if (bl) { bl.checked = false; try { $(bl).trigger('change'); } catch (e) { } }
+      } catch (e) { }
+      try {
+        extension_settings[EXT_ID].wrapperIframe = true; const wp = $id(KEY_TO_CHECKBOX.wrapperIframe);
+        if (wp) { wp.checked = true; try { $(wp).trigger('change'); } catch (e) { } }
+      } catch (e) { }
+      try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) { }
+    }
+    function initTaskTabs() {
+      const tabs = Array.from(document.querySelectorAll('.task-tab'));
+      if (!tabs.length) return;
+      const panels = Array.from(document.querySelectorAll('.task-panel'));
+      const showPanel = (id) => {
+        panels.forEach(panel => {
+          panel.style.display = panel.dataset.panel === id ? '' : 'none';
+        });
+      };
+      document.addEventListener('click', function (evt) {
+        const btn = evt.target.closest('.task-tab');
+        if (!btn) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        if (btn.classList.contains('active')) return;
+        tabs.forEach(t => t.classList.toggle('active', t === btn));
+        showPanel(btn.dataset.target);
+      });
+      const initial = tabs.find(t => t.classList.contains('active')) || tabs[0];
+      if (initial) {
+        showPanel(initial.dataset.target);
+      }
+    }
+    window.XB_captureAndStoreStates = function () { try { extension_settings[EXT_ID].prevModuleStatesV2 = captureStates(); if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) { } };
+    window.XB_applyPrevStates = function () { try { const st = extension_settings[EXT_ID].prevModuleStatesV2; if (st) applyStates(st); } catch (e) { } };
+    onReady(() => {
+      setupUpdateButtonHandlers();
+      initInfoAnnouncement();
+      setupXBtnPositionButton();
+      initTaskTabs();
+      try { $(document).off('click.xbreset', '#xiaobaix_reset_btn').on('click.xbreset', '#xiaobaix_reset_btn', e => { e.preventDefault(); e.stopPropagation(); applyResetDefaults(); }); } catch (e) {
+        const btn = $id('xiaobaix_reset_btn'); if (btn) { btn.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); applyResetDefaults(); }, { once: false }); }
+      }
+    });
+  }();
 </script>
 
 <!-- 预设绑定正则 -->
 <script>
-!function(){
-  function go(){ if(window.PRB_bindUI) window.PRB_bindUI(); }
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go,{once:true});
-  else { if(!window.PRB_bindUI) requestAnimationFrame(go); else go(); }
-}();
+  !function () {
+    function go() { if (window.PRB_bindUI) window.PRB_bindUI(); }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go, { once: true });
+    else { if (!window.PRB_bindUI) requestAnimationFrame(go); else go(); }
+  }();
 </script>
 
 <!-- 功能与更新公告区块 -->
@@ -513,50 +769,189 @@
   <div class="xiaobaix-modal-content">
     <div class="xiaobaix-modal-header">
       <span class="xiaobaix-modal-title">小白X 功能与更新公告</span>
-      <button id="xiaobaix_info_close" class="menu_button menu_button_icon" title="关闭"><i class="fa-solid fa-xmark"></i></button>
+      <button id="xiaobaix_info_close" class="menu_button menu_button_icon" title="关闭"><i
+          class="fa-solid fa-xmark"></i></button>
     </div>
     <div class="xiaobaix-modal-body">
       <div id="xiaobaix_info_content" class="xiaobaix-info-content"></div>
     </div>
   </div>
   <style>
-    #xiaobaix_info_btn{align-items:flex-end;margin-bottom:0}
-    .xiaobaix-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:9999;padding:10px;padding-bottom:max(10px,env(safe-area-inset-bottom))}
-    .xiaobaix-modal-content{background:var(--SmartThemeBlurTintColor,#1e1e1e);border:1px solid var(--SmartThemeBorderColor,#333);border-radius:10px;width:min(900px,90vw);height:min(85vh,92vh);display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,.5);backdrop-filter:blur(var(--SmartThemeBlurStrength,0px))}
-    .xiaobaix-modal-header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--SmartThemeBorderColor,#2a2a2a);background:var(--SmartThemeBlurTintColor,#1e1e1e);border-radius:10px 10px 0 0}
-    .xiaobaix-modal-title{color:var(--SmartThemeBodyColor,#e9e9e9);font-weight:600}
-    .xiaobaix-modal-body{flex:1;overflow:auto}
-    .xiaobaix-info-content{padding:12px;display:flex;flex-direction:column;gap:12px;word-break:break-all;word-wrap:break-word}
-    .xiaobaix-info-content h3,.xiaobaix-info-content h4{margin:4px 0 8px;color:var(--SmartThemeBodyColor,#e9e9e9)}
-    .xiaobaix-info-content p{margin:0;color:#ccc}
-    .xiaobaix-info-grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
-    .xiaobaix-info-grid h4{margin:0 0 6px;color:#9be49b}
-    .xiaobaix-info-grid ul{margin:0;padding-left:18px}
-    .xiaobaix-info-grid li{margin:4px 0}
-    @media (max-width:680px){.xiaobaix-info-grid{grid-template-columns:1fr}}
-    @media (max-width:999px){
-      .xiaobaix-modal{align-items:flex-start}
-      .xiaobaix-modal-content{width:100vw;height:calc(100svh - var(--topBarBlockSize,0px) - 10px);margin-top:var(--topBarBlockSize,0px);border-radius:12px}
+    #xiaobaix_info_btn {
+      align-items: flex-end;
+      margin-bottom: 0
     }
-    .collapsible .toggle{display:none}
-    .collapsible .title{cursor:pointer;display:block}
-    .collapsible .title h4::after{content:' ▼';font-size:.8em;transition:transform .3s}
-    .collapsible .content{max-height:0;overflow:hidden;transition:max-height .3s ease}
-    .collapsible .toggle:checked~.content{max-height:200px}
-    .collapsible .toggle:checked~.title h4::after{transform:rotate(-180deg)}
+
+    .xiaobaix-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 10px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom))
+    }
+
+    .xiaobaix-modal-content {
+      background: var(--SmartThemeBlurTintColor, #1e1e1e);
+      border: 1px solid var(--SmartThemeBorderColor, #333);
+      border-radius: 10px;
+      width: min(900px, 90vw);
+      height: min(85vh, 92vh);
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+      backdrop-filter: blur(var(--SmartThemeBlurStrength, 0px))
+    }
+
+    .xiaobaix-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--SmartThemeBorderColor, #2a2a2a);
+      background: var(--SmartThemeBlurTintColor, #1e1e1e);
+      border-radius: 10px 10px 0 0
+    }
+
+    .xiaobaix-modal-title {
+      color: var(--SmartThemeBodyColor, #e9e9e9);
+      font-weight: 600
+    }
+
+    .xiaobaix-modal-body {
+      flex: 1;
+      overflow: auto
+    }
+
+    .xiaobaix-info-content {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      word-break: break-all;
+      word-wrap: break-word
+    }
+
+    .xiaobaix-info-content h3,
+    .xiaobaix-info-content h4 {
+      margin: 4px 0 8px;
+      color: var(--SmartThemeBodyColor, #e9e9e9)
+    }
+
+    .xiaobaix-info-content p {
+      margin: 0;
+      color: #ccc
+    }
+
+    .xiaobaix-info-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr))
+    }
+
+    .xiaobaix-info-grid h4 {
+      margin: 0 0 6px;
+      color: #9be49b
+    }
+
+    .xiaobaix-info-grid ul {
+      margin: 0;
+      padding-left: 18px
+    }
+
+    .xiaobaix-info-grid li {
+      margin: 4px 0
+    }
+
+    @media (max-width:680px) {
+      .xiaobaix-info-grid {
+        grid-template-columns: 1fr
+      }
+    }
+
+    @media (max-width:999px) {
+      .xiaobaix-modal {
+        align-items: flex-start
+      }
+
+      .xiaobaix-modal-content {
+        width: 100vw;
+        height: calc(100svh - var(--topBarBlockSize, 0px) - 10px);
+        margin-top: var(--topBarBlockSize, 0px);
+        border-radius: 12px
+      }
+    }
+
+    .collapsible .toggle {
+      display: none
+    }
+
+    .collapsible .title {
+      cursor: pointer;
+      display: block
+    }
+
+    .collapsible .title h4::after {
+      content: ' ▼';
+      font-size: .8em;
+      transition: transform .3s
+    }
+
+    .collapsible .content {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height .3s ease
+    }
+
+    .collapsible .toggle:checked~.content {
+      max-height: 200px
+    }
+
+    .collapsible .toggle:checked~.title h4::after {
+      transform: rotate(-180deg)
+    }
   </style>
 </div>
 
 <!-- 循环任务子区块 -->
 <style>
-  .cloud-tasks-modal{max-height:70vh}
-  .cloud-tasks-modal *{font-family:'ZCOOL KuaiLe','ZCOOL XiaoWei',sans-serif!important}
-  .cloud-tasks-modal h3{margin-top:0;color:var(--SmartThemeBodyColor,#e9e9e9)}
-  .cloud-tasks-modal h4{color:var(--SmartThemeBodyColor,#cacaca);margin-bottom:10px}
-  .cloud-tasks-section{margin-bottom:15px}
-  .cloud-tasks-list{max-height:300px;overflow-y:auto}
-  .cloud-task-item{transition:background-color .2s}
-  .cloud-task-item:hover{background-color:rgba(255,255,255,.05)}
+  .cloud-tasks-modal {
+    max-height: 70vh
+  }
+
+  .cloud-tasks-modal * {
+    font-family: 'ZCOOL KuaiLe', 'ZCOOL XiaoWei', sans-serif !important
+  }
+
+  .cloud-tasks-modal h3 {
+    margin-top: 0;
+    color: var(--SmartThemeBodyColor, #e9e9e9)
+  }
+
+  .cloud-tasks-modal h4 {
+    color: var(--SmartThemeBodyColor, #cacaca);
+    margin-bottom: 10px
+  }
+
+  .cloud-tasks-section {
+    margin-bottom: 15px
+  }
+
+  .cloud-tasks-list {
+    max-height: 300px;
+    overflow-y: auto
+  }
+
+  .cloud-task-item {
+    transition: background-color .2s
+  }
+
+  .cloud-task-item:hover {
+    background-color: rgba(255, 255, 255, .05)
+  }
 </style>
 
 <div id="task_editor_template" style="display:none;">
@@ -569,7 +964,8 @@
       </div>
       <div class="flex1">
         <label for="task_commands_edit">脚本命令</label>
-        <textarea class="task_commands_edit text_pole wide100p textarea_compact" style="height:200px;" placeholder="输入要执行的斜杠命令或js, eg: &#10;&lt;&lt;taskjs&gt;&gt;&#10;count++;&#10;&lt;&lt;/taskjs&gt;&gt;&#10;/echo 已完成脚本！"></textarea>
+        <textarea class="task_commands_edit text_pole wide100p textarea_compact" style="height:200px;"
+          placeholder="输入要执行的斜杠命令或js, eg: &#10;&lt;&lt;taskjs&gt;&gt;&#10;count++;&#10;&lt;&lt;/taskjs&gt;&gt;&#10;/echo 已完成脚本！"></textarea>
       </div>
       <div class="flex-container">
         <div class="flex1">
@@ -593,6 +989,7 @@
           <select class="task_type_edit text_pole textarea_compact">
             <option value="global" id="section-font">全局任务</option>
             <option value="character" id="section-font">角色任务</option>
+            <option value="preset" id="section-font">预设任务</option>
           </select>
           <br>
           <div class="flex1">
@@ -650,7 +1047,7 @@
 
 <div id="cloud_tasks_modal_template" style="display:none;">
   <div class="cloud-tasks-modal">
-    <h3>云端任务下载</h3>
+    <h3>任务下载</h3>
     <div class="cloud-tasks-loading" style="text-align:center;padding:20px;">
       <i class="fa-solid fa-spinner fa-spin"></i> 正在加载云端任务...
     </div>
@@ -671,7 +1068,8 @@
 </div>
 
 <div id="cloud_task_item_template" style="display:none;">
-  <div class="cloud-task-item" style="border:1px solid var(--SmartThemeBorderColor);padding:10px;margin:8px 0;border-radius:4px;">
+  <div class="cloud-task-item"
+    style="border:1px solid var(--SmartThemeBorderColor);padding:10px;margin:8px 0;border-radius:4px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
       <strong class="cloud-task-name"></strong>
       <button class="cloud-task-download menu_button menu_button_icon" title="下载并导入此任务">
