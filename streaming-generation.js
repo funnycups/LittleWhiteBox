@@ -28,10 +28,12 @@ class StreamingGeneration {
         this.lastSessionId = null;
         this.activeCount = 0;
         this._toggleBusy = false;
+        this._toggleQueue = Promise.resolve();
     }
 
     init() {
         if (this.isInitialized) return;
+        try { localStorage.removeItem('xbgen:lastToggleSnap'); } catch {}
         this.registerCommands();
         this.isInitialized = true;
     }
@@ -318,7 +320,7 @@ class StreamingGeneration {
         let depth = 0;
         for (let i = 0; i < input.length; i++) {
             const ch = input[i];
-                       if (ch === '{') depth++;
+            if (ch === '{') depth++;
             if (ch === '}') depth = Math.max(0, depth - 1);
             if (ch === ';' && depth === 0) {
                 parts.push(buf);
@@ -376,55 +378,59 @@ class StreamingGeneration {
         if (t) arr.push({ role, content: t });
     };
 
-    async _waitForToggleFree() {
-        while (this._toggleBusy) {
-            await new Promise(r => setTimeout(r, 10));
-        }
+    async _runToggleTask(task) {
+        const prev = this._toggleQueue;
+        let release;
+        this._toggleQueue = new Promise(r => (release = r));
+        await prev;
+        try { return await task(); }
+        finally { release(); }
     }
 
     async _withTemporaryPromptToggles(addonSet, fn) {
-        await this._waitForToggleFree();
-        this._toggleBusy = true;
-        let snapshot = [];
-        try {
+        return this._runToggleTask(async () => {
             const pm = promptManager;
-            const activeChar = pm?.activeCharacter ?? null;
-            const order = pm?.getPromptOrderForCharacter(activeChar) ?? [];
-            snapshot = order.map(e => ({ identifier: e.identifier, enabled: !!e.enabled }));
-            this._lastToggleSnapshot = snapshot.map(s => ({ ...s }));
-            order.forEach(e => { e.enabled = false; });
-            const enableIds = new Set();
-            const PRESET_EXCLUDES = new Set([
-                'chatHistory',
-                'worldInfoBefore', 'worldInfoAfter',
-                'charDescription', 'charPersonality', 'scenario', 'personaDescription',
-            ]);
-            if (addonSet.has('preset')) {
-                for (const s of snapshot) {
-                    const isExcluded = PRESET_EXCLUDES.has(s.identifier);
-                    if (s.enabled && !isExcluded) enableIds.add(s.identifier);
-                }
+            if (!pm || typeof pm.getPromptOrderForCharacter !== 'function') {
+                return await fn();
             }
-            if (addonSet.has('chatHistory')) enableIds.add('chatHistory');
-            if (addonSet.has('worldInfo')) { enableIds.add('worldInfoBefore'); enableIds.add('worldInfoAfter'); }
-            if (addonSet.has('charDescription')) enableIds.add('charDescription');
-            if (addonSet.has('charPersonality')) enableIds.add('charPersonality');
-            if (addonSet.has('scenario')) enableIds.add('scenario');
-            if (addonSet.has('personaDescription')) enableIds.add('personaDescription');
-            if (addonSet.has('worldInfo') && !addonSet.has('chatHistory')) enableIds.add('chatHistory');
-            order.forEach(e => { if (enableIds.has(e.identifier)) e.enabled = true; });
-            return await fn();
-        } finally {
+            const origGetter = pm.getPromptOrderForCharacter.bind(pm);
+            pm.getPromptOrderForCharacter = (...args) => {
+                const list = origGetter(...args) || [];
+                const PRESET_EXCLUDES = new Set([
+                    'chatHistory',
+                    'worldInfoBefore', 'worldInfoAfter',
+                    'charDescription', 'charPersonality', 'scenario', 'personaDescription',
+                ]);
+
+                const enableIds = new Set();
+                if (addonSet.has('preset')) {
+                    for (const e of list) {
+                        if (e?.identifier && e.enabled && !PRESET_EXCLUDES.has(e.identifier)) {
+                            enableIds.add(e.identifier);
+                        }
+                    }
+                }
+                if (addonSet.has('chatHistory')) enableIds.add('chatHistory');
+                if (addonSet.has('worldInfo')) { enableIds.add('worldInfoBefore'); enableIds.add('worldInfoAfter'); }
+                if (addonSet.has('charDescription')) enableIds.add('charDescription');
+                if (addonSet.has('charPersonality')) enableIds.add('charPersonality');
+                if (addonSet.has('scenario')) enableIds.add('scenario');
+                if (addonSet.has('personaDescription')) enableIds.add('personaDescription');
+                if (addonSet.has('worldInfo') && !addonSet.has('chatHistory')) enableIds.add('chatHistory');
+
+                return list.map(e => {
+                    const cloned = { ...e };
+                    cloned.enabled = enableIds.has(cloned.identifier);
+                    return cloned;
+                });
+            };
+
             try {
-                const pm = promptManager;
-                const activeChar = pm?.activeCharacter ?? null;
-                const order = pm?.getPromptOrderForCharacter(activeChar) ?? [];
-                const mapSnap = new Map((this._lastToggleSnapshot || snapshot).map(s => [s.identifier, s.enabled]));
-                order.forEach(e => { if (mapSnap.has(e.identifier)) e.enabled = mapSnap.get(e.identifier); });
-            } catch {}
-            this._toggleBusy = false;
-            this._lastToggleSnapshot = null;
-        }
+                return await fn();
+            } finally {
+                pm.getPromptOrderForCharacter = origGetter;
+            }
+        });
     }
 
     async _captureWorldInfoText(prompt) {
