@@ -125,7 +125,7 @@ const hasAnyRule = (n)=>{
   if(n.objectPolicy && n.objectPolicy!=='none') return true;
   if(n.arrayPolicy && n.arrayPolicy!=='lock') return true;
   const c=n.constraints||{};
-  return ('min'in c)||('max'in c)||(Array.isArray(c.enum)&&c.enum.length)||(c.regex&&c.regex.source);
+  return ('min'in c)||('max'in c)||('step'in c)||(Array.isArray(c.enum)&&c.enum.length)||(c.regex&&c.regex.source);
 };
 const ruleTip = (n)=>{
   if(!n) return '';
@@ -134,6 +134,7 @@ const ruleTip = (n)=>{
   if(n.objectPolicy){ const m={none:'(默认：不可增删键)',ext:'$ext（可增键）',prune:'$prune（可删键）',free:'$free（可增删键）'}; lines.push(`对象策略：${m[n.objectPolicy]||n.objectPolicy}`); }
   if(n.arrayPolicy){ const m={lock:'(默认：不可增删项)',grow:'$grow（可增项）',shrink:'$shrink（可删项）',list:'$list（可增删项）'}; lines.push(`数组策略：${m[n.arrayPolicy]||n.arrayPolicy}`); }
   if('min'in c||'max'in c){ if('min'in c&&'max'in c) lines.push(`范围：$range=[${c.min},${c.max}]`); else if('min'in c) lines.push(`下限：$min=${c.min}`); else lines.push(`上限：$max=${c.max}`); }
+  if('step'in c) lines.push(`步长：$step=${c.step}`);
   if(Array.isArray(c.enum)&&c.enum.length) lines.push(`枚举：$enum={${c.enum.join(';')}}`);
   if(c.regex&&c.regex.source) lines.push(`正则：$match=/${c.regex.source}/${c.regex.flags||''}`);
   return lines.join('\n');
@@ -143,7 +144,7 @@ const badgesHtml = (n)=>{
   const tip=ruleTip(n).replace(/"/g,'&quot;'), out=[];
   if(n.ro) out.push(`<span class="vm-badge" data-type="ro" title="${tip}"><i class="fa-solid fa-shield-halved"></i></span>`);
   if((n.objectPolicy&&n.objectPolicy!=='none')||(n.arrayPolicy&&n.arrayPolicy!=='lock')) out.push(`<span class="vm-badge" data-type="struct" title="${tip}"><i class="fa-solid fa-diagram-project"></i></span>`);
-  const c=n.constraints||{}; if(('min'in c)||('max'in c)||(Array.isArray(c.enum)&&c.enum.length)||(c.regex&&c.regex.source)) out.push(`<span class="vm-badge" data-type="cons" title="${tip}"><i class="fa-solid fa-ruler-vertical"></i></span>`);
+  const c=n.constraints||{}; if(('min'in c)||('max'in c)||('step'in c)||(Array.isArray(c.enum)&&c.enum.length)||(c.regex&&c.regex.source)) out.push(`<span class="vm-badge" data-type="cons" title="${tip}"><i class="fa-solid fa-ruler-vertical"></i></span>`);
   return out.length?`<span class="vm-badges">${out.join('')}</span>`:'';
 };
 const debounce=(fn,ms=200)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);}};
