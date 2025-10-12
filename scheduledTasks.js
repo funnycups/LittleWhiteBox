@@ -113,7 +113,6 @@ async function saveCharacterTasks(tasks) {
 
     await writeExtensionField(Number(this_chid), TASKS_MODULE_NAME, { tasks });
     try {
-        // 同步回内存，确保引用一致
         if (!characters[this_chid].data) characters[this_chid].data = {};
         if (!characters[this_chid].data.extensions) characters[this_chid].data.extensions = {};
         if (!characters[this_chid].data.extensions[TASKS_MODULE_NAME]) characters[this_chid].data.extensions[TASKS_MODULE_NAME] = { tasks: [] };
@@ -240,7 +239,6 @@ async function executeTaskJS(jsCode, taskName = 'AnonymousTask') {
     const codeSig = __hashStringForKey(String(jsCode || ''));
     const stableKey = (String(taskName || '').trim()) || `js-${codeSig}`;
 
-    // ✅ 强制清理旧实例（即使代码相同）
     const old = __taskRunMap.get(stableKey);
     if (old) {
         try { 
@@ -254,7 +252,6 @@ async function executeTaskJS(jsCode, taskName = 'AnonymousTask') {
         __taskRunMap.delete(stableKey);
     }
     
-    // ✅ 清理该任务的所有动态回调
     const callbackPrefix = `${stableKey}_fl_`;
     for (const [id, entry] of state.dynamicCallbacks.entries()) {
         if (id.startsWith(callbackPrefix)) {
@@ -636,7 +633,6 @@ async function onChatCreated() {
 // ------------- UI: lists & items ----------
 function getTasksHash() {
     const tasks = [...getSettings().globalTasks, ...getCharacterTasks()];
-    // 包含 commands 的长度以确保仅修改 commands 也会刷新 UI，但避免对长串做完整拼接
     return tasks.map(t => `${t.id}_${t.disabled}_${t.name}_${t.interval}_${t.floorType}_${t.triggerTiming || 'after_ai'}_${(t.commands||'').length}`).join('|');
 }
 
@@ -737,7 +733,9 @@ function refreshTaskLists() {
 // ------------- Task bar-------------------
 const cache = { bar: null, btns: null, sig: '', ts: 0 };
 
-const getActivatedTasks = () => allTasks().filter(t => t.buttonActivated && !t.disabled);
+const getActivatedTasks = () => isGloballyEnabled()
+    ? allTasks().filter(t => t.buttonActivated && !t.disabled)
+    : [];
 
 const getBar = () => {
     if (cache.bar?.isConnected) return cache.bar;
@@ -815,8 +813,11 @@ function toggleTaskBarVisibility() {
 
 document.addEventListener('click', e => {
     const btn = e.target.closest('.xiaobaix-task-button');
-    btn?.dataset.taskName && window.xbqte(btn.dataset.taskName).catch(console.error);
+    if (!btn) return;
+    if (!isGloballyEnabled()) return;
+    window.xbqte(btn.dataset.taskName).catch(console.error);
 });
+
 
 new MutationObserver(updateTaskBar).observe(document.body, { childList: true, subtree: true });
 
@@ -1657,11 +1658,10 @@ function initTasks() {
     window.addEventListener('message', handleTaskMessage);
 
     $('#scheduled_tasks_enabled').on('input', e => {
-        if (!isGloballyEnabled()) return;
         const enabled = $(e.target).prop('checked');
         getSettings().enabled = enabled;
         debouncedSave();
-        if (!enabled) cleanup();
+        try { createTaskBar(); } catch {}
     });
 
     $('#add_global_task').on('click', () => showTaskEditor(null, false, false));
@@ -1677,7 +1677,6 @@ function initTasks() {
         }
     });
 
-    // ✅ 全局任务列表事件委托（只绑定一次）
     $('#global_tasks_list')
         .on('input', '.disable_task', function() {
             const $item = $(this).closest('.task-item');
@@ -1701,7 +1700,6 @@ function initTasks() {
             deleteTask(idx, 'global');
         });
 
-    // ✅ 角色任务列表事件委托（只绑定一次）
     $('#character_tasks_list')
         .on('input', '.disable_task', function() {
             const $item = $(this).closest('.task-item');
