@@ -2448,10 +2448,11 @@ function registerXbSetVarSlashCommand(){
     }
     function isDirectiveToken(tok){
       const t = String(tok||'').trim();
-      if (!t.startsWith('$')) return false;
+      if (!t) return false;
       if (t === '$ro' || t === '$ext' || t === '$prune' || t === '$free' || t === '$grow' || t === '$shrink' || t === '$list') return true;
       if (t.startsWith('$min=') || t.startsWith('$max=') || t.startsWith('$range=') || t.startsWith('$enum=') || t.startsWith('$match=')) return true;
       if (t.startsWith('$step=')) return true;
+      if (t === '$clear') return true;
       return false;
     }    
     function parseKeyAndValue(namedArgs, unnamedArgs){
@@ -2558,7 +2559,6 @@ function registerXbSetVarSlashCommand(){
     }));
   } catch {} 
 }
-
 
 /* ============= 第五区：快照/回滚器 ============= */
 const SNAP_STORE_KEY = 'LWB_SNAP';
@@ -3005,10 +3005,179 @@ function typeOfValue(v) { if (Array.isArray(v)) return 'array'; const t = typeof
 function ensureRuleNode(path) { const tbl = rulesGetTable(); const p = normalizePath(path); const node = tbl[p] || (tbl[p] = { typeLock: 'unknown', ro: false, objectPolicy: 'none', arrayPolicy: 'lock', constraints: {}, elementConstraints: null }); return node }
 function getRuleNode(path) { const tbl = rulesGetTable(); return tbl[normalizePath(path)] }
 function setTypeLockIfUnknown(path, v) { const n = ensureRuleNode(path); if (!n.typeLock || n.typeLock === 'unknown') { n.typeLock = typeOfValue(v); rulesSaveToMeta() } }
-function parseDirectivesTokenList(tokens) { const out = { ro: false, objectPolicy: null, arrayPolicy: null, constraints: {} }; for (const tok of tokens) { const t = String(tok || '').trim(); if (!t) continue; if (t === '$ro') { out.ro = true; continue } if (t === '$ext') { out.objectPolicy = 'ext'; continue } if (t === '$prune') { out.objectPolicy = 'prune'; continue } if (t === '$free') { out.objectPolicy = 'free'; continue } if (t === '$grow') { out.arrayPolicy = 'grow'; continue } if (t === '$shrink') { out.arrayPolicy = 'shrink'; continue } if (t === '$list') { out.arrayPolicy = 'list'; continue } if (t.startsWith('$min=')) { const num = Number(t.slice(5)); if (Number.isFinite(num)) { out.constraints.min = num } continue } if (t.startsWith('$max=')) { const num = Number(t.slice(5)); if (Number.isFinite(num)) { out.constraints.max = num } continue } if (t.startsWith('$range=')) { const m = t.match(/^\$range=\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]$/); if (m) { const a = Number(m[1]), b = Number(m[2]); if (Number.isFinite(a) && Number.isFinite(b)) { out.constraints.min = Math.min(a, b); out.constraints.max = Math.max(a, b) } } continue } if (t.startsWith('$enum=')) { const m = t.match(/^\$enum=\{\s*([^}]+)\s*\}$/); if (m) { const raw = m[1]; const vals = raw.split(/[;；]/).map(s => s.trim()).filter(Boolean); if (vals.length) out.constraints.enum = vals } continue } if (t.startsWith('$match=')) { const raw = t.slice(7); if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) { const last = raw.lastIndexOf('/'); const patternRaw = raw.slice(1, last); const flags = raw.slice(last + 1) || ''; const pattern = patternRaw.replace(/\\\//g, '/'); out.constraints.regex = { source: pattern, flags } } continue } if (t.startsWith('$step=')) { const num = Number(t.slice(6)); if (Number.isFinite(num)) out.constraints.step = Math.max(0, Math.abs(num)); continue } } return out }
-function applyRuleDelta(path, delta) { const node = ensureRuleNode(path); if (delta.ro) node.ro = true; if (delta.objectPolicy) node.objectPolicy = delta.objectPolicy; if (delta.arrayPolicy) node.arrayPolicy = delta.arrayPolicy; if (delta.constraints) { const c = node.constraints || {}; if (delta.constraints.min != null) c.min = Number(delta.constraints.min); if (delta.constraints.max != null) c.max = Number(delta.constraints.max); if (delta.constraints.enum) c.enum = delta.constraints.enum.slice(); if (delta.constraints.regex) { c.regex = { source: delta.constraints.regex.source, flags: delta.constraints.regex.flags || '' }; try { guardianState.regexCache[normalizePath(path)] = new RegExp(c.regex.source, c.regex.flags) } catch {} } if (delta.constraints.step != null) c.step = Math.max(0, Math.abs(Number(delta.constraints.step))); node.constraints = c } }
+function parseDirectivesTokenList(tokens) {
+  const out = { ro: false, objectPolicy: null, arrayPolicy: null, constraints: {}, clear: false };
+  for (const tok of tokens) {
+    const t = String(tok || '').trim();
+    if (!t) continue;
+    if (t === '$ro') { out.ro = true; continue }
+    if (t === '$ext') { out.objectPolicy = 'ext'; continue }
+    if (t === '$prune') { out.objectPolicy = 'prune'; continue }
+    if (t === '$free') { out.objectPolicy = 'free'; continue }
+    if (t === '$grow') { out.arrayPolicy = 'grow'; continue }
+    if (t === '$shrink') { out.arrayPolicy = 'shrink'; continue }
+    if (t === '$list') { out.arrayPolicy = 'list'; continue }
+    if (t.startsWith('$min=')) { const num = Number(t.slice(5)); if (Number.isFinite(num)) { out.constraints.min = num } continue }
+    if (t.startsWith('$max=')) { const num = Number(t.slice(5)); if (Number.isFinite(num)) { out.constraints.max = num } continue }
+    if (t.startsWith('$range=')) {
+      const m = t.match(/^\$range=\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]$/);
+      if (m) {
+        const a = Number(m[1]), b = Number(m[2]);
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+          out.constraints.min = Math.min(a, b);
+          out.constraints.max = Math.max(a, b)
+        }
+      }
+      continue
+    }
+    if (t.startsWith('$enum=')) {
+      const m = t.match(/^\$enum=\{\s*([^}]+)\s*\}$/);
+      if (m) {
+        const raw = m[1];
+        const vals = raw.split(/[;；]/).map(s => s.trim()).filter(Boolean);
+        if (vals.length) out.constraints.enum = vals
+      }
+      continue
+    }
+    if (t.startsWith('$match=')) {
+      const raw = t.slice(7);
+      if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
+        const last = raw.lastIndexOf('/');
+        const patternRaw = raw.slice(1, last);
+        const flags = raw.slice(last + 1) || '';
+        const pattern = patternRaw.replace(/\\\//g, '/');
+        out.constraints.regex = { source: pattern, flags }
+      }
+      continue
+    }
+    if (t.startsWith('$step=')) { const num = Number(t.slice(6)); if (Number.isFinite(num)) out.constraints.step = Math.max(0, Math.abs(num)); continue }
+    if (t === '$clear') { out.clear = true; continue }
+  }
+  return out
+}
+function applyRuleDelta(path, delta) {
+  const p = normalizePath(path);
+  if (delta && delta.clear) {
+    try {
+      const tbl = rulesGetTable();
+      if (tbl && Object.prototype.hasOwnProperty.call(tbl, p)) {
+        delete tbl[p];
+      }
+      if (guardianState?.regexCache) {
+        delete guardianState.regexCache[p];
+      }
+    } catch {}
+  }
+  const hasOther =
+    !!(delta && (
+      delta.ro ||
+      delta.objectPolicy ||
+      delta.arrayPolicy ||
+      (delta.constraints && Object.keys(delta.constraints).length)
+    ));
+
+  if (hasOther) {
+    const node = ensureRuleNode(p);
+    if (delta.ro) node.ro = true;
+    if (delta.objectPolicy) node.objectPolicy = delta.objectPolicy;
+    if (delta.arrayPolicy) node.arrayPolicy = delta.arrayPolicy;
+    if (delta.constraints) {
+      const c = node.constraints || {};
+      if (delta.constraints.min != null) c.min = Number(delta.constraints.min);
+      if (delta.constraints.max != null) c.max = Number(delta.constraints.max);
+      if (delta.constraints.enum) c.enum = delta.constraints.enum.slice();
+      if (delta.constraints.regex) {
+        c.regex = { source: delta.constraints.regex.source, flags: delta.constraints.regex.flags || '' };
+        try { guardianState.regexCache[p] = new RegExp(c.regex.source, c.regex.flags || ''); } catch {}
+      }
+      if (delta.constraints.step != null) c.step = Math.max(0, Math.abs(Number(delta.constraints.step)));
+      node.constraints = c;
+    }
+  }
+  rulesSaveToMeta();
+}
 function pathIsAbsolute(path) { const s = String(path || ''); return !!s && !s.startsWith('.') && !s.startsWith('[') }
-function rulesLoadFromTree(valueTree, basePath) { const clean = {}; const rulesDelta = {}; function setCleanAt(obj, key, val) { obj[key] = val } function mergeRule(target, p, d) { const n = rulesDelta[p] || (rulesDelta[p] = { tokens: [] }); n.tokens.push(d) } function walk(obj, curAbs) { if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj; const out = {}; for (const [k, v] of Object.entries(obj)) { if (k.startsWith('$')) { const rest = k.slice(1).trim(); const parts = rest.split(/\s+/).filter(Boolean); if (!parts.length) continue; const rulePathToken = parts[parts.length - 1]; const dirTokens = parts.slice(0, parts.length - 1); let targetPath = rulePathToken; if (!pathIsAbsolute(targetPath) && curAbs) targetPath = curAbs ? `${curAbs}.${targetPath}` : targetPath; if (!pathIsAbsolute(targetPath) && basePath) targetPath = basePath ? `${basePath}.${targetPath}` : targetPath; targetPath = normalizePath(targetPath); const parsed = parseDirectivesTokenList(dirTokens); mergeRule(rulesDelta, targetPath, parsed); if (v && typeof v === 'object' && !Array.isArray(v)) { const subClean = walk(v, targetPath); if (subClean && typeof subClean === 'object' && Object.keys(subClean).length) { Object.keys(subClean).forEach(() => {}) } } } else { if (v && typeof v === 'object' && !Array.isArray(v)) { const sub = walk(v, curAbs ? `${curAbs}.${k}` : (basePath ? `${basePath}.${k}` : k)); setCleanAt(out, k, sub || {}) } else { setCleanAt(out, k, v) } } } return out } const cleaned = walk(valueTree, basePath || ''); const flatRules = {}; for (const [p, tokenBag] of Object.entries(rulesDelta)) { for (const tok of tokenBag.tokens) { if (!flatRules[p]) flatRules[p] = {}; const d = parseDirectivesTokenList([]); if (tok.ro) d.ro = true; if (tok.objectPolicy) d.objectPolicy = tok.objectPolicy; if (tok.arrayPolicy) d.arrayPolicy = tok.arrayPolicy; if (tok.constraints) d.constraints = structuredClone(tok.constraints); const node = flatRules[p]; if (d.ro) node.ro = true; if (d.objectPolicy) node.objectPolicy = d.objectPolicy; if (d.arrayPolicy) node.arrayPolicy = d.arrayPolicy; if (d.constraints) { node.constraints = node.constraints || {}; if (d.constraints.min != null) node.constraints.min = d.constraints.min; if (d.constraints.max != null) node.constraints.max = d.constraints.max; if (d.constraints.enum) node.constraints.enum = d.constraints.enum.slice(); if (d.constraints.regex) node.constraints.regex = { source: d.constraints.regex.source, flags: d.constraints.regex.flags || '' }; if (d.constraints.step != null) node.constraints.step = Math.max(0, Math.abs(Number(d.constraints.step))) } } } return { cleanValue: cleaned, rulesDelta: flatRules } }
+function rulesLoadFromTree(valueTree, basePath) {
+  const clean = {};
+  const rulesDelta = {};
+
+  function setCleanAt(obj, key, val) { obj[key] = val }
+  function mergeRule(target, p, d) {
+    const n = rulesDelta[p] || (rulesDelta[p] = { tokens: [] });
+    n.tokens.push(d);
+  }
+
+  function walk(obj, curAbs) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+    const out = {};
+
+    for (const [k, v] of Object.entries(obj)) {
+      if (k.startsWith('$')) {
+        const rest = k.slice(1).trim();
+        const parts = rest.split(/\s+/).filter(Boolean);
+        if (!parts.length) continue;
+
+        const rulePathToken = parts[parts.length - 1];
+        const dirTokens = parts.slice(0, parts.length - 1);
+
+        let targetPath = rulePathToken;
+        if (!pathIsAbsolute(targetPath) && curAbs) targetPath = curAbs ? `${curAbs}.${targetPath}` : targetPath;
+        if (!pathIsAbsolute(targetPath) && basePath) targetPath = basePath ? `${basePath}.${targetPath}` : targetPath;
+        targetPath = normalizePath(targetPath);
+
+        const parsed = parseDirectivesTokenList(dirTokens);
+        mergeRule(rulesDelta, targetPath, parsed);
+
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          const subClean = walk(v, targetPath);
+          if (subClean && typeof subClean === 'object' && Object.keys(subClean).length) {
+            Object.keys(subClean).forEach(() => {});
+          }
+        }
+      } else {
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          const sub = walk(v, curAbs ? `${curAbs}.${k}` : (basePath ? `${basePath}.${k}` : k));
+          setCleanAt(out, k, sub || {});
+        } else {
+          setCleanAt(out, k, v);
+        }
+      }
+    }
+
+    return out;
+  }
+
+  const cleaned = walk(valueTree, basePath || '');
+  const flatRules = {};
+  for (const [p, tokenBag] of Object.entries(rulesDelta)) {
+    for (const tok of tokenBag.tokens) {
+      const node = flatRules[p] || (flatRules[p] = {});
+
+      if (tok.clear) node.clear = true;
+      if (tok.ro) node.ro = true;
+      if (tok.objectPolicy) node.objectPolicy = tok.objectPolicy;
+      if (tok.arrayPolicy) node.arrayPolicy = tok.arrayPolicy;
+
+      if (tok.constraints) {
+        const c = node.constraints || (node.constraints = {});
+        if (tok.constraints.min != null) c.min = tok.constraints.min;
+        if (tok.constraints.max != null) c.max = tok.constraints.max;
+        if (tok.constraints.enum) c.enum = tok.constraints.enum.slice();
+        if (tok.constraints.regex) {
+          c.regex = {
+            source: tok.constraints.regex.source,
+            flags: tok.constraints.regex.flags || ''
+          };
+        }
+        if (tok.constraints.step != null) {
+          c.step = Math.max(0, Math.abs(Number(tok.constraints.step)));
+        }
+      }
+    }
+  }
+
+  return { cleanValue: cleaned, rulesDelta: flatRules };
+}
 function applyRulesDeltaToTable(delta) { if (!delta || typeof delta !== 'object') return; for (const [p, d] of Object.entries(delta)) { applyRuleDelta(p, d) } rulesSaveToMeta() }
 function clampNumberWithConstraints(v, node) { let out = Number(v); if (!Number.isFinite(out)) return { ok: false }; const c = node?.constraints || {}; if (Number.isFinite(c.min)) out = Math.max(out, c.min); if (Number.isFinite(c.max)) out = Math.min(out, c.max); return { ok: true, value: out } }
 function checkStringWithConstraints(v, node) { const s = String(v); const c = node?.constraints || {}; if (Array.isArray(c.enum) && c.enum.length) { if (!c.enum.includes(s)) return { ok: false } } if (c.regex && c.regex.source) { let re = guardianState.regexCache[normalizePath(node.__path || '')]; if (!re) { try { re = new RegExp(c.regex.source, c.regex.flags || ''); guardianState.regexCache[normalizePath(node.__path || '')] = re } catch {} } if (re && !re.test(s)) return { ok: false } } return { ok: true, value: s } }
