@@ -4,6 +4,7 @@ import { saveSettingsDebounced, eventSource, event_types, characters, this_chid 
 import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from "../../../popup.js";
 import { getPresetManager } from "../../../preset-manager.js";
 import { download, uuidv4 } from "../../../utils.js";
+import { oai_settings } from "../../../openai.js";
 
 const EXT_ID="LittleWhiteBox", MODULE_NAME="characterUpdater", extensionFolderPath=`scripts/extensions/third-party/${EXT_ID}`;
 
@@ -323,6 +324,17 @@ const PresetStore=(()=>{
     try{
       await pm.savePreset(name,clone,{ skipUpdate:true });
       syncTarget(preset,clone);
+      const activeName=PM()?.getSelectedPresetName?.();
+      if(activeName&&activeName===name){
+        if(Object.prototype.hasOwnProperty.call(clone,'prompt_order')){
+          try{ oai_settings.prompt_order=deepClone(clone.prompt_order); }
+          catch{ oai_settings.prompt_order=clone.prompt_order; }
+        }
+        if(Object.prototype.hasOwnProperty.call(clone,'prompts')){
+          try{ oai_settings.prompts=deepClone(clone.prompts); }
+          catch{ oai_settings.prompts=clone.prompts; }
+        }
+      }
       return entry.xiaobai_ext?deepClone(entry.xiaobai_ext):null;
     }catch(err){ console.error("[PresetStore] 保存失败",err); throw err; }
   };
