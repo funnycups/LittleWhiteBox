@@ -2107,16 +2107,11 @@ function _ensureAbsTargetPath(basePath, token){
   }catch{ return String(basePath||''); }
 }
 function _segmentsRelativeToBase(absPath, basePath){
-  try{
-    const segs = lwbSplitPathWithBrackets(absPath);
-    if(!segs.length) return [];
-    const base = String(basePath||'');
-    const baseSegs = lwbSplitPathWithBrackets(base);
-    if(baseSegs.length && String(segs[0])===String(baseSegs[0])){
-      return segs.slice(1);
-    }
-    return segs;
-  }catch{ return []; }
+  const segs = lwbSplitPathWithBrackets(absPath);
+  const baseSegs = lwbSplitPathWithBrackets(basePath);
+  if (!segs.length || !baseSegs.length) return segs || [];
+  const matches = baseSegs.every((b,i)=>String(segs[i])===String(b));
+  return matches ? segs.slice(baseSegs.length) : segs;
 }
 
 function expandShorthandRuleObject(basePath, valueObj){
