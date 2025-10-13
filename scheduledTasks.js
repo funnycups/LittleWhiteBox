@@ -892,6 +892,16 @@ function initSortable($list, onUpdate) {
     });
 }
 
+function updateTaskCounts(globalCount, characterCount, presetCount) {
+    const globalEl = document.getElementById('global_task_count');
+    const characterEl = document.getElementById('character_task_count');
+    const presetEl = document.getElementById('preset_task_count');
+
+    if (globalEl) globalEl.textContent = globalCount > 0 ? `(${globalCount})` : '';
+    if (characterEl) characterEl.textContent = characterCount > 0 ? `(${characterCount})` : '';
+    if (presetEl) presetEl.textContent = presetCount > 0 ? `(${presetCount})` : '';
+}
+
 function refreshTaskLists() {
     updatePresetTaskHint();
     const currentHash = getTasksHash();
@@ -908,6 +918,8 @@ function refreshTaskLists() {
     const globalTasks = getSettings().globalTasks;
     const characterTasks = getCharacterTasks();
     const presetTasks = getPresetTasks();
+
+    updateTaskCounts(globalTasks.length, characterTasks.length, presetTasks.length);
 
     const globalFragment = document.createDocumentFragment();
     globalTasks.forEach((task, i) => {
