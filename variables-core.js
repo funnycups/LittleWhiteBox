@@ -51,7 +51,8 @@ function q(root, selector){ try{ return (root||document).querySelector(selector)
 function qa(root, selector){ try{ return Array.from((root||document).querySelectorAll(selector)); }catch{ return []; } }
 function makeEl(tag, className){ const el=document.createElement(tag); if(className) el.className=className; return el; }
 function setActive(elements, index){ try{ elements.forEach((el,i)=>el.classList.toggle('active', i===index)); }catch{} }
-function stripLeadingHtmlComments(s) {
+
+function stripLeadingHtmlComments(s) {
   let t = String(s ?? '');
   t = t.replace(/^\uFEFF/, '');
   while (true) {
@@ -477,6 +478,19 @@ function parseBlock(innerText) {
     if (!s) return false;
     if (!s.includes('[') || !s.includes('=')) return false;
     try {
+      const decodeTomlKey = (rawKey) => {
+        const cleaned = stripQ(String(rawKey ?? '').trim());
+        const { directives, remainder, original } = extractDirectiveInfo(cleaned);
+        const core = remainder || original || cleaned;
+        const segs = core.split('.').map(seg => stripQ(String(seg).trim())).filter(Boolean);
+        return { directives, segs, core };
+      };
+      const applyGuardForKey = (directives, segments) => {
+        if (!directives || !directives.length || !segments || !segments.length) return;
+        const target = norm(segments.join('.'));
+        if (!target) return;
+        recordGuardDirective(target, directives);
+      };
       const parseScalar = (raw) => {
         const v = String(raw ?? '').trim();
         if (v === 'true') return true;
@@ -509,17 +523,21 @@ function parseBlock(innerText) {
         const rhsRaw = kv[2];
         const hasTriple = rhsRaw.includes('"""') || rhsRaw.includes("'''");
         const rhs = hasTriple ? rhsRaw : stripYamlInlineComment(rhsRaw);
+        const decoded = decodeTomlKey(keyRaw);
+        const segs = decoded.segs;
+        if (!segs.length) continue;
+        const top = segs[0];
+        const rest = segs.slice(1);
+        const relRaw = rest.join('.');
+        const relNorm = norm(relRaw);
+        applyGuardForKey(decoded.directives, [top, ...rest].filter(Boolean));
         if (!hasTriple) {
           const value = parseScalar(rhs);
-          const keyClean = stripQ(String(keyRaw).trim());
-          const segs = keyClean.split('.').map(s => stripQ(String(s).trim())).filter(Boolean);
-          if (!segs.length) continue;
-          const top = segs[0];
-          const path = (String(segs.slice(1).join('.')) || '').replace(/\[(\d+)\]/g, '.$1');
-          if (currentOp === 'set') putSet(top, path, value);
-          else if (currentOp === 'push') putPush(top, path, value);
-          else if (currentOp === 'bump') putBump(top, path, value);
-          else if (currentOp === 'del') putDel(top, path || keyRaw);
+          const fallback = relNorm || norm(segs.join('.'));
+          if (currentOp === 'set') putSet(top, relNorm, value);
+          else if (currentOp === 'push') putPush(top, relNorm, value);
+          else if (currentOp === 'bump') putBump(top, relNorm, value);
+          else if (currentOp === 'del') putDel(top, relNorm || fallback);
           continue;
         }
         const isTripleBasic = rhs.includes('"""');
@@ -548,14 +566,11 @@ function parseBlock(innerText) {
         }
         let value = buf.join('\n').replace(/\r\n/g, '\n');
         if (value.startsWith('\n')) value = value.slice(1);
-        const segs = keyRaw.split('.').map(s => s.trim()).filter(Boolean);
-        if (!segs.length) continue;
-        const top = segs[0];
-        const path = (String(segs.slice(1).join('.')) || '').replace(/\[(\d+)\]/g, '.$1');
-        if (currentOp === 'set') putSet(top, path, value);
-        else if (currentOp === 'push') putPush(top, path, value);
-        else if (currentOp === 'bump') putBump(top, path, value);
-        else if (currentOp === 'del') putDel(top, path || keyRaw);
+        const fallback = relNorm || norm(segs.join('.'));
+        if (currentOp === 'set') putSet(top, relNorm, value);
+        else if (currentOp === 'push') putPush(top, relNorm, value);
+        else if (currentOp === 'bump') putBump(top, relNorm, value);
+        else if (currentOp === 'del') putDel(top, relNorm || fallback);
       }
       return true;
     } catch { return false; }
