@@ -51,6 +51,16 @@ function q(root, selector){ try{ return (root||document).querySelector(selector)
 function qa(root, selector){ try{ return Array.from((root||document).querySelectorAll(selector)); }catch{ return []; } }
 function makeEl(tag, className){ const el=document.createElement(tag); if(className) el.className=className; return el; }
 function setActive(elements, index){ try{ elements.forEach((el,i)=>el.classList.toggle('active', i===index)); }catch{} }
+function stripLeadingHtmlComments(s) {
+  let t = String(s ?? '');
+  t = t.replace(/^\uFEFF/, '');
+  while (true) {
+    const m = t.match(/^\s*<!--[\s\S]*?-->\s*/);
+    if (!m) break;
+    t = t.slice(m[0].length);
+  }
+  return t;
+}
 
 function stripYamlInlineComment(s){
   const text = String(s ?? '');
@@ -291,11 +301,64 @@ function preprocessBumpAliases(innerText) {
 }
 function parseBlock(innerText) {
   innerText = preprocessBumpAliases(innerText);
+  const textForJsonToml = stripLeadingHtmlComments(innerText);
   const ops = { set: {}, push: {}, bump: {}, del: {} };
   const lines = String(innerText || '').split(/\r?\n/);
   const indentOf = (s) => s.length - s.trimStart().length;
   const stripQ = (s) => { let t = String(s ?? '').trim(); if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) t = t.slice(1, -1); return t; };
   const norm = (p) => String(p || '').replace(/\[(\d+)\]/g, '.$1');
+  const guardMap = new Map();
+  const recordGuardDirective = (path, directives) => {
+    const tokens = Array.isArray(directives) ? directives.map(t => String(t || '').trim()).filter(Boolean) : [];
+    if (!tokens.length) return;
+    const normalizedPath = norm(path);
+    if (!normalizedPath) return;
+    let bag = guardMap.get(normalizedPath);
+    if (!bag) {
+      bag = new Set();
+      guardMap.set(normalizedPath, bag);
+    }
+    for (const tok of tokens) {
+      if (tok) bag.add(tok);
+    }
+  };
+  const extractDirectiveInfo = (rawKey) => {
+    const text = String(rawKey || '').trim().replace(/:$/, '');
+    if (!text) {
+      return { directives: [], remainder: '', original: '' };
+    }
+    const directives = [];
+    let idx = 0;
+    while (idx < text.length) {
+      while (idx < text.length && /\s/.test(text[idx])) idx++;
+      if (idx >= text.length) break;
+      if (text[idx] !== '$') break;
+      const start = idx;
+      idx++;
+      while (idx < text.length && !/\s/.test(text[idx])) idx++;
+      directives.push(text.slice(start, idx));
+    }
+    const remainder = text.slice(idx).trim();
+    const seg = remainder || text;
+    return {
+      directives,
+      remainder: seg,
+      original: text,
+    };
+  };
+  const buildPathInfo = (rawKey, parentPath) => {
+    const parent = String(parentPath || '').trim();
+    const { directives, remainder, original } = extractDirectiveInfo(rawKey);
+    const segTrim = String(remainder || original || '').trim();
+    const curPathRaw = segTrim ? (parent ? `${parent}.${segTrim}` : segTrim) : parent;
+    const guardTargetRaw = directives.length ? (segTrim ? curPathRaw : parent || curPathRaw) : '';
+    return {
+      directives,
+      curPathRaw,
+      guardTargetRaw,
+      segment: segTrim,
+    };
+  };
   let curOp = '';
   const stack = [];
   const putSet = (top, path, value) => { (ops.set[top] ||= {}); ops.set[top][path] = value; };
@@ -308,6 +371,14 @@ function parseBlock(innerText) {
     for (const [top, flat] of Object.entries(ops.push)) if (flat && Object.keys(flat).length) results.push({ name: top, operation: 'push', data: flat });
     for (const [top, flat] of Object.entries(ops.bump)) if (flat && Object.keys(flat).length) results.push({ name: top, operation: 'bump', data: flat });
     for (const [top, list] of Object.entries(ops.del)) if (Array.isArray(list) && list.length) results.push({ name: top, operation: 'del', data: list });
+    if (guardMap.size) {
+      const guardList = [];
+      for (const [path, tokenSet] of guardMap.entries()) {
+        const directives = Array.from(tokenSet).filter(Boolean);
+        if (directives.length) guardList.push({ path, directives });
+      }
+      if (guardList.length) results.push({ operation: 'guard', data: guardList });
+    }
     return results;
   };
   function normalizeOpName(k) {
@@ -320,11 +391,18 @@ function parseBlock(innerText) {
     if (!s) return false;
     if (s[0] !== '{' && s[0] !== '[') return false;
     try {
-      const data = JSON.parse(s);
+      const data = JSON.parse(text);
+      const decodeKey = (rawKey) => {
+        const { directives, remainder, original } = extractDirectiveInfo(rawKey);
+        const path = (remainder || original || String(rawKey)).trim();
+        if (directives && directives.length) recordGuardDirective(path, directives);
+        return path;
+      };
       const walkSetLike = (top, node, basePath = '') => {
         if (node === null || node === undefined) return;
         if (typeof node !== 'object' || Array.isArray(node)) { putSet(top, norm(basePath), node); return; }
-        for (const [k, v] of Object.entries(node)) {
+        for (const [rawK, v] of Object.entries(node)) {
+          const k = decodeKey(rawK);
           const p0 = basePath ? `${basePath}.${k}` : k;
           const p = norm(p0);
           if (Array.isArray(v)) putSet(top, p, v);
@@ -334,7 +412,8 @@ function parseBlock(innerText) {
       };
       const walkPushLike = (top, node, basePath = '') => {
         if (!node || typeof node !== 'object' || Array.isArray(node)) return;
-        for (const [k, v] of Object.entries(node)) {
+        for (const [rawK, v] of Object.entries(node)) {
+          const k = decodeKey(rawK);
           const p0 = basePath ? `${basePath}.${k}` : k;
           const p = norm(p0);
           if (Array.isArray(v)) for (const it of v) putPush(top, p, it);
@@ -344,7 +423,8 @@ function parseBlock(innerText) {
       };
       const walkBumpLike = (top, node, basePath = '') => {
         if (!node || typeof node !== 'object' || Array.isArray(node)) return;
-        for (const [k, v] of Object.entries(node)) {
+        for (const [rawK, v] of Object.entries(node)) {
+          const k = decodeKey(rawK);
           const p0 = basePath ? `${basePath}.${k}` : k;
           const p = norm(p0);
           if (v && typeof v === 'object' && !Array.isArray(v)) walkBumpLike(top, v, p);
@@ -352,9 +432,10 @@ function parseBlock(innerText) {
         }
       };
       const collectDelPaths = (acc, node, basePath = '') => {
-        if (Array.isArray(node)) { for (const it of node) if (typeof it === 'string') acc.push(norm(basePath ? `${basePath}.${it}` : it)); return; }
+        if (Array.isArray(node)) { for (const it of node) if (typeof it === 'string') acc.push(norm(basePath ? `${basePath}.${decodeKey(it)}` : decodeKey(it))); return; }
         if (node && typeof node === 'object') {
-          for (const [k, v] of Object.entries(node)) {
+          for (const [rawK, v] of Object.entries(node)) {
+            const k = decodeKey(rawK);
             const p0 = basePath ? `${basePath}.${k}` : k;
             const p = norm(p0);
             if (v === true) acc.push(p); else collectDelPaths(acc, v, p);
@@ -366,7 +447,8 @@ function parseBlock(innerText) {
           if (!entry || typeof entry !== 'object') continue;
           for (const [k, v] of Object.entries(entry)) {
             const op = normalizeOpName(k); if (!op || !v || typeof v !== 'object') continue;
-            for (const [top, payload] of Object.entries(v)) {
+            for (const [rawTop, payload] of Object.entries(v)) {
+              const top = decodeKey(rawTop);
               if (op === 'set') walkSetLike(top, payload);
               else if (op === 'push') walkPushLike(top, payload);
               else if (op === 'bump') walkBumpLike(top, payload);
@@ -377,7 +459,8 @@ function parseBlock(innerText) {
       } else if (data && typeof data === 'object') {
         for (const [k, v] of Object.entries(data)) {
           const op = normalizeOpName(k); if (!op || !v || typeof v !== 'object') continue;
-          for (const [top, payload] of Object.entries(v)) {
+          for (const [rawTop, payload] of Object.entries(v)) {
+            const top = decodeKey(rawTop);
             if (op === 'set') walkSetLike(top, payload);
             else if (op === 'push') walkPushLike(top, payload);
             else if (op === 'bump') walkBumpLike(top, payload);
@@ -477,8 +560,8 @@ function parseBlock(innerText) {
       return true;
     } catch { return false; }
   };
-  if (tryParseJsonFirst(innerText)) return finalizeResults();
-  if (tryParseTomlSecond(innerText)) return finalizeResults();
+  if (tryParseJsonFirst(textForJsonToml)) return finalizeResults();
+  if (tryParseTomlSecond(textForJsonToml)) return finalizeResults();
   const readList = (startIndex, parentIndent) => {
     const out = [];
     let i = startIndex;
@@ -530,9 +613,20 @@ function parseBlock(innerText) {
     if (mKV) {
       const key = mKV[1].trim();
       const rhs = String(stripYamlInlineComment(mKV[2])).trim();
-      const parentPath = stack.length ? stack[stack.length - 1].path : '';
-      const curPath0 = parentPath ? `${parentPath}.${key}` : key;
-      const curPath = (String(curPath0) || '').replace(/\[(\d+)\]/g, '.$1');
+      const parentInfo = stack.length ? stack[stack.length - 1] : null;
+      const parentPath = parentInfo ? parentInfo.path : '';
+      const inheritedDirs = parentInfo && Array.isArray(parentInfo.directives) ? parentInfo.directives : [];
+      const inheritedForChildren = parentInfo && Array.isArray(parentInfo.directivesForChildren) ? parentInfo.directivesForChildren : inheritedDirs;
+      const info = buildPathInfo(key, parentPath);
+      const combinedDirs = [...inheritedDirs, ...info.directives];
+      const nextInherited = info.directives.length ? info.directives : inheritedForChildren;
+      const effectiveGuardDirs = info.directives.length ? info.directives : inheritedDirs;
+      if (effectiveGuardDirs.length && info.guardTargetRaw) {
+        recordGuardDirective(info.guardTargetRaw, effectiveGuardDirs);
+      }
+      const curPathRaw = info.curPathRaw;
+      const curPath = norm(curPathRaw);
+      if (!curPath) continue;
       if (rhs && (rhs[0] === '|' || rhs[0] === '>')) {
         const { text, next } = readBlockScalar(i + 1, ind, rhs[0]);
         i = next;
@@ -544,7 +638,7 @@ function parseBlock(innerText) {
         continue;
       }
       if (rhs === '') {
-        stack.push({ indent: ind, path: curPath });
+        stack.push({ indent: ind, path: curPath, directives: combinedDirs, directivesForChildren: nextInherited });
         let j = i + 1;
         while (j < lines.length && !lines[j].trim()) j++;
         let handledList = false;
@@ -625,6 +719,11 @@ async function applyVariablesForMessage(messageId){
     blocks.forEach((b,idx)=>{
       const parts=parseBlock(b);
       for(const p of parts){
+        // 【变量守护·应用】保留 guard 操作，稍后统一处理
+        if(p.operation==='guard' && Array.isArray(p.data) && p.data.length>0){
+          ops.push({operation:'guard',data:p.data});
+          continue;
+        }
         const name=p.name&&p.name.trim()?p.name.trim():`varevent_${idx+1}`;
         if(p.operation==='setObject' && p.data && Object.keys(p.data).length>0) ops.push({name,operation:'setObject',data:p.data});
         else if(p.operation==='del' && Array.isArray(p.data) && p.data.length>0) ops.push({name,operation:'del',data:p.data});
@@ -636,6 +735,7 @@ async function applyVariablesForMessage(messageId){
     if(ops.length===0 && delVarNames.size===0) { setAppliedSignature(messageId, curSig); return; }
     const byName=new Map();
     for(const {name} of ops){
+      if (!name || typeof name !== 'string') continue;
       const {root}=getRootAndPath(name);
       if(!byName.has(root)){
         const curRaw=getLocalVariable(root); const obj=parseObj(curRaw);
@@ -702,6 +802,30 @@ async function applyVariablesForMessage(messageId){
     }
     const norm = (p)=> String(p||'').replace(/\[(\d+)\]/g, '.$1');
     for(const op of ops){
+      // 【变量守护·应用】先处理 guard 操作，调用 applyRuleDelta 写入规则表
+      if (op.operation === 'guard') {
+        const entries = Array.isArray(op.data) ? op.data : [];
+        if (typeof parseDirectivesTokenList === 'function' && typeof applyRuleDelta === 'function') {
+          for (const entry of entries) {
+            const path = typeof entry?.path === 'string' ? entry.path.trim() : '';
+            const tokens = Array.isArray(entry?.directives) ? entry.directives.map(t => String(t || '').trim()).filter(Boolean) : [];
+            if (!path || !tokens.length) continue;
+            try {
+              const delta = parseDirectivesTokenList(tokens);
+              if (!delta) continue;
+              const normalizedPath = typeof normalizePath === 'function' ? normalizePath(path) : path;
+              try {
+                console.log('[LWB:applyVariables] guard apply', { normalizedPath, tokens, delta });
+              } catch {}
+              applyRuleDelta(normalizedPath, delta);
+            } catch {}
+          }
+        }
+        try {
+          if (typeof rulesSaveToMeta === 'function') rulesSaveToMeta();
+        } catch {}
+        continue;
+      }
       const {root, subPath}=getRootAndPath(op.name);
       const rec=byName.get(root); if(!rec) continue;
       if(op.operation==='setObject'){
@@ -2564,6 +2688,49 @@ function getVarDict() {
   const meta = getMeta();
   return structuredClone(meta.variables || {});
 }
+// 【变量守护·快照】回溯快照需要把守护规则一并备份
+function cloneRulesTableForSnapshot() {
+  if (typeof rulesGetTable !== 'function') return {};
+  try {
+    const table = rulesGetTable();
+    if (!table || typeof table !== 'object') return {};
+    return structuredClone(table);
+  } catch {
+    try { return JSON.parse(JSON.stringify(rulesGetTable() || {})); } catch { return {}; }
+  }
+}
+// 【变量守护·快照】回放快照时同步守护表并刷新缓存
+function applyRulesSnapshot(tableLike) {
+  if (typeof rulesSetTable !== 'function') return;
+  const safe = (tableLike && typeof tableLike === 'object') ? tableLike : {};
+  let cloned = {};
+  try {
+    cloned = structuredClone(safe);
+  } catch {
+    try { cloned = JSON.parse(JSON.stringify(safe)); } catch { cloned = {}; }
+  }
+  rulesSetTable(cloned);
+  if (guardianState?.regexCache) guardianState.regexCache = {};
+  try {
+    for (const [p, node] of Object.entries(guardianState.table || {})) {
+      const c = node?.constraints?.regex;
+      if (c && c.source) {
+        const flags = c.flags || '';
+        try { guardianState.regexCache[p] = new RegExp(c.source, flags); } catch {}
+      }
+    }
+  } catch {}
+  try { if (typeof rulesSaveToMeta === 'function') rulesSaveToMeta(); } catch {}
+}
+function normalizeSnapshotRecord(raw) {
+  if (!raw || typeof raw !== 'object') return { vars: {}, rules: {} };
+  if (Object.prototype.hasOwnProperty.call(raw, 'vars') || Object.prototype.hasOwnProperty.call(raw, 'rules')) {
+    const varsPart = (raw.vars && typeof raw.vars === 'object') ? raw.vars : {};
+    const rulesPart = (raw.rules && typeof raw.rules === 'object') ? raw.rules : {};
+    return { vars: varsPart, rules: rulesPart };
+  }
+  return { vars: raw, rules: {} };
+}
 function syncMetaToLocalVariables(dict) {
   try {
     if (typeof guardBypass === 'function') guardBypass(true);
@@ -2601,14 +2768,21 @@ function getSnapMap() {
 function setSnapshot(messageId, snapDict) {
   if (messageId == null || messageId < 0) return;
   const snaps = getSnapMap();
-  snaps[messageId] = structuredClone(snapDict || {});
+  try {
+    snaps[messageId] = structuredClone(snapDict || {});
+  } catch {
+    try { snaps[messageId] = JSON.parse(JSON.stringify(snapDict || {})); } catch { snaps[messageId] = {}; }
+  }
   getContext()?.saveMetadataDebounced?.();
 }
 function getSnapshot(messageId) {
   if (messageId == null || messageId < 0) return undefined;
   const snaps = getSnapMap();
   const snap = snaps[messageId];
-  return snap ? structuredClone(snap) : undefined;
+  if (!snap) return undefined;
+  try { return structuredClone(snap); } catch {
+    try { return JSON.parse(JSON.stringify(snap)); } catch { return undefined; }
+  }
 }
 function clearSnapshotsFrom(startIdInclusive) {
   if (startIdInclusive == null) return;
@@ -2633,7 +2807,8 @@ function snapshotCurrentLastFloor() {
     const lastId = chat.length ? chat.length - 1 : -1;
     if (lastId < 0) return;
     const dict = getVarDict();
-    setSnapshot(lastId, dict);
+    const rules = cloneRulesTableForSnapshot();
+    setSnapshot(lastId, { vars: dict, rules });
   } catch {}
 }
 function snapshotPreviousFloor() {
@@ -2643,7 +2818,9 @@ function snapshotForMessageId(currentId) {
   try {
     if (typeof currentId !== 'number' || currentId < 0) return;
     const dict = getVarDict();
-    setSnapshot(currentId, dict);
+    // 【变量守护·快照】同时备份守护规则
+    const rules = cloneRulesTableForSnapshot();
+    setSnapshot(currentId, { vars: dict, rules });
   } catch {}
 }
 function rollbackToPreviousOf(messageId) {
@@ -2653,7 +2830,15 @@ function rollbackToPreviousOf(messageId) {
   if (prevId < 0) return;
   const snap = getSnapshot(prevId);
   if (snap) {
-    try { if (typeof guardBypass === 'function') guardBypass(true); setVarDict(snap); } finally { if (typeof guardBypass === 'function') guardBypass(false); }
+    // 【变量守护·快照】回滚时还原变量 + 守护规则
+    const normalized = normalizeSnapshotRecord(snap);
+    try {
+      if (typeof guardBypass === 'function') guardBypass(true);
+      setVarDict(normalized.vars || {});
+      applyRulesSnapshot(normalized.rules || {});
+    } finally {
+      if (typeof guardBypass === 'function') guardBypass(false);
+    }
   }
 }
 async function executeQueuedVareventJsAfterTurn() {
@@ -3177,7 +3362,8 @@ function applyRulesDeltaToTable(delta) { if (!delta || typeof delta !== 'object'
 function clampNumberWithConstraints(v, node) { let out = Number(v); if (!Number.isFinite(out)) return { ok: false }; const c = node?.constraints || {}; if (Number.isFinite(c.min)) out = Math.max(out, c.min); if (Number.isFinite(c.max)) out = Math.min(out, c.max); return { ok: true, value: out } }
 function checkStringWithConstraints(v, node) { const s = String(v); const c = node?.constraints || {}; if (Array.isArray(c.enum) && c.enum.length) { if (!c.enum.includes(s)) return { ok: false } } if (c.regex && c.regex.source) { let re = guardianState.regexCache[normalizePath(node.__path || '')]; if (!re) { try { re = new RegExp(c.regex.source, c.regex.flags || ''); guardianState.regexCache[normalizePath(node.__path || '')] = re } catch {} } if (re && !re.test(s)) return { ok: false } } return { ok: true, value: s } }
 function getParentPath(absPath) { const segs = lwbSplitPathWithBrackets(absPath); if (segs.length <= 1) return ''; return segs.slice(0, -1).map(s => String(s)).join('.') }
-function guardValidate(op, absPath, payload) { if (guardianState.bypass) return { allow: true, value: payload }; const p = normalizePath(absPath); const node = getRuleNode(p) || { typeLock: 'unknown', ro: false, objectPolicy: 'none', arrayPolicy: 'lock', constraints: {} }; if (node.ro) return { allow: false, reason: 'ro' }; const parentPath = getParentPath(p); const parentNode = parentPath ? (getRuleNode(parentPath) || { objectPolicy: 'none', arrayPolicy: 'lock' }) : null; const currentValue = getValueAtPath(p); if (op === 'delNode') { if (!parentPath) return { allow: false, reason: 'no-parent' }; const pp = getRuleNode(parentPath) || { objectPolicy: 'none', arrayPolicy: 'lock' }; const lastSeg = p.split('.').pop() || ''; const isIndex = /^\d+$/.test(lastSeg); if (isIndex) { if (!(pp.arrayPolicy === 'shrink' || pp.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-shrink' }; return { allow: true } } else { if (!(pp.objectPolicy === 'prune' || pp.objectPolicy === 'free')) return { allow: false, reason: 'object-no-prune' }; return { allow: true } } } if (op === 'push') { const arr = getValueAtPath(p); if (arr === undefined) { const lastSeg = p.split('.').pop() || ''; const isIndex = /^\d+$/.test(lastSeg); if (parentPath) { const parentVal = getValueAtPath(parentPath); const pp = parentNode || { objectPolicy: 'none', arrayPolicy: 'lock' }; if (isIndex) { if (!Array.isArray(parentVal)) return { allow: false, reason: 'parent-not-array' }; if (!(pp.arrayPolicy === 'grow' || pp.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-grow' } } else { if (!(pp.objectPolicy === 'ext' || pp.objectPolicy === 'free')) return { allow: false, reason: 'object-no-ext' } } } const nn = ensureRuleNode(p); nn.typeLock = 'array'; rulesSaveToMeta(); return { allow: true, value: payload } } if (!Array.isArray(arr)) { if (node.typeLock !== 'unknown' && node.typeLock !== 'array') return { allow: false, reason: 'type-locked-not-array' }; return { allow: false, reason: 'not-array' } } if (!(node.arrayPolicy === 'grow' || node.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-grow' }; return { allow: true, value: payload } } if (op === 'bump') { let d = Number(payload); if (!Number.isFinite(d)) return { allow: false, reason: 'delta-nan' }; if (currentValue === undefined) { if (parentPath) { const lastSeg = p.split('.').pop() || ''; const isIndex = /^\d+$/.test(lastSeg); if (isIndex) { if (!(parentNode && (parentNode.arrayPolicy === 'grow' || parentNode.arrayPolicy === 'list'))) return { allow: false, reason: 'array-no-grow' } } else { if (!(parentNode && (parentNode.objectPolicy === 'ext' || parentNode.objectPolicy === 'free'))) return { allow: false, reason: 'object-no-ext' } } } } const c = node?.constraints || {}; const step = Number.isFinite(c.step) ? Math.abs(c.step) : Infinity; if (isFinite(step)) { if (d > step) d = step; if (d < -step) d = -step } const cur = Number(currentValue); if (!Number.isFinite(cur)) { const base = 0 + d; const cl = clampNumberWithConstraints(base, node); if (!cl.ok) return { allow: false, reason: 'number-constraint' }; setTypeLockIfUnknown(p, base); return { allow: true, value: cl.value } } const next = cur + d; const clamped = clampNumberWithConstraints(next, node); if (!clamped.ok) return { allow: false, reason: 'number-constraint' }; return { allow: true, value: clamped.value } } if (op === 'set') { const exists = currentValue !== undefined; if (!exists) { if (parentNode) { const lastSeg = p.split('.').pop() || ''; const isIndex = /^\d+$/.test(lastSeg); if (isIndex) { if (!(parentNode.arrayPolicy === 'grow' || parentNode.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-grow' } } else { if (!(parentNode.objectPolicy === 'ext' || parentNode.objectPolicy === 'free')) return { allow: false, reason: 'object-no-ext' } } } } const incomingType = typeOfValue(payload); if (node.typeLock !== 'unknown' && node.typeLock !== incomingType) return { allow: false, reason: 'type-locked-mismatch' }; if (incomingType === 'number') { let incoming = Number(payload); if (!Number.isFinite(incoming)) return { allow: false, reason: 'number-constraint' }; const c = node?.constraints || {}; const step = Number.isFinite(c.step) ? Math.abs(c.step) : Infinity; const curNum = Number(currentValue); const base = Number.isFinite(curNum) ? curNum : 0; if (isFinite(step)) { let diff = incoming - base; if (diff > step) diff = step; if (diff < -step) diff = -step; incoming = base + diff } const clamped = clampNumberWithConstraints(incoming, node); if (!clamped.ok) return { allow: false, reason: 'number-constraint' }; setTypeLockIfUnknown(p, incoming); return { allow: true, value: clamped.value } } if (incomingType === 'string') { const n2 = { ...node, __path: p }; const ok = checkStringWithConstraints(payload, n2); if (!ok.ok) return { allow: false, reason: 'string-constraint' }; setTypeLockIfUnknown(p, payload); return { allow: true, value: ok.value } } setTypeLockIfUnknown(p, payload); return { allow: true, value: payload } } return { allow: true, value: payload } }
+function getEffectiveParentNode(p) { let parentPath = getParentPath(p); while (parentPath) { const pNode = getRuleNode(parentPath); if (pNode && (pNode.objectPolicy !== 'none' || pNode.arrayPolicy !== 'lock')) { return pNode; } parentPath = getParentPath(parentPath); } return null; }
+function guardValidate(op, absPath, payload) { if (guardianState.bypass) return { allow: true, value: payload }; const p = normalizePath(absPath); const node = getRuleNode(p) || { typeLock: 'unknown', ro: false, objectPolicy: 'none', arrayPolicy: 'lock', constraints: {} }; if (node.ro) return { allow: false, reason: 'ro' }; const parentPath = getParentPath(p); const parentNode = parentPath ? (getEffectiveParentNode(p) || { objectPolicy: 'none', arrayPolicy: 'lock' }) : null; const currentValue = getValueAtPath(p); if (op === 'delNode') { if (!parentPath) return { allow: false, reason: 'no-parent' }; const pp = getRuleNode(parentPath) || { objectPolicy: 'none', arrayPolicy: 'lock' }; const lastSeg = p.split('.').pop() || ''; const isIndex = /^\d+$/.test(lastSeg); if (isIndex) { if (!(pp.arrayPolicy === 'shrink' || pp.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-shrink' }; return { allow: true } } else { if (!(pp.objectPolicy === 'prune' || pp.objectPolicy === 'free')) return { allow: false, reason: 'object-no-prune' }; return { allow: true } } } if (op === 'push') { const arr = getValueAtPath(p); if (arr === undefined) { const lastSeg = p.split('.').pop() || ''; const isIndex = /^\d+$/.test(lastSeg); if (parentPath) { const parentVal = getValueAtPath(parentPath); const pp = parentNode || { objectPolicy: 'none', arrayPolicy: 'lock' }; if (isIndex) { if (!Array.isArray(parentVal)) return { allow: false, reason: 'parent-not-array' }; if (!(pp.arrayPolicy === 'grow' || pp.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-grow' } } else { if (!(pp.objectPolicy === 'ext' || pp.objectPolicy === 'free')) return { allow: false, reason: 'object-no-ext' } } } const nn = ensureRuleNode(p); nn.typeLock = 'array'; rulesSaveToMeta(); return { allow: true, value: payload } } if (!Array.isArray(arr)) { if (node.typeLock !== 'unknown' && node.typeLock !== 'array') return { allow: false, reason: 'type-locked-not-array' }; return { allow: false, reason: 'not-array' } } if (!(node.arrayPolicy === 'grow' || node.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-grow' }; return { allow: true, value: payload } } if (op === 'bump') { let d = Number(payload); if (!Number.isFinite(d)) return { allow: false, reason: 'delta-nan' }; if (currentValue === undefined) { if (parentPath) { const lastSeg = p.split('.').pop() || ''; const isIndex = /^\d+$/.test(lastSeg); if (isIndex) { if (!(parentNode && (parentNode.arrayPolicy === 'grow' || parentNode.arrayPolicy === 'list'))) return { allow: false, reason: 'array-no-grow' } } else { if (!(parentNode && (parentNode.objectPolicy === 'ext' || parentNode.objectPolicy === 'free'))) return { allow: false, reason: 'object-no-ext' } } } } const c = node?.constraints || {}; const step = Number.isFinite(c.step) ? Math.abs(c.step) : Infinity; if (isFinite(step)) { if (d > step) d = step; if (d < -step) d = -step } const cur = Number(currentValue); if (!Number.isFinite(cur)) { const base = 0 + d; const cl = clampNumberWithConstraints(base, node); if (!cl.ok) return { allow: false, reason: 'number-constraint' }; setTypeLockIfUnknown(p, base); return { allow: true, value: cl.value } } const next = cur + d; const clamped = clampNumberWithConstraints(next, node); if (!clamped.ok) return { allow: false, reason: 'number-constraint' }; return { allow: true, value: clamped.value } } if (op === 'set') { const exists = currentValue !== undefined; if (!exists) { if (parentNode) { const lastSeg = p.split('.').pop() || ''; const isIndex = /^\d+$/.test(lastSeg); if (isIndex) { if (!(parentNode.arrayPolicy === 'grow' || parentNode.arrayPolicy === 'list')) return { allow: false, reason: 'array-no-grow' } } else { if (!(parentNode.objectPolicy === 'ext' || parentNode.objectPolicy === 'free')) return { allow: false, reason: 'object-no-ext' } } } } const incomingType = typeOfValue(payload); if (node.typeLock !== 'unknown' && node.typeLock !== incomingType) return { allow: false, reason: 'type-locked-mismatch' }; if (incomingType === 'number') { let incoming = Number(payload); if (!Number.isFinite(incoming)) return { allow: false, reason: 'number-constraint' }; const c = node?.constraints || {}; const step = Number.isFinite(c.step) ? Math.abs(c.step) : Infinity; const curNum = Number(currentValue); const base = Number.isFinite(curNum) ? curNum : 0; if (isFinite(step)) { let diff = incoming - base; if (diff > step) diff = step; if (diff < -step) diff = -step; incoming = base + diff } const clamped = clampNumberWithConstraints(incoming, node); if (!clamped.ok) return { allow: false, reason: 'number-constraint' }; setTypeLockIfUnknown(p, incoming); return { allow: true, value: clamped.value } } if (incomingType === 'string') { const n2 = { ...node, __path: p }; const ok = checkStringWithConstraints(payload, n2); if (!ok.ok) return { allow: false, reason: 'string-constraint' }; setTypeLockIfUnknown(p, payload); return { allow: true, value: ok.value } } setTypeLockIfUnknown(p, payload); return { allow: true, value: payload } } return { allow: true, value: payload } }
 function installVariableApiPatch() { try { const ctx = getContext(); const api = ctx?.variables?.local; if (!api || guardianState.origVarApi) return; guardianState.origVarApi = { set: api.set?.bind(api), add: api.add?.bind(api), inc: api.inc?.bind(api), dec: api.dec?.bind(api), del: api.del?.bind(api) }; if (guardianState.origVarApi.set) { api.set = (name, value) => { try { if (guardianState.bypass) return guardianState.origVarApi.set(name, value); let finalValue = value; if (value && typeof value === 'object' && !Array.isArray(value)) { let hasRuleKey = false; for (const k of Object.keys(value)) { if (k.startsWith('$')) { hasRuleKey = true; break } } if (hasRuleKey) { const { cleanValue, rulesDelta } = rulesLoadFromTree(value, normalizePath(name)); finalValue = cleanValue; applyRulesDeltaToTable(rulesDelta) } } const res = guardValidate('set', normalizePath(name), finalValue); if (!res.allow) return; return guardianState.origVarApi.set(name, res.value) } catch { return } } } if (guardianState.origVarApi.add) { api.add = (name, delta) => { try { if (guardianState.bypass) return guardianState.origVarApi.add(name, delta); const res = guardValidate('bump', normalizePath(name), delta); if (!res.allow) return; const cur = Number(getValueAtPath(normalizePath(name))); if (!Number.isFinite(cur)) { return guardianState.origVarApi.set(name, res.value) } const next = res.value; const diff = Number(next) - cur; return guardianState.origVarApi.add(name, diff) } catch { return } } } if (guardianState.origVarApi.inc) { api.inc = (name) => api.add ? api.add(name, 1) : undefined } if (guardianState.origVarApi.dec) { api.dec = (name) => api.add ? api.add(name, -1) : undefined } if (guardianState.origVarApi.del) { api.del = (name) => { try { if (guardianState.bypass) return guardianState.origVarApi.del(name); const res = guardValidate('delNode', normalizePath(name)); if (!res.allow) return; return guardianState.origVarApi.del(name) } catch { return } } } } catch {} }
 function uninstallVariableApiPatch() { try { const ctx = getContext(); const api = ctx?.variables?.local; if (!api || !guardianState.origVarApi) return; if (guardianState.origVarApi.set) api.set = guardianState.origVarApi.set; if (guardianState.origVarApi.add) api.add = guardianState.origVarApi.add; if (guardianState.origVarApi.inc) api.inc = guardianState.origVarApi.inc; if (guardianState.origVarApi.dec) api.dec = guardianState.origVarApi.dec; if (guardianState.origVarApi.del) api.del = guardianState.origVarApi.del; guardianState.origVarApi = null } catch {} }
 /* ============= 第八区：模块导出/初始化/清理 ============= */

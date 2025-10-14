@@ -10,6 +10,8 @@ import { SlashCommandParser } from "../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from "../../../slash-commands/SlashCommandArgument.js";
 import { SECRET_KEYS, writeSecret } from "../../../secrets.js";
+import { evaluateMacros } from "../../../macros.js";
+import { renderStoryString, power_user } from "../../../power-user.js";
 
 const EVT_DONE = 'xiaobaix_streaming_completed';
 
@@ -288,11 +290,7 @@ class StreamingGeneration {
                 const result = await this.callAPI(generateData, abortController.signal, false);
                 this.updateTempReply(result, session.id);
             }
-            const payload = {
-                finalText: session.text,
-                originalPrompt: prompt,
-                sessionId: session.id
-            };
+            const payload = { finalText: session.text, originalPrompt: prompt, sessionId: session.id };
             try { eventSource?.emit?.(EVT_DONE, payload); } catch {}
             this.postToFrames(EVT_DONE, payload);
             try { window?.postMessage?.({ type: EVT_DONE, payload, from: 'xiaobaix' }, '*'); } catch {}
@@ -307,8 +305,7 @@ class StreamingGeneration {
         }
     }
 
-    _normalize = (s) => String(s || '').replace(/[\r\t\u200B\u00A0]/g, '').replace(/\s+/g, ' ')
-        .replace(/^["'""'']+|["'""'']+$/g, '').trim();
+    _normalize = (s) => String(s || '').replace(/[\r\t\u200B\u00A0]/g, '').replace(/\s+/g, ' ').replace(/^["'""'']+|["'""'']+$/g, '').trim();
     _stripNamePrefix = (s) => String(s || '').replace(/^\s*[^:]{1,32}:\s*/, '');
     _normStrip = (s) => this._normalize(this._stripNamePrefix(s));
 
@@ -351,7 +348,7 @@ class StreamingGeneration {
             const role = normRole(seg.slice(0, idx));
             if (!role) continue;
             const content = extractValue(seg.slice(idx + 1));
-            if (content) result.push({ role, content });
+            if (content || content === '') result.push({ role, content });
         }
         return result;
     }
@@ -366,17 +363,11 @@ class StreamingGeneration {
                 const [a, b] = [n.length, c.length];
                 const [minL, maxL] = [Math.min(a, b), Math.max(a, b)];
                 if (minL < 20) continue;
-                if (((a >= b && n.includes(c)) || (b >= a && c.includes(n))) && minL / maxL >= 0.8)
-                    return true;
+                if (((a >= b && n.includes(c)) || (b >= a && c.includes(n))) && minL / maxL >= 0.8) return true;
             }
             return false;
         };
     }
-
-    _pushIf = (arr, role, content) => {
-        const t = String(content || '').trim();
-        if (t) arr.push({ role, content: t });
-    };
 
     async _runToggleTask(task) {
         const prev = this._toggleQueue;
@@ -401,7 +392,6 @@ class StreamingGeneration {
                     'worldInfoBefore', 'worldInfoAfter',
                     'charDescription', 'charPersonality', 'scenario', 'personaDescription',
                 ]);
-
                 const enableIds = new Set();
                 if (addonSet.has('preset')) {
                     for (const e of list) {
@@ -417,14 +407,12 @@ class StreamingGeneration {
                 if (addonSet.has('scenario')) enableIds.add('scenario');
                 if (addonSet.has('personaDescription')) enableIds.add('personaDescription');
                 if (addonSet.has('worldInfo') && !addonSet.has('chatHistory')) enableIds.add('chatHistory');
-
                 return list.map(e => {
                     const cloned = { ...e };
                     cloned.enabled = enableIds.has(cloned.identifier);
                     return cloned;
                 });
             };
-
             try {
                 return await fn();
             } finally {
@@ -512,10 +500,188 @@ class StreamingGeneration {
         return Number.isFinite(n) ? n : undefined;
     }
 
+    getActiveCharFields() {
+        const ctx = getContext();
+        const char = (ctx?.getCharacter?.(ctx?.characterId)) || (Array.isArray(ctx?.characters) ? ctx.characters[ctx.characterId] : null) || {};
+        const data = char.data || char || {};
+        const personaText =
+            (typeof power_user?.persona_description === 'string' ? power_user.persona_description : '') ||
+            String((ctx?.extensionSettings?.personas?.current?.description) || '').trim();
+        const mesExamples =
+            String(data.mes_example || data.mesExample || data.example_dialogs || '').trim();
+        return {
+            description: String(data.description || '').trim(),
+            personality: String(data.personality || '').trim(),
+            scenario: String(data.scenario || '').trim(),
+            persona: String(personaText || '').trim(),
+            mesExamples,
+        };
+    }
+
+    _extractTextFromMessage(msg) {
+        if (!msg) return '';
+        if (typeof msg.mes === 'string') return msg.mes.replace(/\r\n/g, '\n');
+        if (typeof msg.content === 'string') return msg.content.replace(/\r\n/g, '\n');
+        if (Array.isArray(msg.content)) {
+            return msg.content
+                .filter(p => p && p.type === 'text' && typeof p.text === 'string')
+                .map(p => p.text.replace(/\r\n/g, '\n')).join('\n');
+        }
+        return '';
+    }
+
+    _getLastMessagesSnapshot() {
+        const ctx = getContext();
+        const list = Array.isArray(ctx?.chat) ? ctx.chat : [];
+        let lastMessage = '';
+        let lastUserMessage = '';
+        let lastCharMessage = '';
+        for (let i = list.length - 1; i >= 0; i--) {
+            const m = list[i];
+            const text = this._extractTextFromMessage(m).trim();
+            if (!lastMessage && text) lastMessage = text;
+            if (!lastUserMessage && m?.is_user && text) lastUserMessage = text;
+            if (!lastCharMessage && !m?.is_user && !m?.is_system && text) lastCharMessage = text;
+            if (lastMessage && lastUserMessage && lastCharMessage) break;
+        }
+        return { lastMessage, lastUserMessage, lastCharMessage };
+    }
+
+async expandInline(text) {
+    let out = String(text ?? '');
+    if (!out) return out;
+
+    const f = this.getActiveCharFields();
+    const dict = {
+        '{{description}}': f.description,
+        '{{personality}}': f.personality,
+        '{{scenario}}': f.scenario,
+        '{{persona}}': f.persona,
+        '{{mesexamples}}': f.mesExamples,
+    };
+    for (const [k, v] of Object.entries(dict)) {
+        if (!k) continue;
+        const re = new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        out = out.replace(re, v || '');
+    }
+
+    const ctx = getContext();
+    out = String(out)
+        .replace(/\{\{user\}\}/gi, String(ctx?.name1 || 'User'))
+        .replace(/\{\{char\}\}/gi, String(ctx?.name2 || 'Assistant'))
+        .replace(/\{\{newline\}\}/gi, '\n');
+
+    out = out
+        .replace(/<\s*user\s*>/gi, String(ctx?.name1 || 'User'))
+        .replace(/<\s*(char|character)\s*>/gi, String(ctx?.name2 || 'Assistant'))
+        .replace(/<\s*persona\s*>/gi, String(f.persona || ''));
+
+    const snap = this._getLastMessagesSnapshot();
+    const lastDict = {
+        '{{lastmessage}}': snap.lastMessage,
+        '{{lastusermessage}}': snap.lastUserMessage,
+        '{{lastcharmessage}}': snap.lastCharMessage,
+    };
+    for (const [k, v] of Object.entries(lastDict)) {
+        const re = new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        out = out.replace(re, (m) => (v && v.length ? v : ''));
+    }
+
+    const expandVarMacros = async (s) => {
+        if (typeof window?.STscript !== 'function') return s;
+        let txt = String(s);
+
+        const escapeForCmd = (v) => {
+            const escaped = String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            return `"${escaped}"`;
+        };
+
+        const apply = async (macroRe, getCmdForRoot) => {
+            const found = [];
+            let m;
+            macroRe.lastIndex = 0;
+            while ((m = macroRe.exec(txt)) !== null) {
+                const full = m[0];
+                const path = m[1]?.trim();
+                if (!path) continue;
+                found.push({ full, path });
+            }
+            if (!found.length) return;
+
+            const cache = new Map();
+            const getRootAndTail = (p) => {
+                const idx = p.indexOf('.');
+                return idx === -1 ? [p, ''] : [p.slice(0, idx), p.slice(idx + 1)];
+            };
+            const dig = (val, tail) => {
+                if (!tail) return val;
+                const parts = tail.split('.').filter(Boolean);
+                let cur = val;
+                for (const key of parts) {
+                    if (cur && typeof cur === 'object' && key in cur) cur = cur[key];
+                    else return '';
+                }
+                return cur;
+            };
+
+            const roots = [...new Set(found.map(item => getRootAndTail(item.path)[0]))];
+            await Promise.all(roots.map(async (root) => {
+                try {
+                    const cmd = getCmdForRoot(root);
+                    const result = await window.STscript(cmd);
+                    let parsed = result;
+                    try { parsed = JSON.parse(result); } catch {}
+                    cache.set(root, parsed);
+                } catch {
+                    cache.set(root, '');
+                }
+            }));
+
+            for (const item of found) {
+                const [root, tail] = getRootAndTail(item.path);
+                const rootVal = cache.get(root);
+                const val = tail ? dig(rootVal, tail) : rootVal;
+                const finalStr = typeof val === 'string' ? val : (val == null ? '' : JSON.stringify(val));
+                txt = txt.split(item.full).join(finalStr);
+            }
+        };
+
+        await apply(
+            /\{\{getvar::([\s\S]*?)\}\}/gi,
+            (root) => `/getvar key=${escapeForCmd(root)}`
+        );
+        await apply(
+            /\{\{getglobalvar::([\s\S]*?)\}\}/gi,
+            (root) => `/getglobalvar ${escapeForCmd(root)}`
+        );
+
+        return txt;
+    };
+
+    out = await expandVarMacros(out);
+
+    try {
+        if (typeof renderStoryString === 'function') {
+            const r = renderStoryString(out);
+            if (typeof r === 'string' && r.length) out = r;
+        }
+    } catch {}
+    try {
+        if (typeof evaluateMacros === 'function') {
+            const r2 = await evaluateMacros(out);
+            if (typeof r2 === 'string' && r2.length) out = r2;
+        }
+    } catch {}
+
+    return out;
+}
+
     async xbgenrawCommand(args, prompt) {
         const hasScaffolding = Boolean(String(
-            args?.top || args?.topsys || args?.topuser || args?.topassistant ||
-            args?.bottom || args?.bottomsys || args?.bottomuser || args?.bottomassistant ||
+            args?.top || args?.top64 ||
+            args?.topsys || args?.topuser || args?.topassistant ||
+            args?.bottom || args?.bottom64 ||
+            args?.bottomsys || args?.bottomuser || args?.bottomassistant ||
             args?.addon || ''
         ).trim());
         if (!prompt?.trim() && !hasScaffolding) return '';
@@ -545,7 +711,18 @@ class StreamingGeneration {
             }
         } catch {}
         const nonstream = String(args?.nonstream || '').toLowerCase() === 'true';
-        const addonSet = new Set(String(args?.addon || '').split(',').map(s => s.trim()).filter(Boolean));
+        const b64dUtf8 = (s) => {
+            try {
+                let str = String(s).trim().replace(/-/g, '+').replace(/_/g, '/');
+                const pad = str.length % 4 ? '='.repeat(4 - (str.length % 4)) : '';
+                str += pad;
+                const bin = atob(str);
+                const u8 = Uint8Array.from(bin, c => c.charCodeAt(0));
+                return new TextDecoder().decode(u8);
+            } catch { return ''; }
+        };
+        const topComposite = args?.top64 ? b64dUtf8(args.top64) : String(args?.top || '').trim();
+        const bottomComposite = args?.bottom64 ? b64dUtf8(args.bottom64) : String(args?.bottom || '').trim();
         const createMsgs = (prefix) => {
             const msgs = [];
             ['sys', 'user', 'assistant'].forEach(r => {
@@ -554,8 +731,6 @@ class StreamingGeneration {
             });
             return msgs;
         };
-        const topComposite = String(args?.top || '').trim();
-        const bottomComposite = String(args?.bottom || '').trim();
         const historyPlaceholderRegex = /\{\$history(\d{1,3})\}/ig;
         const resolveHistoryPlaceholder = async (text) => {
             if (!text || typeof text !== 'string') return text;
@@ -579,17 +754,10 @@ class StreamingGeneration {
                 for (let i = start; i < chatArr.length; i++) {
                     const msg = chatArr[i];
                     const isUser = !!msg?.is_user;
-                    if (isUser) {
-                        const speaker = (msg?.name && String(msg.name).trim())
-                            || (ctx?.name1 && String(ctx.name1).trim())
-                            || 'USER';
-                        lines.push(`${speaker}：`);
-                    } else {
-                        const speaker = (msg?.name && String(msg.name).trim())
-                            || (ctx?.name2 && String(ctx.name2).trim())
-                            || 'ASSISTANT';
-                        lines.push(`${speaker}：`);
-                    }
+                    const speaker = isUser
+                        ? ((msg?.name && String(msg.name).trim()) || (ctx?.name1 && String(ctx.name1).trim()) || 'USER')
+                        : ((msg?.name && String(msg.name).trim()) || (ctx?.name2 && String(ctx.name2).trim()) || 'ASSISTANT');
+                    lines.push(`${speaker}：`);
                     const textContent = (extractText(msg) || '').trim();
                     if (textContent) lines.push(textContent);
                     lines.push('');
@@ -607,32 +775,79 @@ class StreamingGeneration {
             }
             return out;
         };
-        const topMsgs = await mapHistoryPlaceholders(
+        let topMsgs = await mapHistoryPlaceholders(
             []
                 .concat(topComposite ? this._parseCompositeParam(topComposite) : [])
                 .concat(createMsgs('top'))
         );
-        const bottomMsgs = await mapHistoryPlaceholders(
+        let bottomMsgs = await mapHistoryPlaceholders(
             []
                 .concat(bottomComposite ? this._parseCompositeParam(bottomComposite) : [])
                 .concat(createMsgs('bottom'))
         );
+        const expandSegmentInline = async (arr) => {
+            for (const m of arr) {
+                if (m && typeof m.content === 'string') {
+                    const before = m.content;
+                    const after = await this.expandInline(before);
+                    m.content = after && after.length ? after : before;
+                }
+            }
+        };
+        await expandSegmentInline(topMsgs);
+        await expandSegmentInline(bottomMsgs);
+        if (typeof prompt === 'string' && prompt.trim()) {
+            const beforeP = await resolveHistoryPlaceholder(prompt);
+            const afterP = await this.expandInline(beforeP);
+            prompt = afterP && afterP.length ? afterP : beforeP;
+        }
         try {
-            const needsWI = [...topMsgs, ...bottomMsgs].some(m => m && typeof m.content === 'string' && m.content.includes('{$worldInfo}'));
+            const needsWI = [...topMsgs, ...bottomMsgs].some(m => m && typeof m.content === 'string' && m.content.includes('{$worldInfo}')) || (typeof prompt === 'string' && prompt.includes('{$worldInfo}'));
             if (needsWI) {
                 const wiText = await this._captureWorldInfoText(prompt || '');
-                const wiRegex = /\{\$worldInfo\}/ig;
-                const applyWI = (arr) => {
-                    for (const m of arr) {
-                        if (m && typeof m.content === 'string') {
-                            m.content = m.content.replace(wiRegex, wiText || '');
+                const wiTrim = String(wiText || '').trim();
+                if (wiTrim) {
+                    const wiRegex = /\{\$worldInfo\}/ig;
+                    const applyWI = (arr) => {
+                        for (const m of arr) {
+                            if (m && typeof m.content === 'string') {
+                                m.content = m.content.replace(wiRegex, wiTrim);
+                            }
                         }
-                    }
-                };
-                applyWI(topMsgs);
-                applyWI(bottomMsgs);
+                    };
+                    applyWI(topMsgs);
+                    applyWI(bottomMsgs);
+                    if (typeof prompt === 'string') prompt = prompt.replace(wiRegex, wiTrim);
+                }
             }
         } catch {}
+        const addonSetStr = String(args?.addon || '').trim();
+        const shouldUsePM = addonSetStr.length > 0;
+        if (!shouldUsePM) {
+            const messages = []
+                .concat(topMsgs.filter(m => typeof m?.content === 'string' && m.content.trim().length))
+                .concat(prompt && prompt.trim().length ? [{ role, content: prompt.trim() }] : [])
+                .concat(bottomMsgs.filter(m => typeof m?.content === 'string' && m.content.trim().length));
+            const common = { messages, apiOptions, stop: parsedStop };
+            if (nonstream) {
+                try { if (lock) deactivateSendButtons(); } catch {}
+                try {
+                    await this._emitPromptReady(messages);
+                    const finalText = await this.processGeneration(common, prompt || '', sessionId, false);
+                    return String(finalText ?? '');
+                } finally {
+                    try { if (lock) activateSendButtons(); } catch {}
+                }
+            } else {
+                try { if (lock) deactivateSendButtons(); } catch {}
+                await this._emitPromptReady(messages);
+                const p = this.processGeneration(common, prompt || '', sessionId, true);
+                p.finally(() => { try { if (lock) activateSendButtons(); } catch {} });
+                p.catch(() => {});
+                return String(sessionId);
+            }
+        }
+        const addonSet = new Set(addonSetStr.split(',').map(s => s.trim()).filter(Boolean));
         const buildAddonFinalMessages = async () => {
             const context = getContext();
             let capturedData = null;
@@ -642,8 +857,6 @@ class StreamingGeneration {
                     : (Array.isArray(data) ? data.slice() : data);
             };
             eventSource.on(event_types.GENERATE_AFTER_DATA, dataListener);
-            const tempKeys = [];
-            const pushTemp = () => {};
             const skipWIAN = addonSet.has('worldInfo') ? false : true;
             await this._withTemporaryPromptToggles(addonSet, async () => {
                 const sandboxed = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
@@ -668,14 +881,10 @@ class StreamingGeneration {
                 }
             });
             eventSource.removeListener(event_types.GENERATE_AFTER_DATA, dataListener);
-            tempKeys.forEach(key => {});
             let src = [];
             const cd = capturedData;
-            if (Array.isArray(cd)) {
-                src = cd.slice();
-            } else if (cd && typeof cd === 'object' && Array.isArray(cd.prompt)) {
-                src = cd.prompt.slice();
-            }
+            if (Array.isArray(cd)) src = cd.slice();
+            else if (cd && typeof cd === 'object' && Array.isArray(cd.prompt)) src = cd.prompt.slice();
             const sandboxedAfter = addonSet.has('worldInfo') && !addonSet.has('chatHistory');
             const isFromChat = this._createIsFromChat();
             const finalPromptMessages = src.filter(m => {
@@ -720,7 +929,7 @@ class StreamingGeneration {
             const seenKey = new Set();
             const finalMessages = [];
             for (const m of mergedOnce) {
-                if (!m || !m.content) continue;
+                if (!m || !m.content || !String(m.content).trim().length) continue;
                 const key = `${m.role}:${this._normStrip(m.content)}`;
                 if (seenKey.has(key)) continue;
                 seenKey.add(key);
@@ -728,29 +937,6 @@ class StreamingGeneration {
             }
             return finalMessages;
         };
-        if (addonSet.size === 0) {
-            const messages = [].concat(topMsgs);
-            if (prompt?.trim()) messages.push({ role, content: prompt.trim() });
-            messages.push(...bottomMsgs);
-            const common = { messages, apiOptions, stop: parsedStop };
-            if (nonstream) {
-                try { if (lock) deactivateSendButtons(); } catch {}
-                try {
-                    await this._emitPromptReady(messages);
-                    const finalText = await this.processGeneration(common, prompt || '', sessionId, false);
-                    return String(finalText ?? '');
-                } finally {
-                    try { if (lock) activateSendButtons(); } catch {}
-                }
-            } else {
-                try { if (lock) deactivateSendButtons(); } catch {}
-                await this._emitPromptReady(messages);
-                const p = this.processGeneration(common, prompt || '', sessionId, true);
-                p.finally(() => { try { if (lock) activateSendButtons(); } catch {} });
-                p.catch(() => {});
-                return String(sessionId);
-            }
-        }
         if (nonstream) {
             try { if (lock) deactivateSendButtons(); } catch {}
             try {
@@ -956,10 +1142,12 @@ class StreamingGeneration {
                 { name: 'bottomassistant', description: '置底 assistant', typeList: [ARGUMENT_TYPE.STRING] },
                 { name: 'top', description: '复合置顶: assistant={A};user={B};sys={C}', typeList: [ARGUMENT_TYPE.STRING] },
                 { name: 'bottom', description: '复合置底: assistant={C};sys={D1}', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'top64', description: '复合置顶(base64-url安全编码)', typeList: [ARGUMENT_TYPE.STRING] },
+                { name: 'bottom64', description: '复合置底(base64-url安全编码)', typeList: [ARGUMENT_TYPE.STRING] },
                 ...commonArgs
             ].map(SlashCommandNamedArgument.fromProps),
             unnamedArgumentList: [SlashCommandArgument.fromProps({
-                description: '原始提示文本', typeList: [ARGUMENT_TYPE.STRING], isRequired: true
+                description: '原始提示文本', typeList: [ARGUMENT_TYPE.STRING], isRequired: false
             })],
             helpString: '使用原始提示进行流式生成',
             returns: 'session ID'
@@ -1000,9 +1188,9 @@ const streamingGeneration = new StreamingGeneration();
 
 export function initStreamingGeneration() {
     const w = window;
-    if ((/** @type {any} */(w))?.isXiaobaixEnabled === false) return;
+    if ((w)?.isXiaobaixEnabled === false) return;
     streamingGeneration.init();
-    (/** @type {any} */(w))?.registerModuleCleanup?.('streamingGeneration', () => streamingGeneration.cleanup());
+    (w)?.registerModuleCleanup?.('streamingGeneration', () => streamingGeneration.cleanup());
 }
 
 export { streamingGeneration };
@@ -1010,6 +1198,6 @@ export { streamingGeneration };
 if (typeof window !== 'undefined') {
     Object.assign(window, {
         xiaobaixStreamingGeneration: streamingGeneration,
-        eventSource: (/** @type {any} */(window))?.eventSource || eventSource
+        eventSource: (window)?.eventSource || eventSource
     });
 }

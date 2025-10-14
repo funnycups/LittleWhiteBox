@@ -1,3 +1,4 @@
+/* 公共工具区 */
 /* eslint-disable no-console */
 import { extension_settings, getContext, writeExtensionField } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types, characters, this_chid } from "../../../../script.js";
@@ -15,7 +16,13 @@ const SECURITY_CONFIG={
   TRUSTED_DOMAINS:["rentry.org","discord.com","discordapp.net","discordapp.com"]
 };
 const moduleState={ isInitialized:false, eventHandlers:{}, timers:{}, observers:{} };
+let PresetRegexUI;
 const defaultSettings={ enabled:true, showNotifications:true };
+const PRESET_REGEX_FLAG="preset-regex";
+const PRESET_REGEX_AUTO_DISABLED="preset-regex-auto";
+const PRESET_REGEX_DOM={ BLOCK_ID:"preset_regex_scripts_block", LIST_ID:"preset_regex_scripts", LABEL_ID:"preset_regex_active_preset" };
+let presetUsageDirty=true;
+function markPresetUsageDirty(){ presetUsageDirty=true; }
 
 const Settings={
   get(){
@@ -55,14 +62,7 @@ const Server={
       else { opt.headers["Content-Type"]="application/json"; opt.body=JSON.stringify(data); }
     }
     const res=await fetch(`${serverUrl.replace(/\/$/,"")}${endpoint}?${auth}`,opt);
-    if(!res.ok){
-      const errJson=await res.json().catch(()=>({}));
-      const msg=errJson.error||`服务器错误: ${res.status}`;
-      const err=/** @type {any} */(new Error(msg));
-      err.status=res.status;
-      err.isPasswordError=res.status===401||(""+msg).includes("密码");
-      throw err;
-    }
+    if(!res.ok){ const errJson=await res.json().catch(()=>({})); const msg=errJson.error||`服务器错误: ${res.status}`; const e=new Error(msg); e.status=res.status; e.isPasswordError=res.status===401||(""+msg).includes("密码"); throw e; }
     return await res.json();
   },
   create(d){ return Server.req("/create","POST",d,true); },
@@ -103,8 +103,7 @@ const Press={
 function UpdaterFactory(adapter){
   async function bind(id, form){
     const local=adapter.getLocalData(id);
-  const uuid=Tools.uuid();
-  const timestamp=new Date().toISOString();
+    const uuid=Tools.uuid(), timestamp=new Date().toISOString();
     const rawName=form?.name?.trim()||adapter.getDisplayName(id)||"Unnamed";
     const nameGroup=Tools.nameToServer(rawName,adapter.fallbackName||"Item");
     try{
@@ -114,51 +113,49 @@ function UpdaterFactory(adapter){
       return { success:true, nameGroup, uniqueValue:uuid };
     }catch(e){ console.error("[绑定失败]",e); return { success:false, error:e.isPasswordError?"密码错误":(e?.message||"网络连接失败") }; }
   }
-async function update(id, form, silent = false) {
-  const data = adapter.getLocalData(id);
-  if (!adapter.isBound(id)) return { success: false, error: "未绑定" };
+  async function update(id, form, silent=false){
+    const data=adapter.getLocalData(id);
+    if(!adapter.isBound(id)) return { success:false, error:"未绑定" };
 
-  const newPublicTs = new Date().toISOString();
+    const newPublicTs=new Date().toISOString();
 
-  const base = {
-    name: data.nameGroup,
-    unique_value: data.uniqueValue,
-    password: Tools.encrypt(form.password),
-    update_notice: form.updateNote || (silent ? (data.updateNote || "") : "版本更新"),
-    link_address: form.pngUrl || data.linkAddress || "",
-  };
-
-  const payload = silent
-    ? { ...base, silent: true }  
-    : { ...base, timestamp: newPublicTs };
-
-  try {
-    const r = await Server.update(payload);
-    if (!r.success) return { success: false, error: r.error };
-
-    const newData = {
-      ...data,
-      updateNote: form.updateNote || data.updateNote || "",
-      linkAddress: form.pngUrl || data.linkAddress || "",
-      timestamp: silent ? data.timestamp : newPublicTs,
-      [silent ? "lastSilentUpdateTime" : "lastUpdateTime"]: Date.now(),
+    const base={
+      name:data.nameGroup,
+      unique_value:data.uniqueValue,
+      password:Tools.encrypt(form.password),
+      update_notice:form.updateNote||(silent?(data.updateNote||""):"版本更新"),
+      link_address:form.pngUrl||data.linkAddress||"",
     };
-    await adapter.setLocalData(id, newData);
 
-    Cache.set(adapter.toCacheKey(id), {
-      serverData: {
-        timestamp: silent ? data.timestamp : newPublicTs,
-        update_notice: newData.updateNote,
-        link_address: newData.linkAddress,
-      },
-    });
+    const payload=silent ? { ...base, silent:true } : { ...base, timestamp:newPublicTs };
 
-    return { success: true, timestamp: newData.timestamp };
-  } catch (e) {
-    console.error("[更新失败]", e);
-    return { success: false, error: e.isPasswordError ? "密码错误" : (e?.message || "网络连接失败") };
+    try{
+      const r=await Server.update(payload);
+      if(!r.success) return { success:false, error:r.error };
+
+      const newData={
+        ...data,
+        updateNote:form.updateNote||data.updateNote||"",
+        linkAddress:form.pngUrl||data.linkAddress||"",
+        timestamp:silent?data.timestamp:newPublicTs,
+        [silent?"lastSilentUpdateTime":"lastUpdateTime"]:Date.now(),
+      };
+      await adapter.setLocalData(id,newData);
+
+      Cache.set(adapter.toCacheKey(id),{
+        serverData:{
+          timestamp:silent?data.timestamp:newPublicTs,
+          update_notice:newData.updateNote,
+          link_address:newData.linkAddress,
+        },
+      });
+
+      return { success:true, timestamp:newData.timestamp };
+    }catch(e){
+      console.error("[更新失败]",e);
+      return { success:false, error:e.isPasswordError?"密码错误":(e?.message||"网络连接失败") };
+    }
   }
-}
 
   async function batchStartupCheck(){
     try{
@@ -167,7 +164,7 @@ async function update(id, form, silent = false) {
       ids.forEach((id,idx)=>{
         const d=adapter.getLocalData(id);
         if(d?.uniqueValue&&d?.nameGroup){
-          const localTimestamp = adapter.getLocalTimestampForCompare?.(id) ?? d.timestamp;
+          const localTimestamp=adapter.getLocalTimestampForCompare?.(id) ?? d.timestamp;
           items.push({ nameGroup:d.nameGroup, uniqueValue:d.uniqueValue, clientId:idx, localTimestamp });
           idxToId.set(idx,id);
         }
@@ -178,7 +175,7 @@ async function update(id, form, silent = false) {
       resp.results.forEach(r=>{
         if(r.found&&r.data){
           const id=idxToId.get(r.clientId), local=adapter.getLocalData(id);
-          const localTs = adapter.getLocalTimestampForCompare?.(id) ?? local?.timestamp ?? "";
+          const localTs=adapter.getLocalTimestampForCompare?.(id) ?? local?.timestamp ?? "";
           cacheMap.set(adapter.toCacheKey(id),{ serverData:r.data });
           if(r.data.timestamp && r.data.timestamp!==localTs){
             updates.push({ id, name:adapter.getDisplayName(id)||"未知", currentTimestamp:localTs, latestTimestamp:r.data.timestamp, updateNote:r.data.update_notice||"无更新说明", linkAddress:r.data.link_address||"", serverData:r.data });
@@ -192,6 +189,7 @@ async function update(id, form, silent = false) {
   return { bind, update, batchStartupCheck };
 }
 
+/* 角色卡区 */
 const CharacterAdapter={
   fallbackName:"Character",
   getCurrentId(){ return this_chid; },
@@ -241,6 +239,7 @@ const CharacterAdapter={
 };
 const CharacterUpdater=UpdaterFactory(CharacterAdapter);
 
+/* 预设区 - 存储 */
 const PresetStore=(()=>{
   const DEFAULT_CHARACTER_ID=100000;
   const BINDING_KEY="binding";
@@ -371,6 +370,7 @@ const PresetStore=(()=>{
   };
 })();
 
+/* 预设区 - 适配器 */
 const PresetAdapter={
   fallbackName:"Preset",
   getCurrentId(){ return PresetStore.currentName(); },
@@ -398,6 +398,7 @@ const PresetAdapter={
     let bound=false; try{ const local=PresetStore.readMerged(name); bound=!!(local?.uniqueValue && local?.timestamp); }catch{}
     $status.removeClass().addClass(bound?"bound":"unbound").text(bound?"已绑定":"未提醒");
     if(!bound) this.onUpdateIndicator(name,false);
+    PresetRegexUI?.refresh?.();
   },
   afterBatch(updates){
     try{ cleanPresetDropdown(); }catch{}
@@ -411,6 +412,7 @@ const PresetAdapter={
 const PresetUpdater=UpdaterFactory(PresetAdapter);
 
 
+/* 预设区 - 弹窗与提示 */
 const Popup={
   fmt(ts){ return ts?new Date(ts).toLocaleDateString():"未知"; },
   async showUpdate(info){
@@ -525,6 +527,7 @@ const CharacterUI={
   }
 };
 
+/* 预设区 - UI 控件 */
 const PresetUI={
   ensureGreenCSS(){ if(document.getElementById("preset-updater-green-style")) return; const style=document.createElement("style"); style.id="preset-updater-green-style"; style.textContent=`#preset-updater-edit-button.has-update{ color:#28a745 !important; }`; document.head.appendChild(style); },
   addButton(){
@@ -544,13 +547,19 @@ const PresetUI={
   },
   setButton(has){ $("#preset-updater-edit-button").toggleClass("has-update",!!has); },
   async checkCurrent(){
-    if(!Settings.get().enabled) return this.setButton(false);
-    const name=PresetAdapter.getCurrentId();
-    if(!name||!PresetAdapter.isBound(name)) return this.setButton(false);
-    const cloud=Cache.getCloud(PresetAdapter.toCacheKey(name));
-    if(!cloud) return this.setButton(false);
-    const localTs=PresetAdapter.getLocalTimestampForCompare(name);
-    this.setButton(!!(cloud.timestamp&&cloud.timestamp!==localTs));
+    let highlight=false;
+    if(Settings.get().enabled){
+      const name=PresetAdapter.getCurrentId();
+      if(name&&PresetAdapter.isBound(name)){
+        const cloud=Cache.getCloud(PresetAdapter.toCacheKey(name));
+        if(cloud){
+          const localTs=PresetAdapter.getLocalTimestampForCompare(name);
+          highlight=!!(cloud.timestamp&&cloud.timestamp!==localTs);
+        }
+      }
+    }
+    this.setButton(highlight);
+    PresetRegexUI?.refresh?.();
   }
 };
 
@@ -712,13 +721,16 @@ const Menu={
   }
 };
 
+/* 预设区 - 正则绑定核心 */
 const PRB=(()=>{
+  /* 核心引用 */
   const pm=()=>{ try{return getPresetManager("openai");}catch{return null;} };
   const curName=()=>{ try{return pm()?.getSelectedPresetName?.()||"";}catch{return"";} };
   /** @type {any} */
   const toaster=globalThis.toastr;
   const popupFn=typeof globalThis.callGenericPopup==="function"?globalThis.callGenericPopup:null;
 
+  /* 兼容读取 */
   function readRegexBindingsFromBPrompt(data){
     try{
       const prompts = data?.chatCompletionSettings?.prompts || data?.prompts || [];
@@ -744,6 +756,7 @@ const PRB=(()=>{
     return null;
   }
 
+  /* 绑定读写 */
   const hasScripts=(binding)=>Array.isArray(binding?.scripts) && binding.scripts.length>0;
 
   const read=name=>{
@@ -775,6 +788,7 @@ const PRB=(()=>{
       if(payload && hasScripts(fromPayload(payload))) ext[PresetStore.REGEX_KEY]=payload;
       else delete ext[PresetStore.REGEX_KEY];
     });
+    markPresetUsageDirty();
   };
   const allRegex=()=>Array.isArray(extension_settings.regex)?extension_settings.regex:[];
   const filtered=()=>allRegex().filter(s=>/\[.+?\]-/.test(String(s?.scriptName||"")));
@@ -786,11 +800,14 @@ const PRB=(()=>{
     extension_settings.regex=extension_settings.regex.filter(old=>{ const n=norm(old?.scriptName); const ok=!names.has(n); if(!ok) removedCount.set(n,(removedCount.get(n)||0)+1); return ok; });
     let added=0, replaced=0;
     for(const [n,sc] of incoming.entries()){ const c=structuredClone(sc); if(!c.id) c.id=uuidv4(); extension_settings.regex.push(c); ((removedCount.get(n)||0)>0)?(replaced++):(added++); }
-    saveSettingsDebounced(); return { added, replaced };
+    saveSettingsDebounced();
+    markPresetUsageDirty();
+    return { added, replaced };
   };
   const toPayload=b=>!b?null:(b.strategy==="byName"?{ strategy:"byName", scripts:(b.scripts||[]).map(String) }:{ strategy:"byEmbed", scripts:Array.isArray(b.scripts)?b.scripts:[] });
   const fromPayload=p=>!p||typeof p!=="object"?{ strategy:"byEmbed", scripts:[] }:(p.strategy==="byName"?{ strategy:"byName", scripts:(p.scripts||[]).map(String) }:{ strategy:"byEmbed", scripts:Array.isArray(p.scripts)?p.scripts:[] });
 
+  /* 正则刷新辅助 */
   function cloneScript(script){
     if(script==null) return script;
     try{ return structuredClone(script); }
@@ -822,6 +839,7 @@ const PRB=(()=>{
     return { binding:{ ...binding, scripts:refreshed }, changed:true };
   }
 
+  /* UI 同步 */
   function refreshUI(){
     const name=curName(); const bind=read(name);
     $("#prb-current-preset").text(name||"(未选择)");
@@ -842,6 +860,7 @@ const PRB=(()=>{
       });
       list.append(chip);
     }
+    PresetRegexUI?.refresh?.();
   }
   function bindUI(){
     $(document)
@@ -904,6 +923,7 @@ const PRB=(()=>{
     refreshUI();
   }
 
+  /* 导入导出钩子 */
   function onExportReady(preset){
     try{
       const name = PresetStore.currentName();
@@ -927,6 +947,7 @@ const PRB=(()=>{
     } catch (e) {
       console.warn('[PRB.onExportReady] export failed', e);
     }
+  PresetRegexUI?.refresh?.();
   }
 
   async function onImportReady({ data, presetName }){
@@ -960,12 +981,272 @@ const PRB=(()=>{
         try{ PresetAdapter.onHeaderBoundState(); }catch{}
       }
     }catch{}
+  PresetRegexUI?.refresh?.();
   }
 
   try{ globalThis.PRB_bindUI=bindUI; }catch{}
-  async function remove(name){ await PresetStore.updateExt(name,ext=>{ delete ext[PresetStore.REGEX_KEY]; }); }
+  async function remove(name){ await PresetStore.updateExt(name,ext=>{ delete ext[PresetStore.REGEX_KEY]; }); markPresetUsageDirty(); }
   return { bindUI, refreshUI, onExportReady, onImportReady, read, write, remove, toPayload };
 })();
+/* 预设区 - 正则脚本 UI */
+PresetRegexUI=(()=>{
+  const scripts=()=>Array.isArray(extension_settings?.regex)?extension_settings.regex:[];
+  const cache={ signature:"", flagged:new Set(), usage:new Map() };
+  let observer=null;
+  let syncing=false;
+
+  const ensureBlock=()=>{
+    const host=document.getElementById("global_scripts_block");
+    if(!host) return null;
+    let block=document.getElementById(PRESET_REGEX_DOM.BLOCK_ID);
+    if(block) return block;
+    block=document.createElement("div");
+    block.id=PRESET_REGEX_DOM.BLOCK_ID;
+    block.className="padding5";
+    block.style.display="none";
+    block.innerHTML=
+      `<div class="flex-container alignItemsBaseline">
+          <strong class="flex1">预设正则脚本</strong>
+          <small id="${PRESET_REGEX_DOM.LABEL_ID}" class="preset-regex-active"></small>
+        </div>
+        <small class="preset-regex-hint">仅在切换到绑定的预设时显示，绑定预设正则请到小白X菜单中进行管理。</small>
+        <div id="${PRESET_REGEX_DOM.LIST_ID}" no-scripts-text="暂无正则脚本" class="flex-container regex-script-container flexFlowColumn"></div>`;
+    host.parentNode?.insertBefore(block,host);
+    return block;
+  };
+
+  const getDom=()=>{
+    const block=ensureBlock();
+    return {
+      global:document.getElementById("saved_regex_scripts"),
+      block,
+      list:block?document.getElementById(PRESET_REGEX_DOM.LIST_ID):null,
+      label:block?document.getElementById(PRESET_REGEX_DOM.LABEL_ID):null
+    };
+  };
+
+  const dedupe=(container)=>{
+    if(!container) return;
+    const labels=Array.from(container.querySelectorAll(".regex-script-label"));
+    const seen=new Set();
+    for(let i=labels.length-1;i>=0;i-=1){
+      const node=labels[i];
+      const id=node.id;
+      if(!id||seen.has(id)) node.remove();
+      else seen.add(id);
+    }
+  };
+
+  const buildLookup=()=>{
+    const list=scripts();
+    const byId=new Map();
+    const byName=new Map();
+    list.forEach(script=>{
+      if(!script||typeof script!=="object") return;
+      if(!script.id){ script.id=uuidv4(); presetUsageDirty=true; }
+      if(script.id) byId.set(script.id,script);
+      if(script.scriptName){ byName.set(String(script.scriptName).toLowerCase(),script); }
+    });
+    return { scripts:list, byId, byName };
+  };
+
+  const resolvePresetUsage=(name,lookup)=>{
+    const binding=PRB.read(name);
+    if(!binding||!Array.isArray(binding.scripts)) return { order:[], ids:new Set() };
+    const order=[];
+    const ids=new Set();
+    binding.scripts.forEach(entry=>{
+      let script=null;
+      if(typeof entry==="string") script=lookup.byName.get(entry.toLowerCase());
+      else if(entry?.id) script=lookup.byId.get(entry.id);
+      else if(entry?.scriptName) script=lookup.byName.get(String(entry.scriptName).toLowerCase());
+      if(script?.id&&!ids.has(script.id)){
+        ids.add(script.id);
+        order.push(script.id);
+      }
+    });
+    return { order, ids };
+  };
+
+  const getPresetNames=()=>{
+    const names=new Set();
+    try{ PresetStore.allBound()?.forEach(n=>n&&names.add(n)); }catch{}
+    try{ PresetStore.getPM?.()?.getAllPresets?.()?.forEach(n=>n&&names.add(n)); }catch{}
+    return names;
+  };
+
+  const computeSignature=list=>list.map(script=>`${script?.id||""}:${script?.scriptName||""}:${String(script?.[PRESET_REGEX_FLAG]??"")}`).join("|");
+
+  const ensureUsage=lookup=>{
+    const signature=computeSignature(lookup.scripts);
+    if(signature!==cache.signature){ cache.signature=signature; presetUsageDirty=true; }
+    if(!presetUsageDirty) return cache;
+    const flagged=new Set();
+    const usage=new Map();
+    getPresetNames().forEach(name=>{
+      const info=resolvePresetUsage(name,lookup);
+      usage.set(name,info);
+      info.ids.forEach(id=>flagged.add(id));
+    });
+    lookup.byId.forEach(script=>{
+      if(String(script?.[PRESET_REGEX_FLAG]??"").toLowerCase()==="true"&&script.id){ flagged.add(script.id); }
+    });
+    cache.flagged=flagged;
+    cache.usage=usage;
+    presetUsageDirty=false;
+    return cache;
+  };
+
+  const applyMetadata=(lookup,flagged,activeIds)=>{
+    let changed=false;
+    lookup.scripts.forEach(script=>{
+      if(!script||typeof script!=="object") return;
+      if(!script.id){ script.id=uuidv4(); changed=true; }
+      const id=script.id;
+      const isPreset=id&&flagged.has(id);
+      const hasFlag=String(script[PRESET_REGEX_FLAG]??"").toLowerCase()==="true";
+      if(isPreset!==hasFlag){
+        if(isPreset) script[PRESET_REGEX_FLAG]="true";
+        else delete script[PRESET_REGEX_FLAG];
+        changed=true;
+        presetUsageDirty=true;
+      }
+      const marker=script[PRESET_REGEX_AUTO_DISABLED];
+      if(!isPreset){
+        if(marker){
+          if(typeof marker==="object"&&"previous" in marker){
+            const prev=marker.previous===true;
+            if(script.disabled!==prev){ script.disabled=prev; changed=true; }
+          }
+          delete script[PRESET_REGEX_AUTO_DISABLED];
+          changed=true;
+        }
+        return;
+      }
+      const active=activeIds.has(id);
+      if(!active){
+        if(!marker||typeof marker!=="object"||!Object.prototype.hasOwnProperty.call(marker,"previous")){
+          script[PRESET_REGEX_AUTO_DISABLED]={ previous:script.disabled===true };
+          changed=true;
+        }
+        if(script.disabled!==true){ script.disabled=true; changed=true; }
+      }else if(marker&&typeof marker==="object"&&Object.prototype.hasOwnProperty.call(marker,"previous")){
+        const prev=marker.previous===true;
+        if(script.disabled!==prev){ script.disabled=prev; changed=true; }
+        delete script[PRESET_REGEX_AUTO_DISABLED];
+        changed=true;
+      }
+    });
+    if(changed) saveSettingsDebounced();
+  };
+
+  const applyCheckboxState=(node,script)=>{
+    const checkbox=node?.querySelector?.(".disable_regex");
+    if(checkbox instanceof HTMLInputElement){ checkbox.checked=!!(script?.disabled); }
+  };
+
+  const syncDom=({ lookup, flagged, activeOrder, activeIds, presetName })=>{
+    const { global, block, list, label }=getDom();
+    if(!global||!list||!block) return;
+    dedupe(global);
+    dedupe(list);
+
+    activeIds.forEach(id=>{
+      const node=document.getElementById(id);
+      if(node instanceof HTMLElement && node.parentElement!==list){ list.appendChild(node); }
+    });
+
+    const listNodes=new Map();
+    Array.from(list.children).forEach(node=>{ if(node instanceof HTMLElement&&node.id) listNodes.set(node.id,node); });
+    const ordered=document.createDocumentFragment();
+    activeOrder.forEach(id=>{ const node=listNodes.get(id); if(node) ordered.appendChild(node); });
+    if(ordered.childNodes.length) list.appendChild(ordered);
+
+    Array.from(list.children).forEach(node=>{
+      if(!(node instanceof HTMLElement)) return;
+      const id=node.id;
+      if(!activeIds.has(id)){
+        global.appendChild(node);
+        return;
+      }
+      const script=lookup.byId.get(id);
+      node.style.display="";
+      applyCheckboxState(node,script);
+    });
+
+    Array.from(global.children).forEach(node=>{
+      if(!(node instanceof HTMLElement)) return;
+      const id=node.id;
+      if(flagged.has(id)){
+        node.style.display="none";
+        return;
+      }
+      const script=lookup.byId.get(id);
+      node.style.display="";
+      applyCheckboxState(node,script);
+    });
+
+    dedupe(list);
+
+    const hasActive=activeIds.size>0||activeOrder.length>0;
+    if(label) label.textContent=hasActive&&presetName?`当前预设: ${presetName}`:"";
+    block.style.display=hasActive?"":"none";
+  };
+
+  const clearDom=()=>{
+    const global=document.getElementById("saved_regex_scripts");
+    const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
+    if(!global||!list) return;
+    Array.from(list.children).forEach(node=>{
+      if(node instanceof HTMLElement){ node.style.display=""; global.appendChild(node); }
+    });
+  };
+
+  const attachObserver=()=>{
+    const global=document.getElementById("saved_regex_scripts");
+    if(!global) return;
+    if(!observer){
+      observer=new MutationObserver(()=>{ if(!syncing) refresh(); });
+    }
+    try{ observer.disconnect(); }catch{}
+    observer.observe(global,{ childList:true });
+  };
+
+  const computeState=()=>{
+    const lookup=buildLookup();
+    const usage=ensureUsage(lookup);
+    const presetName=PresetStore.currentName?.()||"";
+    const info=usage.usage.get(presetName)||{ order:[], ids:new Set() };
+    const activeOrder=Array.isArray(info.order)?info.order.slice():[];
+    const activeIds=info.ids instanceof Set?new Set(info.ids):new Set(activeOrder);
+    return { lookup, presetName, flagged:new Set(usage.flagged), activeOrder, activeIds };
+  };
+
+  const refresh=()=>{
+    if(syncing) return;
+    syncing=true;
+    try{
+      observer?.disconnect?.();
+      const state=computeState();
+      applyMetadata(state.lookup,state.flagged,state.activeIds);
+      syncDom(state);
+    }finally{
+      syncing=false;
+    }
+    attachObserver();
+  };
+
+  const destroy=()=>{
+    observer?.disconnect?.();
+    observer=null;
+    clearDom();
+  };
+
+  const markDirty=()=>{ presetUsageDirty=true; };
+
+  return { refresh, destroy, markDirty };
+})();
+PresetRegexUI.refresh();
 
 async function addMenusHTML(){
   try{ const res=await fetch(`${extensionFolderPath}/character-updater-menus.html`); if(res.ok) $("body").append(await res.text()); }
@@ -1033,10 +1314,12 @@ function wireEvents(){
       await CharacterUpdater.batchStartupCheck();
       await PresetUpdater.batchStartupCheck();
       try{ cleanPresetDropdown(); }catch{}
+  PresetRegexUI?.refresh?.();
     },
     [event_types.CHAT_CHANGED]: async ()=>{
       CharacterAdapter.onHeaderBoundState();
       if(CharacterAdapter.getCurrentId()!=null && CharacterAdapter.isBound(CharacterAdapter.getCurrentId())) await CharacterUI.checkCurrent();
+  PresetRegexUI?.refresh?.();
     },
     [event_types.CHARACTER_EDITED]: ()=>CharacterAdapter.onHeaderBoundState(),
     [event_types.CHARACTER_PAGE_LOADED]: async ()=>{
@@ -1054,9 +1337,16 @@ function wireEvents(){
       try{ cleanPresetDropdown(); }catch{}
       PresetAdapter.onHeaderBoundState();
       await PresetUI.checkCurrent();
+  PresetRegexUI?.refresh?.();
     },
-    [event_types.OAI_PRESET_EXPORT_READY]: (preset)=>{ try{ PRB.onExportReady(preset); }catch{} },
-    [event_types.OAI_PRESET_IMPORT_READY]: (payload)=>{ try{ PRB.onImportReady(payload); }catch{} },
+    [event_types.OAI_PRESET_EXPORT_READY]: (preset)=>{
+      try{ PRB.onExportReady(preset); }catch{}
+  PresetRegexUI?.refresh?.();
+    },
+    [event_types.OAI_PRESET_IMPORT_READY]: (payload)=>{
+      try{ PRB.onImportReady(payload); }catch{}
+  PresetRegexUI?.refresh?.();
+    },
   };
   Object.entries(handlers).forEach(([evt,fn])=>{ moduleState.eventHandlers[evt]=fn; eventSource.on(evt,fn); });
 }
@@ -1068,6 +1358,7 @@ async function addMenusAndBind(){
   CharacterAdapter.onHeaderBoundState(); PresetAdapter.onHeaderBoundState();
   wireCharacter(); wireEvents();
   try{ cleanPresetDropdown(); }catch{}
+  PresetRegexUI?.refresh?.();
 }
 
 function cleanup(){
@@ -1090,6 +1381,7 @@ function cleanup(){
   try{ $(".character-menu-overlay, #character-updater-edit-button, .character-update-notification, .xiaobaix-confirm-modal").remove(); }catch{}
   try{ $("#preset-updater-edit-button, #preset-updater-green-style").remove(); }catch{}
   try{ cleanPresetDropdown(); }catch{}
+  try{ PresetRegexUI.destroy?.(); $("#preset_regex_scripts_block").remove(); }catch{}
   try{ Cache.clear(); }catch{}
   moduleState.isInitialized=false;
 }

@@ -309,23 +309,42 @@ function iframeClientScript(){return `
 (function(){
   function measureVisibleHeight(){
     try{
-      var root = document.body || document.documentElement;
-      var h1 = root.scrollHeight || 0;
-      var h2 = root.offsetHeight || 0;
-      var h3 = 0;
-      try{ h3 = root.getBoundingClientRect ? Math.round(root.getBoundingClientRect().height) : 0 }catch(e){}
-      var h = Math.max(h1, h2, h3);
-      return Math.max(0, Math.round(h));
+      var doc = document;
+      var target = doc.querySelector('.calendar-wrapper') || doc.body;
+      if(!target) return 0;
+      
+      var minTop = Infinity, maxBottom = 0;
+      var addRect = function(el){
+        try{
+          var r = el.getBoundingClientRect();
+          if(r && r.height > 0){
+            if(minTop > r.top) minTop = r.top;
+            if(maxBottom < r.bottom) maxBottom = r.bottom;
+          }
+        }catch(e){}
+      };
+      
+      addRect(target);
+      var children = target.children || [];
+      for(var i=0;i<children.length;i++){
+        var child = children[i];
+        if(!child) continue;
+        try{
+          var s = window.getComputedStyle(child);
+          if(s.display === 'none' || s.visibility === 'hidden') continue;
+          if(!child.offsetParent && s.position !== 'fixed') continue;
+        }catch(e){}
+        addRect(child);
+      }
+      
+      return maxBottom > 0 ? Math.ceil(maxBottom - Math.min(minTop, 0)) : (target.scrollHeight || 0);
     }catch(e){
-      var b=document.body;
-      return (b && (b.scrollHeight||b.offsetHeight)) || 0;
+      return (document.body && document.body.scrollHeight) || 0;
     }
-  }
+  }  function post(m){ try{ parent.postMessage(m,'*') }catch(e){} }
 
-  function post(m){ try{ parent.postMessage(m,'*') }catch(e){} }
-
-  var rafPending=false, lastH=0;
-  var HYSTERESIS = 2; // px
+    var rafPending=false, lastH=0;
+    var HYSTERESIS = 2; // px
 
   function send(force){
     if(rafPending && !force) return;
@@ -340,9 +359,19 @@ function iframeClientScript(){return `
     });
   }
 
-  try{ send(true) }catch(e){}
+    try{ send(true) }catch(e){}
   document.addEventListener('DOMContentLoaded', function(){ send(true) }, {once:true});
   window.addEventListener('load', function(){ send(true) }, {once:true});
+
+    try{
+        if(document.fonts){
+            document.fonts.ready.then(function(){ send(true) }).catch(function(){});
+            if(document.fonts.addEventListener){
+                document.fonts.addEventListener('loadingdone', function(){ send(true) });
+                document.fonts.addEventListener('loadingerror', function(){ send(true) });
+            }
+        }
+    }catch(e){}
 
   ['transitionend','animationend'].forEach(function(evt){
     document.addEventListener(evt, function(){ send(false) }, {passive:true, capture:true});
@@ -634,7 +663,7 @@ function renderHtmlInIframe(htmlContent, container, preElement) {
         const iframe = document.createElement('iframe');
         iframe.id = generateUniqueId();
         iframe.className = 'xiaobaix-iframe';
-        iframe.style.cssText = 'width:100%;border:none;background:transparent;overflow:hidden;height:100vh;margin:0;padding:0;display:block;contain:layout paint style;will-change:height';
+        iframe.style.cssText = 'width:100%;border:none;background:transparent;overflow:hidden;height:0;margin:0;padding:0;display:block;contain:layout paint style;will-change:height;min-height:50px';
         iframe.setAttribute('frameborder', '0');
         iframe.setAttribute('scrolling', 'no');
         iframe.loading = 'eager';
