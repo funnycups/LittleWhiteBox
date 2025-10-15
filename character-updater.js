@@ -1151,7 +1151,7 @@ PresetRegexUI=(()=>{
     dedupe(global);
     dedupe(list);
 
-    activeIds.forEach(id=>{
+    flagged.forEach(id=>{
       const node=document.getElementById(id);
       if(node instanceof HTMLElement && node.parentElement!==list){ list.appendChild(node); }
     });
@@ -1165,22 +1165,16 @@ PresetRegexUI=(()=>{
     Array.from(list.children).forEach(node=>{
       if(!(node instanceof HTMLElement)) return;
       const id=node.id;
-      if(!activeIds.has(id)){
-        global.appendChild(node);
-        return;
-      }
       const script=lookup.byId.get(id);
-      node.style.display="";
+      const isActive=activeIds.has(id);
+      node.style.display=isActive?"":"none";
       applyCheckboxState(node,script);
     });
 
     Array.from(global.children).forEach(node=>{
       if(!(node instanceof HTMLElement)) return;
       const id=node.id;
-      if(flagged.has(id)){
-        node.style.display="none";
-        return;
-      }
+      if(flagged.has(id)){ list.appendChild(node); return; }
       const script=lookup.byId.get(id);
       node.style.display="";
       applyCheckboxState(node,script);
