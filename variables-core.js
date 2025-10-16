@@ -450,10 +450,29 @@ function parseBlock(innerText) {
             const op = normalizeOpName(k); if (!op || !v || typeof v !== 'object') continue;
             for (const [rawTop, payload] of Object.entries(v)) {
               const top = decodeKey(rawTop);
-              if (op === 'set') walkSetLike(top, payload);
-              else if (op === 'push') walkPushLike(top, payload);
-              else if (op === 'bump') walkBumpLike(top, payload);
-              else if (op === 'del') { const acc = []; collectDelPaths(acc, payload); for (const p of acc) putDel(top, p); }
+              if (op === 'set') {
+                walkSetLike(top, payload);
+              } else if (op === 'push') {
+                if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+                  walkPushLike(top, payload);
+                } else {
+                  const items = Array.isArray(payload) ? payload : [payload];
+                  for (const it of items) putPush(top, '', it);
+                }
+              } else if (op === 'bump') {
+                if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+                  walkBumpLike(top, payload);
+                } else {
+                  putBump(top, '', payload);
+                }
+              } else if (op === 'del') {
+                if (payload && typeof payload === 'object') {
+                  const acc = []; collectDelPaths(acc, payload);
+                  for (const p of acc) putDel(top, p);
+                } else {
+                  putDel(top, '');
+                }
+              }
             }
           }
         }
@@ -462,10 +481,29 @@ function parseBlock(innerText) {
           const op = normalizeOpName(k); if (!op || !v || typeof v !== 'object') continue;
           for (const [rawTop, payload] of Object.entries(v)) {
             const top = decodeKey(rawTop);
-            if (op === 'set') walkSetLike(top, payload);
-            else if (op === 'push') walkPushLike(top, payload);
-            else if (op === 'bump') walkBumpLike(top, payload);
-            else if (op === 'del') { const acc = []; collectDelPaths(acc, payload); for (const p of acc) putDel(top, p); }
+            if (op === 'set') {
+              walkSetLike(top, payload);
+            } else if (op === 'push') {
+              if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+                walkPushLike(top, payload);
+              } else {
+                const items = Array.isArray(payload) ? payload : [payload];
+                for (const it of items) putPush(top, '', it);
+              }
+            } else if (op === 'bump') {
+              if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+                walkBumpLike(top, payload);
+              } else {
+                putBump(top, '', payload);
+              }
+            } else if (op === 'del') {
+              if (payload && typeof payload === 'object') {
+                const acc = []; collectDelPaths(acc, payload);
+                for (const p of acc) putDel(top, p);
+              } else {
+                putDel(top, '');
+              }
+            }
           }
         }
       }
