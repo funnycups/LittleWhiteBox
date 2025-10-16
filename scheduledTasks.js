@@ -797,15 +797,7 @@ async function onChatChanged(chatId) {
     });
 
     try {
-        let user = 0, llm = 0, all = 0;
-        if (Array.isArray(chat)) {
-            for (const m of chat) {
-                all++;
-                if (m.is_system) continue;
-                if (m.is_user) user++; else llm++;
-            }
-        }
-        state.floorCounts = { all, user, llm };
+        state.floorCounts = { all: 0, user: 0, llm: 0 };
     } catch {}
 
     setTimeout(() => { state.chatJustChanged = state.isNewChat = false; }, 2000);
@@ -813,15 +805,7 @@ async function onChatChanged(chatId) {
 
 async function onChatCreated() {
     try {
-        let user = 0, llm = 0, all = 0;
-        if (Array.isArray(chat)) {
-            for (const m of chat) {
-                all++;
-                if (m.is_system) continue;
-                if (m.is_user) user++; else llm++;
-            }
-        }
-        state.floorCounts = { all, user, llm };
+        state.floorCounts = { all: 0, user: 0, llm: 0 };
     } catch {}
     await checkAndExecuteTasks('chat_created', false, false);
 }
