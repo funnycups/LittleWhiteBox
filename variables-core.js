@@ -443,11 +443,21 @@ function parseBlock(innerText) {
           }
         }
       };
+      const putDelFullPath = (pathStr) => {
+        if (typeof pathStr !== 'string') return;
+        const std = pathStr.replace(/\[(\d+)\]/g, '.$1');
+        const parts = std.split('.').filter(Boolean);
+        const top = parts.shift();
+        const rel = parts.join('.');
+        if (top) putDel(top, rel);
+      };
       if (Array.isArray(data)) {
         for (const entry of data) {
           if (!entry || typeof entry !== 'object') continue;
           for (const [k, v] of Object.entries(entry)) {
-            const op = normalizeOpName(k); if (!op || !v || typeof v !== 'object') continue;
+            const op = normalizeOpName(k); if (!op || v == null) continue;
+            if (op === 'del' && Array.isArray(v)) { for (const it of v) putDelFullPath(it); continue; }
+            if (!v || typeof v !== 'object') continue;
             for (const [rawTop, payload] of Object.entries(v)) {
               const top = decodeKey(rawTop);
               if (op === 'set') {
@@ -478,7 +488,9 @@ function parseBlock(innerText) {
         }
       } else if (data && typeof data === 'object') {
         for (const [k, v] of Object.entries(data)) {
-          const op = normalizeOpName(k); if (!op || !v || typeof v !== 'object') continue;
+          const op = normalizeOpName(k); if (!op || v == null) continue;
+          if (op === 'del' && Array.isArray(v)) { for (const it of v) putDelFullPath(it); continue; }
+          if (typeof v !== 'object') continue;
           for (const [rawTop, payload] of Object.entries(v)) {
             const top = decodeKey(rawTop);
             if (op === 'set') {
