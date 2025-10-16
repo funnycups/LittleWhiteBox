@@ -64,17 +64,15 @@ class TemplateSettings {
         settings.templateEditor.characterBindings = settings.templateEditor.characterBindings || {};
         return settings.templateEditor;
     }
-    
     static getCurrentChar() {
         if (this_chid === undefined || !characters[this_chid]) return DEFAULT_CHAR_SETTINGS;
         const character = characters[this_chid];
         const embeddedSettings = character.data?.extensions?.[TEMPLATE_MODULE_NAME];
-        return embeddedSettings || { 
-            ...DEFAULT_CHAR_SETTINGS, 
-            ...(this.get().characterBindings?.[character.avatar] || {}) 
+        return embeddedSettings || {
+            ...DEFAULT_CHAR_SETTINGS,
+            ...(this.get().characterBindings?.[character.avatar] || {})
         };
     }
-    
     static getCharTemplate(avatar) {
         if (!avatar || !utils.isEnabled()) return null;
         if (state.caches.template.has(avatar)) return state.caches.template.get(avatar);
@@ -87,6 +85,31 @@ class TemplateSettings {
         result = result || (bindings?.[avatar]?.enabled ? bindings[avatar] : null);
         if (result) state.caches.template.set(avatar, result);
         return result;
+    }
+    static async saveCurrentChar(partial) {
+        const ctx = getContext();
+        if (this_chid === undefined || !characters[this_chid]) {
+            throw new Error('未选择角色，无法保存模板设置');
+        }
+        const ch = characters[this_chid];
+        const settings = {
+            ...DEFAULT_CHAR_SETTINGS,
+            ...partial,
+            enabled: !!partial.enabled,
+        };
+
+        ch.data = ch.data || {};
+        ch.data.extensions = ch.data.extensions || {};
+        ch.data.extensions[TEMPLATE_MODULE_NAME] = settings;
+        if (ch.avatar) {
+            state.caches.template.delete(ch.avatar);
+        }
+        if (typeof ctx.saveCharacter === 'function') {
+            await ctx.saveCharacter();
+        } else {
+            console.warn('[LittleWhiteBox] ctx.saveCharacter 不可用，角色未持久化');
+        }
+        return settings;
     }
 }
 
@@ -1310,7 +1333,7 @@ function importGlobal(event) {
 }
 
 async function checkEmbeddedTemplate() {
-    if (!this_chid || !characters[this_chid]) return;
+    if (this_chid === undefined || !characters[this_chid]) return;
     const character = characters[this_chid];
     const embeddedSettings = character.data?.extensions?.[TEMPLATE_MODULE_NAME];
     if (embeddedSettings?.enabled && embeddedSettings?.template) {

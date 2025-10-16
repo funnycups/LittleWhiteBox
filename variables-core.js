@@ -728,13 +728,14 @@ async function applyVariablesForMessage(messageId){
     if (!curSig) { clearAppliedFor(messageId); return; }
     const appliedMap = getAppliedMap();
     if (appliedMap[messageId] === curSig) return;
+
     const raw=(typeof msg.mes==='string'?msg.mes:(typeof msg.content==='string'?msg.content:'')) ?? '';
     const blocks=extractVareventBlocks(raw); if(blocks.length===0) { clearAppliedFor(messageId); return; }
+
     const ops=[]; const delVarNames=new Set();
     blocks.forEach((b,idx)=>{
       const parts=parseBlock(b);
       for(const p of parts){
-        // 【变量守护·应用】保留 guard 操作，稍后统一处理
         if(p.operation==='guard' && Array.isArray(p.data) && p.data.length>0){
           ops.push({operation:'guard',data:p.data});
           continue;
@@ -747,7 +748,9 @@ async function applyVariablesForMessage(messageId){
         else if(p.operation==='delVar') delVarNames.add(name);
       }
     });
+
     if(ops.length===0 && delVarNames.size===0) { setAppliedSignature(messageId, curSig); return; }
+
     const byName=new Map();
     for(const {name} of ops){
       if (!name || typeof name !== 'string') continue;
@@ -761,6 +764,7 @@ async function applyVariablesForMessage(messageId){
         }
       }
     }
+
     function bumpAtPath(rec, path, delta){
       const numDelta = Number(delta);
       if (!Number.isFinite(numDelta)) return false;
@@ -809,15 +813,17 @@ async function applyVariablesForMessage(messageId){
       }
       return false;
     }
+
     function parseScalarArrayMaybe(str){
       try{
         const v = JSON.parse(String(str??''));
         return Array.isArray(v) ? v : null;
       }catch{ return null; }
     }
+
     const norm = (p)=> String(p||'').replace(/\[(\d+)\]/g, '.$1');
+
     for(const op of ops){
-      // 【变量守护·应用】先处理 guard 操作，调用 applyRuleDelta 写入规则表
       if (op.operation === 'guard') {
         const entries = Array.isArray(op.data) ? op.data : [];
         if (typeof parseDirectivesTokenList === 'function' && typeof applyRuleDelta === 'function') {
@@ -829,20 +835,17 @@ async function applyVariablesForMessage(messageId){
               const delta = parseDirectivesTokenList(tokens);
               if (!delta) continue;
               const normalizedPath = typeof normalizePath === 'function' ? normalizePath(path) : path;
-              try {
-                console.log('[LWB:applyVariables] guard apply', { normalizedPath, tokens, delta });
-              } catch {}
               applyRuleDelta(normalizedPath, delta);
             } catch {}
           }
         }
-        try {
-          if (typeof rulesSaveToMeta === 'function') rulesSaveToMeta();
-        } catch {}
+        try { if (typeof rulesSaveToMeta === 'function') rulesSaveToMeta(); } catch {}
         continue;
       }
+
       const {root, subPath}=getRootAndPath(op.name);
       const rec=byName.get(root); if(!rec) continue;
+
       if(op.operation==='setObject'){
         for(const [k,v] of Object.entries(op.data)){
           const localPath=joinPath(subPath,k);
@@ -857,6 +860,7 @@ async function applyVariablesForMessage(messageId){
             if (res && 'value' in res) newVal = res.value;
           }
           if(!allow) continue;
+
           if(!localPath){
             if(newVal!==null && typeof newVal==='object'){
               rec.mode='object';
@@ -873,10 +877,14 @@ async function applyVariablesForMessage(messageId){
           if(setDeepValue(obj,norm(localPath),newVal)) rec.changed=true;
         }
       }
+
       else if(op.operation==='del'){
         const obj=asObject(rec);
+
+        const pending = [];
         for(const key of op.data){
           const localPath=joinPath(subPath,key);
+
           if(!localPath){
             const absRoot = root;
             const stdPath = typeof normalizePath==='function' ? normalizePath(absRoot) : absRoot;
@@ -886,6 +894,7 @@ async function applyVariablesForMessage(messageId){
               allow = !!res?.allow;
             }
             if(!allow) continue;
+
             if(rec.mode==='scalar'){
               if(rec.scalar!==''){ rec.scalar=''; rec.changed=true; }
             }else{
@@ -896,6 +905,7 @@ async function applyVariablesForMessage(messageId){
             }
             continue;
           }
+
           const absPath = `${root}.${localPath}`;
           const stdPath = typeof normalizePath==='function' ? normalizePath(absPath) : absPath;
           let allow = true;
@@ -904,9 +914,46 @@ async function applyVariablesForMessage(messageId){
             allow = !!res?.allow;
           }
           if(!allow) continue;
-          if(deleteDeepKey(obj,norm(localPath))) rec.changed=true;
+
+          const normLocal = norm(localPath);
+          const segs = splitPathSegments(normLocal);
+          const last = segs[segs.length - 1];
+          const parentSegs = segs.slice(0, -1);
+          const parentKey = parentSegs.join('.');
+
+          pending.push({
+            normLocal,
+            isIndex: typeof last === 'number',
+            parentKey,
+            index: typeof last === 'number' ? last : null,
+          });
+        }
+
+        const arrGroups = new Map();
+        const objDeletes = [];
+
+        for (const it of pending) {
+          if (it.isIndex) {
+            const g = arrGroups.get(it.parentKey) || [];
+            g.push(it);
+            arrGroups.set(it.parentKey, g);
+          } else {
+            objDeletes.push(it);
+          }
+        }
+
+        for (const [parentKey, list] of arrGroups.entries()) {
+          list.sort((a, b) => b.index - a.index);
+          for (const it of list) {
+            if (deleteDeepKey(obj, it.normLocal)) rec.changed = true;
+          }
+        }
+
+        for (const it of objDeletes) {
+          if (deleteDeepKey(obj, it.normLocal)) rec.changed = true;
         }
       }
+
       else if(op.operation==='push'){
         for(const [k,vals] of Object.entries(op.data)){
           const localPath=joinPath(subPath,k);
@@ -924,6 +971,7 @@ async function applyVariablesForMessage(messageId){
             if (allow) filtered.push(newVal);
           }
           if (filtered.length===0) continue;
+
           if(!localPath){
             let arrRef=null;
             if(rec.mode==='object'){
@@ -949,10 +997,12 @@ async function applyVariablesForMessage(messageId){
             if(changed) rec.changed=true;
             continue;
           }
+
           const obj=asObject(rec);
           if(pushDeepValue(obj,norm(localPath),filtered)) rec.changed=true;
         }
       }
+
       else if(op.operation==='bump'){
         for(const [k,delta] of Object.entries(op.data)){
           const num=Number(delta); if(!Number.isFinite(num)) continue;
@@ -986,8 +1036,10 @@ async function applyVariablesForMessage(messageId){
         }
       }
     }
+
     const hasChanges = Array.from(byName.values()).some(rec => rec && rec.changed === true);
     if(!hasChanges && delVarNames.size===0) { setAppliedSignature(messageId, curSig); return; }
+
     for(const [name,rec] of byName.entries()){
       if(!rec.changed) continue;
       try{
@@ -998,6 +1050,7 @@ async function applyVariablesForMessage(messageId){
         }
       }catch(e){}
     }
+
     if(delVarNames.size>0){
       try{
         for (const v of delVarNames) {
@@ -1010,9 +1063,11 @@ async function applyVariablesForMessage(messageId){
         }
       }catch(e){}
     }
+
     setAppliedSignature(messageId, curSig);
   }catch(err){}
 }
+
 if (typeof window !== 'undefined') {
   window.getBumpAliasStore = getBumpAliasStore;
   window.setBumpAliasStore = setBumpAliasStore;
