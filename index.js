@@ -41,7 +41,8 @@ extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     variablesPanel: { enabled: false },
     variablesCore: { enabled: true },
     useBlob: false,
-    wrapperIframe: true
+    wrapperIframe: true,
+    renderEnabled: true
 };
 
 const settings = extension_settings[EXT_ID];
@@ -707,7 +708,7 @@ function toggleSettingsControls(enabled) {
         'wallhaven_purity', 'wallhaven_opacity',
         'xiaobaix_immersive_enabled', 'character_updater_enabled', 'xiaobaix_dynamic_prompt_enabled',
         'xiaobaix_audio_enabled','xiaobaix_variables_panel_enabled',
-        'xiaobaix_use_blob', 'xiaobaix_variables_core_enabled', 'Wrapperiframe'
+        'xiaobaix_use_blob', 'xiaobaix_variables_core_enabled', 'Wrapperiframe', 'xiaobaix_render_enabled'
     ];
     controls.forEach(id => {
         $(`#${id}`).prop('disabled', !enabled).closest('.flex-container').toggleClass('disabled-control', !enabled);
@@ -746,8 +747,10 @@ function setActiveClass(enable) {
 
 function toggleAllFeatures(enabled) {
     if (enabled) {
-        ensureHideCodeStyle(true);
-        setActiveClass(true);
+        if (settings.renderEnabled !== false) {
+            ensureHideCodeStyle(true);
+            setActiveClass(true);
+        }
         toggleSettingsControls(true);
         try { window.XB_applyPrevStates && window.XB_applyPrevStates(); } catch (e) {}
         statsTracker.init(EXT_ID, MODULE_NAME, settings, executeSlashCommand);
@@ -864,6 +867,7 @@ function processMessageById(messageId, forceFinal = true) {
 
 function processCodeBlocks(messageElement, forceFinal=true) {
     if (!settings.enabled || !isXiaobaixEnabled) return;
+    if (settings.renderEnabled === false) return;
     try {
         const codeBlocks = messageElement.querySelectorAll('pre > code');
         const ctx = getContext();
@@ -1001,7 +1005,21 @@ async function setupSettings() {
             saveSettingsDebounced();
             try{settings.wrapperIframe?(!document.getElementById('xb-callgen')&&document.head.appendChild(Object.assign(document.createElement('script'),{id:'xb-callgen',type:'module',src:`${extensionFolderPath}/call-generate-service.js`}))):(window.cleanupCallGenerateHostBridge&&window.cleanupCallGenerateHostBridge(),document.getElementById('xb-callgen')?.remove())}catch(e){}
         });
-        // Reset to defaults: minimal, UI-driven (default ON/OFF + render modes OFF)
+        $("#xiaobaix_render_enabled").prop("checked", settings.renderEnabled !== false).on("change", function () {
+            if (!isXiaobaixEnabled) return;
+            const wasEnabled = settings.renderEnabled !== false;
+            settings.renderEnabled = $(this).prop("checked");
+            saveSettingsDebounced();
+            if (!settings.renderEnabled && wasEnabled) {
+                document.getElementById('xiaobaix-hide-code')?.remove();
+                document.body.classList.remove('xiaobaix-active');
+                invalidateAll();
+            } else if (settings.renderEnabled && !wasEnabled) {
+                ensureHideCodeStyle(true);
+                document.body.classList.add('xiaobaix-active');
+                setTimeout(() => processExistingMessages(), 100);
+            }
+        });
         $(document).off('click.xbreset', '#xiaobaix_reset_btn').on('click.xbreset', '#xiaobaix_reset_btn', function(e){
             e.preventDefault(); e.stopPropagation();
             const MAP={recorded:'xiaobaix_recorded_enabled',immersive:'xiaobaix_immersive_enabled',preview:'xiaobaix_preview_enabled',scriptAssistant:'xiaobaix_script_assistant',tasks:'scheduled_tasks_enabled',templateEditor:'xiaobaix_template_enabled',wallhaven:'wallhaven_enabled',characterUpdater:'character_updater_enabled',dynamicPrompt:'xiaobaix_dynamic_prompt_enabled',variablesPanel:'xiaobaix_variables_panel_enabled',variablesCore:'xiaobaix_variables_core_enabled'};
@@ -1179,7 +1197,7 @@ jQuery(async () => {
     try {
         isXiaobaixEnabled = settings.enabled;
         window.isXiaobaixEnabled = isXiaobaixEnabled;
-        if (isXiaobaixEnabled) {
+        if (isXiaobaixEnabled && settings.renderEnabled !== false) {
             ensureHideCodeStyle(true);
             setActiveClass(true);
         }
