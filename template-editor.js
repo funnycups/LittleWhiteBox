@@ -64,6 +64,7 @@ class TemplateSettings {
         settings.templateEditor.characterBindings = settings.templateEditor.characterBindings || {};
         return settings.templateEditor;
     }
+
     static getCurrentChar() {
         if (this_chid === undefined || !characters[this_chid]) return DEFAULT_CHAR_SETTINGS;
         const character = characters[this_chid];
@@ -73,6 +74,7 @@ class TemplateSettings {
             ...(this.get().characterBindings?.[character.avatar] || {})
         };
     }
+
     static getCharTemplate(avatar) {
         if (!avatar || !utils.isEnabled()) return null;
         if (state.caches.template.has(avatar)) return state.caches.template.get(avatar);
@@ -86,30 +88,30 @@ class TemplateSettings {
         if (result) state.caches.template.set(avatar, result);
         return result;
     }
-    static async saveCurrentChar(partial) {
-        const ctx = getContext();
-        if (this_chid === undefined || !characters[this_chid]) {
-            throw new Error('未选择角色，无法保存模板设置');
-        }
-        const ch = characters[this_chid];
-        const settings = {
-            ...DEFAULT_CHAR_SETTINGS,
-            ...partial,
-            enabled: !!partial.enabled,
-        };
 
-        ch.data = ch.data || {};
-        ch.data.extensions = ch.data.extensions || {};
-        ch.data.extensions[TEMPLATE_MODULE_NAME] = settings;
-        if (ch.avatar) {
-            state.caches.template.delete(ch.avatar);
+    static async saveCurrentChar(partial) {
+        if (this_chid === undefined || this_chid === null || !characters || !characters[this_chid]) {
+            throw new Error('No active character selected');
         }
-        if (typeof ctx.saveCharacter === 'function') {
+        const char = characters[this_chid];
+        const merged = {
+            ...DEFAULT_CHAR_SETTINGS,
+            ...(char.data?.extensions?.[TEMPLATE_MODULE_NAME] || {}),
+            ...partial,
+        };
+        char.data = char.data || {};
+        char.data.extensions = char.data.extensions || {};
+        char.data.extensions[TEMPLATE_MODULE_NAME] = merged;
+        try {
+            state.caches?.template?.delete(char.avatar);
+        } catch {}
+        const ctx = getContext();
+        if (ctx && typeof ctx.saveCharacter === 'function') {
             await ctx.saveCharacter();
-        } else {
-            console.warn('[LittleWhiteBox] ctx.saveCharacter 不可用，角色未持久化');
+        } else if (typeof saveSettingsDebounced === 'function') {
+            saveSettingsDebounced();
         }
-        return settings;
+        return merged;
     }
 }
 
