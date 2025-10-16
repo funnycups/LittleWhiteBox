@@ -34,6 +34,11 @@
               <small>公告</small>
             </button>
           </div>
+          <div class="flex-container alignItemsCenter">
+            <input type="checkbox" id="xiaobaix_render_enabled" />
+            <label for="xiaobaix_render_enabled" class="has-tooltip" data-tooltip="控制代码块转换为iframe渲染的功能
+关闭后将清理所有已渲染的iframe，代码块将以原始形式显示">渲染开关</label>
+          </div>
           <div class="section-divider">渲染模式
             <hr class="sysHR" />
           </div>
@@ -669,6 +674,7 @@
       sandboxMode: 'xiaobaix_sandbox',
       useBlob: 'xiaobaix_use_blob',
       wrapperIframe: 'Wrapperiframe',
+      renderEnabled: 'xiaobaix_render_enabled',
     };
     const DEFAULTS_ON = ['templateEditor', 'tasks', 'dynamicPrompt', 'variablesCore', 'characterUpdater', 'audio'];
     const DEFAULTS_OFF = ['recorded', 'preview', 'scriptAssistant', 'immersive', 'wallhaven', 'variablesPanel'];
@@ -683,11 +689,12 @@
       if (el) { el.checked = !!enabled; try { $(el).trigger('change'); } catch (e) { } }
     }
     function captureStates() {
-      const out = { modules: {}, sandboxMode: false, useBlob: false, wrapperIframe: false };
+      const out = { modules: {}, sandboxMode: false, useBlob: false, wrapperIframe: false, renderEnabled: true };
       try { MODULE_KEYS.forEach(k => { out.modules[k] = !!(extension_settings[EXT_ID][k] && extension_settings[EXT_ID][k].enabled); }); } catch (e) { }
       try { out.sandboxMode = !!extension_settings[EXT_ID].sandboxMode; } catch (e) { }
       try { out.useBlob = !!extension_settings[EXT_ID].useBlob; } catch (e) { }
       try { out.wrapperIframe = !!extension_settings[EXT_ID].wrapperIframe; } catch (e) { }
+      try { out.renderEnabled = extension_settings[EXT_ID].renderEnabled !== false; } catch (e) { }
       return out;
     }
     function applyStates(st) {
@@ -705,6 +712,10 @@
         extension_settings[EXT_ID].wrapperIframe = !!st.wrapperIframe;
         const el = $id('Wrapperiframe'); if (el) { el.checked = !!st.wrapperIframe; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) { } }
       } catch (e) { }
+      try {
+        extension_settings[EXT_ID].renderEnabled = st.renderEnabled !== false;
+        const el = $id('xiaobaix_render_enabled'); if (el) { el.checked = st.renderEnabled !== false; if (window.isXiaobaixEnabled) try { $(el).trigger('change'); } catch (e) { } }
+      } catch (e) { }
       try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) { }
     }
     function applyResetDefaults() {
@@ -721,6 +732,10 @@
       try {
         extension_settings[EXT_ID].wrapperIframe = true; const wp = $id(KEY_TO_CHECKBOX.wrapperIframe);
         if (wp) { wp.checked = true; try { $(wp).trigger('change'); } catch (e) { } }
+      } catch (e) { }
+      try {
+        extension_settings[EXT_ID].renderEnabled = true; const re = $id(KEY_TO_CHECKBOX.renderEnabled);
+        if (re) { re.checked = true; try { $(re).trigger('change'); } catch (e) { } }
       } catch (e) { }
       try { if (window.saveSettingsDebounced) window.saveSettingsDebounced(); } catch (e) { }
     }
