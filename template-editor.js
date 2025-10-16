@@ -61,20 +61,23 @@ class TemplateSettings {
     static get() {
         const settings = extension_settings[EXT_ID] = extension_settings[EXT_ID] || {};
         settings.templateEditor = settings.templateEditor || { enabled: false, characterBindings: {} };
-        settings.templateEditor.characterBindings = settings.templateEditor.characterBindings || {};
         return settings.templateEditor;
     }
-
     static getCurrentChar() {
         if (this_chid === undefined || !characters[this_chid]) return DEFAULT_CHAR_SETTINGS;
         const character = characters[this_chid];
         const embeddedSettings = character.data?.extensions?.[TEMPLATE_MODULE_NAME];
-        return embeddedSettings || {
-            ...DEFAULT_CHAR_SETTINGS,
-            ...(this.get().characterBindings?.[character.avatar] || {})
-        };
+        return embeddedSettings || { ...DEFAULT_CHAR_SETTINGS, ...(this.get().characterBindings[character.avatar] || {}) };
     }
-
+    static async saveCurrentChar(charSettings) {
+        if (this_chid === undefined || !characters[this_chid]) return;
+        const avatar = characters[this_chid].avatar;
+        state.caches.template.clear();
+        await writeExtensionField(Number(this_chid), TEMPLATE_MODULE_NAME, charSettings);
+        const globalSettings = this.get();
+        globalSettings.characterBindings[avatar] = { ...globalSettings.characterBindings[avatar], ...charSettings };
+        saveSettingsDebounced();
+    }
     static getCharTemplate(avatar) {
         if (!avatar || !utils.isEnabled()) return null;
         if (state.caches.template.has(avatar)) return state.caches.template.get(avatar);
@@ -83,35 +86,10 @@ class TemplateSettings {
             const embeddedSettings = characters[this_chid].data?.extensions?.[TEMPLATE_MODULE_NAME];
             if (embeddedSettings?.enabled) result = embeddedSettings;
         }
-        const bindings = this.get().characterBindings;
-        result = result || (bindings?.[avatar]?.enabled ? bindings[avatar] : null);
+        result = result || (this.get().characterBindings[avatar]?.enabled ? this.get().characterBindings[avatar] : null);
+        // 只緩存有效結果，避免將 null 緩存黏住
         if (result) state.caches.template.set(avatar, result);
         return result;
-    }
-
-    static async saveCurrentChar(partial) {
-        if (this_chid === undefined || this_chid === null || !characters || !characters[this_chid]) {
-            throw new Error('No active character selected');
-        }
-        const char = characters[this_chid];
-        const merged = {
-            ...DEFAULT_CHAR_SETTINGS,
-            ...(char.data?.extensions?.[TEMPLATE_MODULE_NAME] || {}),
-            ...partial,
-        };
-        char.data = char.data || {};
-        char.data.extensions = char.data.extensions || {};
-        char.data.extensions[TEMPLATE_MODULE_NAME] = merged;
-        try {
-            state.caches?.template?.delete(char.avatar);
-        } catch {}
-        const ctx = getContext();
-        if (ctx && typeof ctx.saveCharacter === 'function') {
-            await ctx.saveCharacter();
-        } else if (typeof saveSettingsDebounced === 'function') {
-            saveSettingsDebounced();
-        }
-        return merged;
     }
 }
 
@@ -1335,7 +1313,7 @@ function importGlobal(event) {
 }
 
 async function checkEmbeddedTemplate() {
-    if (this_chid === undefined || !characters[this_chid]) return;
+    if (!this_chid || !characters[this_chid]) return;
     const character = characters[this_chid];
     const embeddedSettings = character.data?.extensions?.[TEMPLATE_MODULE_NAME];
     if (embeddedSettings?.enabled && embeddedSettings?.template) {
