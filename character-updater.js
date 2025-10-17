@@ -1568,6 +1568,23 @@ function wireEvents(){
       await PresetUI.checkCurrent();
   PresetRegexUI?.refresh?.();
     },
+    [event_types.PRESET_CHANGED]: async (payload)=>{
+      if(payload?.apiId && payload.apiId!=='openai') return;
+      try{ markPresetUsageDirty(); }catch{}
+      PresetAdapter.onHeaderBoundState();
+      await PresetUI.checkCurrent();
+      PresetRegexUI?.markDirty?.();
+      PresetRegexUI?.refresh?.();
+    },
+    [event_types.PRESET_DELETED]: async (payload)=>{
+      if(payload?.apiId && payload.apiId!=='openai') return;
+      if(payload?.name){ Cache.remove?.(`preset:${payload.name}`); }
+      try{ markPresetUsageDirty(); }catch{}
+      PresetAdapter.onHeaderBoundState();
+      await PresetUI.checkCurrent();
+      PresetRegexUI?.markDirty?.();
+      PresetRegexUI?.refresh?.();
+    },
     [event_types.OAI_PRESET_EXPORT_READY]: (preset)=>{
       try{ PRB.onExportReady(preset); }catch{}
   PresetRegexUI?.refresh?.();
