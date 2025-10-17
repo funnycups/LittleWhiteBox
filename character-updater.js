@@ -24,6 +24,11 @@ const PRESET_REGEX_DOM={ BLOCK_ID:"preset_regex_scripts_block", LIST_ID:"preset_
 let presetUsageDirty=true;
 function markPresetUsageDirty(){ presetUsageDirty=true; }
 
+/* 统一启用状态检查 */
+function isFeatureEnabled(){
+  return Settings.get().enabled;
+}
+
 const VersionHelper = {
   _cached: null,
   async getSTVersion() {
@@ -53,6 +58,7 @@ const Settings={
     const mod=parent.characterUpdater||{};
     const merged={...defaultSettings,...mod};
     merged.serverUrl=parent.characterUpdater?.serverUrl||"https://db.littlewhitebox.qzz.io";
+    merged.enabled = (parent.enabled !== false) && (merged.enabled !== false);
     return merged;
   }
 };
@@ -513,7 +519,7 @@ Popup.showPresetOverview=async function(){
 
 const CharacterUI={
   addButton(){
-    if(!Settings.get().enabled) return;
+    if(!isFeatureEnabled()) return;
     if($("#character-updater-edit-button").length) return;
     $(".form_create_bottom_buttons_block").prepend(`<div id="character-updater-edit-button" class="menu_button fa-solid fa-cloud-arrow-down interactable" title="查看角色卡云端公告与更新情况"></div>`);
     $("#character-updater-edit-button").on("click",async ()=>{
@@ -536,7 +542,7 @@ const CharacterUI={
   },
   updateButton(has){ $("#character-updater-edit-button").toggleClass("has-update",!!has); },
   async checkCurrent(){
-    if(!Settings.get().enabled) return this.updateButton(false);
+    if(!isFeatureEnabled()) return this.updateButton(false);
     const id=CharacterAdapter.getCurrentId();
     if(id==null||!CharacterAdapter.isBound(id)) return this.updateButton(false);
     const local=CharacterAdapter.getLocalData(id);
@@ -554,7 +560,7 @@ const CharacterUI={
 const PresetUI={
   ensureGreenCSS(){ if(document.getElementById("preset-updater-green-style")) return; const style=document.createElement("style"); style.id="preset-updater-green-style"; style.textContent=`#preset-updater-edit-button.has-update{ color:#28a745 !important; }`; document.head.appendChild(style); },
   addButton(){
-    if(!Settings.get().enabled) return;
+    if(!isFeatureEnabled()) return;
     if(document.getElementById("preset-updater-edit-button")) return;
     const $sel=$("#settings_preset_openai"); if(!$sel.length) return;
     const $row=$sel.closest(".flex-container.flexNoGap"); let $c=$row.find(".flex-container.marginLeft5.gap3px").first();
@@ -571,7 +577,7 @@ const PresetUI={
   setButton(has){ $("#preset-updater-edit-button").toggleClass("has-update",!!has); },
   async checkCurrent(){
     let highlight=false;
-    if(Settings.get().enabled){
+    if(isFeatureEnabled()){
       const name=PresetAdapter.getCurrentId();
       if(name&&PresetAdapter.isBound(name)){
         const cloud=Cache.getCloud(PresetAdapter.toCacheKey(name));
@@ -977,6 +983,7 @@ const PRB=(()=>{
 
   /* 导入导出钩子 */
   function onExportReady(preset){
+    if(!isFeatureEnabled()) return;
     try{
       const name = PresetStore.currentName();
       if (!name) return;
@@ -1003,6 +1010,7 @@ const PRB=(()=>{
   }
 
   async function onImportReady({ data, presetName }){
+    if(!isFeatureEnabled()) return;
     try{
       const is1_13_5OrAbove = await VersionHelper.isVersion1_13_5OrAbove();
       
@@ -1012,13 +1020,11 @@ const PRB=(()=>{
       entry.xiaobai_ext=entry.xiaobai_ext||{};
       data.prompt_order=promptOrder;
 
- 
       let binding = fromPayload(entry.xiaobai_ext?.[PresetStore.REGEX_KEY] ?? data?.extensions?.regexBindings);
       if(!binding || !Array.isArray(binding.scripts) || binding.scripts.length===0){
         const bCompat = readRegexBindingsFromBPrompt(data);
         if(bCompat) binding = bCompat;
       }
-
 
       if(is1_13_5OrAbove) {
         if(entry.xiaobai_ext?.[PresetStore.REGEX_KEY]){
@@ -1089,13 +1095,9 @@ PresetRegexUI=(()=>{
   let observer=null;
   let syncing=false;
   let is1_13_5Plus = null;
-  let latestState=null;
-  const dragState={ draggingId:null };
-  let dragHandlersBound=false;
 
   const ensureBlock=async ()=>{
-    if(!Settings.get().enabled) return null;
-    
+    if(!isFeatureEnabled()) return null;
     if(is1_13_5Plus === null) {
       is1_13_5Plus = await VersionHelper.isVersion1_13_5OrAbove();
     }
@@ -1273,7 +1275,6 @@ PresetRegexUI=(()=>{
       const script=lookup.byId.get(id);
       const isActive=activeIds.has(id);
       node.style.display=isActive?"":"none";
-      node.setAttribute("draggable", isActive?"true":"false");
       applyCheckboxState(node,script);
     });
 
@@ -1293,120 +1294,13 @@ PresetRegexUI=(()=>{
     block.style.display=hasActive?"":"none";
   };
 
-    const persistOrder=async()=>{
-      if(!latestState) return;
-      const { presetName, activeIds, lookup }=latestState;
-      if(!presetName||!activeIds.size) return;
-      const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
-      if(!list) return;
-      const orderedIds=Array.from(list.children)
-        .filter(node=>node instanceof HTMLElement && activeIds.has(node.id) && node.style.display!=="none")
-        .map(node=>node.id);
-      if(orderedIds.length<=1) return;
-      const binding=PRB.read(presetName);
-      if(!binding||!Array.isArray(binding.scripts)) return;
-      const original=binding.scripts.slice();
-      const resolveId=item=>{
-        if(item&&typeof item==="object"){
-          if(item.id) return item.id;
-          if(item.scriptName){
-            const match=lookup.byName.get(String(item.scriptName).toLowerCase());
-            return match?.id||item.scriptName;
-          }
-        }
-        if(typeof item==="string"){
-          const match=lookup.byName.get(item.toLowerCase());
-          return match?.id||item;
-        }
-        return "";
-      };
-      const picked=new Set();
-      const reordered=[];
-      orderedIds.forEach(id=>{
-        const idx=original.findIndex((entry,index)=>!picked.has(index)&&resolveId(entry)===id);
-        if(idx!==-1){
-          picked.add(idx);
-          reordered.push(original[idx]);
-        }
-      });
-      original.forEach((entry,index)=>{ if(!picked.has(index)) reordered.push(entry); });
-      if(reordered.length!==binding.scripts.length) return;
-      const same=reordered.every((entry,idx)=>entry===binding.scripts[idx]);
-      if(same) return;
-      binding.scripts=reordered;
-      await PRB.write(presetName,binding);
-      await refresh();
-    };
-
-    const dragTarget=node=>{
-      if(!(node instanceof HTMLElement)) return null;
-      return node.classList.contains("regex-script-label")?node:node.closest?.(".regex-script-label")||null;
-    };
-
-    const onDragStart=e=>{
-      const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
-      if(!list) return;
-      const target=dragTarget(e.target);
-      if(!target||target.style.display==="none"||target.parentElement!==list){ e.preventDefault(); return; }
-      dragState.draggingId=target.id;
-      try{ e.dataTransfer.effectAllowed="move"; e.dataTransfer.setData("text/plain", target.id); }
-      catch{}
-      target.classList.add("preset-regex-dragging");
-    };
-
-    const onDragOver=e=>{
-      if(!dragState.draggingId) return;
-      const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
-      if(!list) return;
-      const target=dragTarget(e.target);
-      if(!target||target.id===dragState.draggingId||target.parentElement!==list) return;
-      e.preventDefault();
-      const dragging=document.getElementById(dragState.draggingId);
-      if(!dragging) return;
-      const rect=target.getBoundingClientRect();
-      const after=(e.clientY-rect.top)>(rect.height/2);
-      if(after){ target.after(dragging); }
-      else{ target.before(dragging); }
-    };
-
-    const finalizeDrag=()=>{
-      if(!dragState.draggingId) return;
-      const node=document.getElementById(dragState.draggingId);
-      node?.classList.remove("preset-regex-dragging");
-      dragState.draggingId=null;
-    };
-
-    const onDrop=e=>{
-      if(!dragState.draggingId) return;
-      e.preventDefault();
-      finalizeDrag();
-      persistOrder().catch(console.error);
-    };
-
-    const onDragEnd=()=>{
-      if(!dragState.draggingId) return;
-      finalizeDrag();
-      persistOrder().catch(console.error);
-    };
-
-    const setupDragAndDrop=list=>{
-      if(dragHandlersBound||!list) return;
-      list.addEventListener("dragstart",onDragStart);
-      list.addEventListener("dragover",onDragOver);
-      list.addEventListener("drop",onDrop);
-      list.addEventListener("dragend",onDragEnd);
-      dragHandlersBound=true;
-    };
-
   const clearDom=()=>{
     const global=document.getElementById("saved_regex_scripts");
     const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
-    const block=document.getElementById(PRESET_REGEX_DOM.BLOCK_ID);
     if(!global||!list) return;
     Array.from(list.children).forEach(node=>{
       if(node instanceof HTMLElement){ node.style.display=""; global.appendChild(node); }
     });
-    if(block) block.remove();
   };
 
   const attachObserver=()=>{
@@ -1430,11 +1324,10 @@ PresetRegexUI=(()=>{
   };
 
   const refresh=async ()=>{
-    if(!Settings.get().enabled) {
-      try{ clearDom(); }catch{}
+    if(!isFeatureEnabled()) {
+      destroy();
       return;
     }
-    
     if(is1_13_5Plus === null) {
       is1_13_5Plus = await VersionHelper.isVersion1_13_5OrAbove();
     }
@@ -1445,11 +1338,8 @@ PresetRegexUI=(()=>{
     try{
       observer?.disconnect?.();
       const state=computeState();
-      latestState=state;
       applyMetadata(state.lookup,state.flagged,state.activeIds);
       await syncDom(state);
-      const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
-      setupDragAndDrop(list);
     }finally{
       syncing=false;
     }
@@ -1459,15 +1349,6 @@ PresetRegexUI=(()=>{
   const destroy=()=>{
     observer?.disconnect?.();
     observer=null;
-    const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
-    if(list&&dragHandlersBound){
-      list.removeEventListener("dragstart",onDragStart);
-      list.removeEventListener("dragover",onDragOver);
-      list.removeEventListener("drop",onDrop);
-      list.removeEventListener("dragend",onDragEnd);
-    }
-    dragHandlersBound=false;
-    latestState=null;
     clearDom();
   };
 
@@ -1475,6 +1356,7 @@ PresetRegexUI=(()=>{
 
   return { refresh, destroy, markDirty };
 })();
+PresetRegexUI.refresh();
 
 async function addMenusHTML(){
   try{ const res=await fetch(`${extensionFolderPath}/character-updater-menus.html`); if(res.ok) $("body").append(await res.text()); }
@@ -1537,6 +1419,7 @@ function wireCharacter(){
 function wireEvents(){
   const handlers={
     [event_types.APP_READY]: async ()=>{
+      if(!isFeatureEnabled()) return;
       try{ PresetStore.cleanupOrphans?.(); }catch{}
       try{ startupCacheCleanup(); }catch{}
       await CharacterUpdater.batchStartupCheck();
@@ -1545,12 +1428,14 @@ function wireEvents(){
   PresetRegexUI?.refresh?.();
     },
     [event_types.CHAT_CHANGED]: async ()=>{
+      if(!isFeatureEnabled()) return;
       CharacterAdapter.onHeaderBoundState();
       if(CharacterAdapter.getCurrentId()!=null && CharacterAdapter.isBound(CharacterAdapter.getCurrentId())) await CharacterUI.checkCurrent();
   PresetRegexUI?.refresh?.();
     },
-    [event_types.CHARACTER_EDITED]: ()=>CharacterAdapter.onHeaderBoundState(),
+    [event_types.CHARACTER_EDITED]: ()=>{ if(isFeatureEnabled()) CharacterAdapter.onHeaderBoundState(); },
     [event_types.CHARACTER_PAGE_LOADED]: async ()=>{
+      if(!isFeatureEnabled()) return;
       const ids=CharacterAdapter.listAllBoundIds();
       ids.forEach(id=>{
         const d=CharacterAdapter.getLocalData(id); const c=Cache.getCloud(CharacterAdapter.toCacheKey(id));
@@ -1560,8 +1445,8 @@ function wireEvents(){
       });
     },
     [event_types.SETTINGS_UPDATED]: async ()=>{
-      if(!Settings.get().enabled) {
-        try{ PresetRegexUI?.destroy?.(); }catch{}
+      if(!isFeatureEnabled()) {
+        cleanup();
         return;
       }
       try{ PRB.refreshUI(); }catch{}
@@ -1571,28 +1456,13 @@ function wireEvents(){
       await PresetUI.checkCurrent();
   PresetRegexUI?.refresh?.();
     },
-    [event_types.PRESET_CHANGED]: async (payload)=>{
-      if(payload?.apiId && payload.apiId!=='openai') return;
-      try{ markPresetUsageDirty(); }catch{}
-      PresetAdapter.onHeaderBoundState();
-      await PresetUI.checkCurrent();
-      PresetRegexUI?.markDirty?.();
-      PresetRegexUI?.refresh?.();
-    },
-    [event_types.PRESET_DELETED]: async (payload)=>{
-      if(payload?.apiId && payload.apiId!=='openai') return;
-      if(payload?.name){ Cache.remove?.(`preset:${payload.name}`); }
-      try{ markPresetUsageDirty(); }catch{}
-      PresetAdapter.onHeaderBoundState();
-      await PresetUI.checkCurrent();
-      PresetRegexUI?.markDirty?.();
-      PresetRegexUI?.refresh?.();
-    },
     [event_types.OAI_PRESET_EXPORT_READY]: (preset)=>{
+      if(!isFeatureEnabled()) return;
       try{ PRB.onExportReady(preset); }catch{}
   PresetRegexUI?.refresh?.();
     },
     [event_types.OAI_PRESET_IMPORT_READY]: (payload)=>{
+      if(!isFeatureEnabled()) return;
       try{ PRB.onImportReady(payload); }catch{}
   PresetRegexUI?.refresh?.();
     },
@@ -1601,6 +1471,10 @@ function wireEvents(){
 }
 
 async function addMenusAndBind(){
+  if(!isFeatureEnabled()) {
+    cleanup();
+    return;
+  }
   await addMenusHTML();
   CharacterUI.addButton(); PresetUI.addButton();
   Menu.bindCharacterTriggers(); Menu.bindPresetTriggers();
@@ -1636,21 +1510,18 @@ function cleanup(){
 }
 
 async function initCharacterUpdater(){
-  if(moduleState.isInitialized) return;
-  
-  if(!Settings.get().enabled) {
-    console.log('[小白X] 扩展已禁用，跳过初始化');
+  if(!isFeatureEnabled()) {
+    cleanup();
     return;
   }
   
+  if(moduleState.isInitialized) return;
   try{
     const registrar=/** @type {any} */ (globalThis).registerModuleCleanup;
     if(typeof registrar==="function") registrar(MODULE_NAME,cleanup);
   }catch{}
   await addMenusAndBind();
   moduleState.isInitialized=true;
-  
-  try{ PresetRegexUI?.refresh?.(); }catch(e){ console.error('[小白X] PresetRegexUI初始化失败', e); }
 }
 
 export { initCharacterUpdater };
