@@ -24,7 +24,6 @@ const PRESET_REGEX_DOM={ BLOCK_ID:"preset_regex_scripts_block", LIST_ID:"preset_
 let presetUsageDirty=true;
 function markPresetUsageDirty(){ presetUsageDirty=true; }
 
-/* 版本检测工具 */
 const VersionHelper = {
   _cached: null,
   async getSTVersion() {
@@ -913,7 +912,6 @@ const PRB=(()=>{
     PresetRegexUI?.refresh?.();
   }
   async function bindUI(){
-    // 1.13.5+不需要绑定UI事件，省性能
     const is1_13_5Plus = await VersionHelper.isVersion1_13_5OrAbove();
     if(is1_13_5Plus) return;
     
@@ -1014,35 +1012,30 @@ const PRB=(()=>{
       entry.xiaobai_ext=entry.xiaobai_ext||{};
       data.prompt_order=promptOrder;
 
-      // 读取正则绑定数据
+ 
       let binding = fromPayload(entry.xiaobai_ext?.[PresetStore.REGEX_KEY] ?? data?.extensions?.regexBindings);
       if(!binding || !Array.isArray(binding.scripts) || binding.scripts.length===0){
         const bCompat = readRegexBindingsFromBPrompt(data);
         if(bCompat) binding = bCompat;
       }
 
-      // 如果是 1.13.5 或以上版本
+
       if(is1_13_5OrAbove) {
-        // 处理xiaobai_ext.regexBindings -> extensions.regex_scripts的迁移
         if(entry.xiaobai_ext?.[PresetStore.REGEX_KEY]){
           const rawScripts=materializeBindingScripts(binding);
           const { list:dedupedScripts, duplicates }=dedupeScriptsById(rawScripts);
           if(duplicates>0) console.log(`[小白X] 已清理 ${duplicates} 个重复ID的正则`);
           if(dedupedScripts.length){
             if(!data.extensions) data.extensions={};
-            // 合并到现有的regex_scripts（如果有的话）
             const existing = Array.isArray(data.extensions.regex_scripts) ? data.extensions.regex_scripts : [];
             const combined = [...existing, ...dedupedScripts.map(cloneScript)];
             const { list:finalScripts } = dedupeScriptsById(combined);
             data.extensions.regex_scripts = finalScripts;
             console.log(`[小白X] 已转换 ${dedupedScripts.length} 个正则为预设正则脚本`);
           }
-          // 清理旧格式
           delete entry.xiaobai_ext[PresetStore.REGEX_KEY];
         }
-        // extensions.regex_scripts 将由官方逻辑自动导入
       } else {
-        // 兼容旧版本：优先处理 extensions.regex_scripts
         const incomingScripts=Array.isArray(data?.extensions?.regex_scripts)?data.extensions.regex_scripts:null;
         if(incomingScripts?.length){
           const { list:dedupedScripts, duplicates }=dedupeScriptsById(incomingScripts);
@@ -1101,7 +1094,8 @@ PresetRegexUI=(()=>{
   let dragHandlersBound=false;
 
   const ensureBlock=async ()=>{
-    // 检查版本，1.13.5及以上不显示此UI
+    if(!Settings.get().enabled) return null;
+    
     if(is1_13_5Plus === null) {
       is1_13_5Plus = await VersionHelper.isVersion1_13_5OrAbove();
     }
@@ -1407,10 +1401,12 @@ PresetRegexUI=(()=>{
   const clearDom=()=>{
     const global=document.getElementById("saved_regex_scripts");
     const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
+    const block=document.getElementById(PRESET_REGEX_DOM.BLOCK_ID);
     if(!global||!list) return;
     Array.from(list.children).forEach(node=>{
       if(node instanceof HTMLElement){ node.style.display=""; global.appendChild(node); }
     });
+    if(block) block.remove();
   };
 
   const attachObserver=()=>{
@@ -1434,7 +1430,11 @@ PresetRegexUI=(()=>{
   };
 
   const refresh=async ()=>{
-    // 检查版本，1.13.5+不需要刷新
+    if(!Settings.get().enabled) {
+      try{ clearDom(); }catch{}
+      return;
+    }
+    
     if(is1_13_5Plus === null) {
       is1_13_5Plus = await VersionHelper.isVersion1_13_5OrAbove();
     }
@@ -1475,7 +1475,6 @@ PresetRegexUI=(()=>{
 
   return { refresh, destroy, markDirty };
 })();
-PresetRegexUI.refresh();
 
 async function addMenusHTML(){
   try{ const res=await fetch(`${extensionFolderPath}/character-updater-menus.html`); if(res.ok) $("body").append(await res.text()); }
@@ -1561,6 +1560,10 @@ function wireEvents(){
       });
     },
     [event_types.SETTINGS_UPDATED]: async ()=>{
+      if(!Settings.get().enabled) {
+        try{ PresetRegexUI?.destroy?.(); }catch{}
+        return;
+      }
       try{ PRB.refreshUI(); }catch{}
       try{ PresetUI.addButton(); }catch{}
       try{ cleanPresetDropdown(); }catch{}
@@ -1634,12 +1637,20 @@ function cleanup(){
 
 async function initCharacterUpdater(){
   if(moduleState.isInitialized) return;
+  
+  if(!Settings.get().enabled) {
+    console.log('[小白X] 扩展已禁用，跳过初始化');
+    return;
+  }
+  
   try{
     const registrar=/** @type {any} */ (globalThis).registerModuleCleanup;
     if(typeof registrar==="function") registrar(MODULE_NAME,cleanup);
   }catch{}
   await addMenusAndBind();
   moduleState.isInitialized=true;
+  
+  try{ PresetRegexUI?.refresh?.(); }catch(e){ console.error('[小白X] PresetRegexUI初始化失败', e); }
 }
 
 export { initCharacterUpdater };
