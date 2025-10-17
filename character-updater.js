@@ -24,6 +24,30 @@ const PRESET_REGEX_DOM={ BLOCK_ID:"preset_regex_scripts_block", LIST_ID:"preset_
 let presetUsageDirty=true;
 function markPresetUsageDirty(){ presetUsageDirty=true; }
 
+/* 版本检测工具 */
+const VersionHelper = {
+  _cached: null,
+  async getSTVersion() {
+    if (this._cached) return this._cached;
+    try {
+      const response = await fetch('/version');
+      const data = await response.json();
+      this._cached = data.pkgVersion || '0.0.0';
+      return this._cached;
+    } catch(e) {
+      console.error('[小白X] 获取版本失败', e);
+      return '0.0.0';
+    }
+  },
+  versionCompare(srcVersion, minVersion) {
+    return (srcVersion || '0.0.0').localeCompare(minVersion, undefined, { numeric: true, sensitivity: 'base' }) > -1;
+  },
+  async isVersion1_13_5OrAbove() {
+    const version = await this.getSTVersion();
+    return this.versionCompare(version, '1.13.5');
+  }
+};
+
 const Settings={
   get(){
     const parent=extension_settings[EXT_ID]||{};
@@ -759,6 +783,32 @@ const PRB=(()=>{
   /* 绑定读写 */
   const hasScripts=(binding)=>Array.isArray(binding?.scripts) && binding.scripts.length>0;
 
+  const materializeBindingScripts=(binding)=>{
+    if(!hasScripts(binding)) return [];
+    if(binding.strategy==="byName"){
+      const names=new Set(binding.scripts.map(name=>String(name)));
+      return allRegex().filter(script=>names.has(String(script?.scriptName)));
+    }
+    return binding.scripts;
+  };
+
+  const dedupeScriptsById=(scripts)=>{
+    if(!Array.isArray(scripts)) return { list:[], duplicates:0 };
+    if(scripts.length<=1) return { list:scripts.slice(), duplicates:0 };
+    const seen=new Set();
+    const list=[];
+    for(let i=scripts.length-1;i>=0;i-=1){
+      const item=scripts[i];
+      const id=item&&typeof item==="object"?item.id:null;
+      if(id){
+        if(seen.has(id)) continue;
+        seen.add(id);
+      }
+      list.unshift(item);
+    }
+    return { list, duplicates:scripts.length-list.length };
+  };
+
   const read=name=>{
     const ext=PresetStore.readExt(name);
     let binding=fromPayload(ext?.[PresetStore.REGEX_KEY]);
@@ -862,7 +912,11 @@ const PRB=(()=>{
     }
     PresetRegexUI?.refresh?.();
   }
-  function bindUI(){
+  async function bindUI(){
+    // 1.13.5+不需要绑定UI事件，省性能
+    const is1_13_5Plus = await VersionHelper.isVersion1_13_5OrAbove();
+    if(is1_13_5Plus) return;
+    
     $(document)
     .off("click.prb","#prb-header-row").on("click.prb","#prb-header-row",()=>{
       const name=curName(); if(!name) return toaster?.info?.("请先选择一个 OpenAI 预设");
@@ -952,26 +1006,73 @@ const PRB=(()=>{
 
   async function onImportReady({ data, presetName }){
     try{
+      const is1_13_5OrAbove = await VersionHelper.isVersion1_13_5OrAbove();
+      
       const promptOrder=Array.isArray(data?.prompt_order)?data.prompt_order:[];
       let entry=promptOrder.find(item=>Number(item?.character_id)===100000);
       if(!entry){ entry={ character_id:100000, order:[] }; promptOrder.push(entry); }
       entry.xiaobai_ext=entry.xiaobai_ext||{};
       data.prompt_order=promptOrder;
 
+      // 读取正则绑定数据
       let binding = fromPayload(entry.xiaobai_ext?.[PresetStore.REGEX_KEY] ?? data?.extensions?.regexBindings);
       if(!binding || !Array.isArray(binding.scripts) || binding.scripts.length===0){
         const bCompat = readRegexBindingsFromBPrompt(data);
         if(bCompat) binding = bCompat;
       }
-      if(binding?.scripts?.length){
-        const scripts=binding.strategy==="byName"
-          ? allRegex().filter(s=>new Set(binding.scripts.map(String)).has(String(s?.scriptName)))
-          : binding.scripts;
-        const result=uniqMerge(scripts)||{ added:0, replaced:0 };
-        try{ await eventSource.emit?.(event_types.CHAT_CHANGED); }catch{}
-        if(presetName){ entry.xiaobai_ext[PresetStore.REGEX_KEY]=toPayload(binding); await write(presetName,binding); }
-        toaster?.success?.(`已更新全局正则：新增 ${Number(result.added)||0}，替换 ${Number(result.replaced)||0}`);
+
+      // 如果是 1.13.5 或以上版本
+      if(is1_13_5OrAbove) {
+        // 处理xiaobai_ext.regexBindings -> extensions.regex_scripts的迁移
+        if(entry.xiaobai_ext?.[PresetStore.REGEX_KEY]){
+          const rawScripts=materializeBindingScripts(binding);
+          const { list:dedupedScripts, duplicates }=dedupeScriptsById(rawScripts);
+          if(duplicates>0) console.log(`[小白X] 已清理 ${duplicates} 个重复ID的正则`);
+          if(dedupedScripts.length){
+            if(!data.extensions) data.extensions={};
+            // 合并到现有的regex_scripts（如果有的话）
+            const existing = Array.isArray(data.extensions.regex_scripts) ? data.extensions.regex_scripts : [];
+            const combined = [...existing, ...dedupedScripts.map(cloneScript)];
+            const { list:finalScripts } = dedupeScriptsById(combined);
+            data.extensions.regex_scripts = finalScripts;
+            console.log(`[小白X] 已转换 ${dedupedScripts.length} 个正则为预设正则脚本`);
+          }
+          // 清理旧格式
+          delete entry.xiaobai_ext[PresetStore.REGEX_KEY];
+        }
+        // extensions.regex_scripts 将由官方逻辑自动导入
+      } else {
+        // 兼容旧版本：优先处理 extensions.regex_scripts
+        const incomingScripts=Array.isArray(data?.extensions?.regex_scripts)?data.extensions.regex_scripts:null;
+        if(incomingScripts?.length){
+          const { list:dedupedScripts, duplicates }=dedupeScriptsById(incomingScripts);
+          if(duplicates>0) console.log(`[小白X] 已清理 ${duplicates} 个重复ID的正则`);
+          if(dedupedScripts.length){
+            const prepared=dedupedScripts.map(cloneScript);
+            const result=uniqMerge(prepared)||{ added:0, replaced:0 };
+            const newBinding={ strategy:"byEmbed", scripts:prepared };
+            entry.xiaobai_ext[PresetStore.REGEX_KEY]=toPayload(newBinding);
+            if(data.extensions) delete data.extensions.regex_scripts;
+            try{ await eventSource.emit?.(event_types.CHAT_CHANGED); }catch{}
+            if(presetName) await write(presetName,newBinding);
+            toaster?.success?.(`已导入为全局正则：新增 ${Number(result.added)||0}，替换 ${Number(result.replaced)||0}`);
+          }
+        } else if(hasScripts(binding)){
+          const rawScripts=materializeBindingScripts(binding);
+          const { list:dedupedScripts, duplicates }=dedupeScriptsById(rawScripts);
+          if(duplicates>0) console.log(`[小白X] 已清理 ${duplicates} 个重复ID的正则`);
+          if(dedupedScripts.length){
+            const prepared=dedupedScripts.map(cloneScript);
+            const result=uniqMerge(prepared)||{ added:0, replaced:0 };
+            try{ await eventSource.emit?.(event_types.CHAT_CHANGED); }catch{}
+            const bindingForSave=binding.strategy==="byName"?binding:{ ...binding, scripts:prepared };
+            entry.xiaobai_ext[PresetStore.REGEX_KEY]=toPayload(bindingForSave);
+            if(presetName) await write(presetName,bindingForSave);
+            toaster?.success?.(`已更新全局正则：新增 ${Number(result.added)||0}，替换 ${Number(result.replaced)||0}`);
+          }
+        }
       }
+
       const detail=data?.extensions?.presetdetailnfo;
       if(detail && presetName){
         const current = PresetStore.read(presetName) || {};
@@ -980,7 +1081,7 @@ const PRB=(()=>{
         await PresetStore.write(presetName, merged);
         try{ PresetAdapter.onHeaderBoundState(); }catch{}
       }
-    }catch{}
+    }catch(e){ console.error('[PRB.onImportReady] 导入失败', e); }
   PresetRegexUI?.refresh?.();
   }
 
@@ -994,8 +1095,18 @@ PresetRegexUI=(()=>{
   const cache={ signature:"", flagged:new Set(), usage:new Map() };
   let observer=null;
   let syncing=false;
+  let is1_13_5Plus = null;
+  let latestState=null;
+  const dragState={ draggingId:null };
+  let dragHandlersBound=false;
 
-  const ensureBlock=()=>{
+  const ensureBlock=async ()=>{
+    // 检查版本，1.13.5及以上不显示此UI
+    if(is1_13_5Plus === null) {
+      is1_13_5Plus = await VersionHelper.isVersion1_13_5OrAbove();
+    }
+    if(is1_13_5Plus) return null;
+    
     const host=document.getElementById("global_scripts_block");
     if(!host) return null;
     let block=document.getElementById(PRESET_REGEX_DOM.BLOCK_ID);
@@ -1015,8 +1126,8 @@ PresetRegexUI=(()=>{
     return block;
   };
 
-  const getDom=()=>{
-    const block=ensureBlock();
+  const getDom=async ()=>{
+    const block=await ensureBlock();
     return {
       global:document.getElementById("saved_regex_scripts"),
       block,
@@ -1145,8 +1256,8 @@ PresetRegexUI=(()=>{
     if(checkbox instanceof HTMLInputElement){ checkbox.checked=!!(script?.disabled); }
   };
 
-  const syncDom=({ lookup, flagged, activeOrder, activeIds, presetName })=>{
-    const { global, block, list, label }=getDom();
+  const syncDom=async ({ lookup, flagged, activeOrder, activeIds, presetName })=>{
+    const { global, block, list, label }=await getDom();
     if(!global||!list||!block) return;
     dedupe(global);
     dedupe(list);
@@ -1168,6 +1279,7 @@ PresetRegexUI=(()=>{
       const script=lookup.byId.get(id);
       const isActive=activeIds.has(id);
       node.style.display=isActive?"":"none";
+      node.setAttribute("draggable", isActive?"true":"false");
       applyCheckboxState(node,script);
     });
 
@@ -1186,6 +1298,111 @@ PresetRegexUI=(()=>{
     if(label) label.textContent=hasActive&&presetName?`当前预设: ${presetName}`:"";
     block.style.display=hasActive?"":"none";
   };
+
+    const persistOrder=async()=>{
+      if(!latestState) return;
+      const { presetName, activeIds, lookup }=latestState;
+      if(!presetName||!activeIds.size) return;
+      const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
+      if(!list) return;
+      const orderedIds=Array.from(list.children)
+        .filter(node=>node instanceof HTMLElement && activeIds.has(node.id) && node.style.display!=="none")
+        .map(node=>node.id);
+      if(orderedIds.length<=1) return;
+      const binding=PRB.read(presetName);
+      if(!binding||!Array.isArray(binding.scripts)) return;
+      const original=binding.scripts.slice();
+      const resolveId=item=>{
+        if(item&&typeof item==="object"){
+          if(item.id) return item.id;
+          if(item.scriptName){
+            const match=lookup.byName.get(String(item.scriptName).toLowerCase());
+            return match?.id||item.scriptName;
+          }
+        }
+        if(typeof item==="string"){
+          const match=lookup.byName.get(item.toLowerCase());
+          return match?.id||item;
+        }
+        return "";
+      };
+      const picked=new Set();
+      const reordered=[];
+      orderedIds.forEach(id=>{
+        const idx=original.findIndex((entry,index)=>!picked.has(index)&&resolveId(entry)===id);
+        if(idx!==-1){
+          picked.add(idx);
+          reordered.push(original[idx]);
+        }
+      });
+      original.forEach((entry,index)=>{ if(!picked.has(index)) reordered.push(entry); });
+      if(reordered.length!==binding.scripts.length) return;
+      const same=reordered.every((entry,idx)=>entry===binding.scripts[idx]);
+      if(same) return;
+      binding.scripts=reordered;
+      await PRB.write(presetName,binding);
+      await refresh();
+    };
+
+    const dragTarget=node=>{
+      if(!(node instanceof HTMLElement)) return null;
+      return node.classList.contains("regex-script-label")?node:node.closest?.(".regex-script-label")||null;
+    };
+
+    const onDragStart=e=>{
+      const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
+      if(!list) return;
+      const target=dragTarget(e.target);
+      if(!target||target.style.display==="none"||target.parentElement!==list){ e.preventDefault(); return; }
+      dragState.draggingId=target.id;
+      try{ e.dataTransfer.effectAllowed="move"; e.dataTransfer.setData("text/plain", target.id); }
+      catch{}
+      target.classList.add("preset-regex-dragging");
+    };
+
+    const onDragOver=e=>{
+      if(!dragState.draggingId) return;
+      const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
+      if(!list) return;
+      const target=dragTarget(e.target);
+      if(!target||target.id===dragState.draggingId||target.parentElement!==list) return;
+      e.preventDefault();
+      const dragging=document.getElementById(dragState.draggingId);
+      if(!dragging) return;
+      const rect=target.getBoundingClientRect();
+      const after=(e.clientY-rect.top)>(rect.height/2);
+      if(after){ target.after(dragging); }
+      else{ target.before(dragging); }
+    };
+
+    const finalizeDrag=()=>{
+      if(!dragState.draggingId) return;
+      const node=document.getElementById(dragState.draggingId);
+      node?.classList.remove("preset-regex-dragging");
+      dragState.draggingId=null;
+    };
+
+    const onDrop=e=>{
+      if(!dragState.draggingId) return;
+      e.preventDefault();
+      finalizeDrag();
+      persistOrder().catch(console.error);
+    };
+
+    const onDragEnd=()=>{
+      if(!dragState.draggingId) return;
+      finalizeDrag();
+      persistOrder().catch(console.error);
+    };
+
+    const setupDragAndDrop=list=>{
+      if(dragHandlersBound||!list) return;
+      list.addEventListener("dragstart",onDragStart);
+      list.addEventListener("dragover",onDragOver);
+      list.addEventListener("drop",onDrop);
+      list.addEventListener("dragend",onDragEnd);
+      dragHandlersBound=true;
+    };
 
   const clearDom=()=>{
     const global=document.getElementById("saved_regex_scripts");
@@ -1216,14 +1433,23 @@ PresetRegexUI=(()=>{
     return { lookup, presetName, flagged:new Set(usage.flagged), activeOrder, activeIds };
   };
 
-  const refresh=()=>{
+  const refresh=async ()=>{
+    // 检查版本，1.13.5+不需要刷新
+    if(is1_13_5Plus === null) {
+      is1_13_5Plus = await VersionHelper.isVersion1_13_5OrAbove();
+    }
+    if(is1_13_5Plus) return;
+    
     if(syncing) return;
     syncing=true;
     try{
       observer?.disconnect?.();
       const state=computeState();
+      latestState=state;
       applyMetadata(state.lookup,state.flagged,state.activeIds);
-      syncDom(state);
+      await syncDom(state);
+      const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
+      setupDragAndDrop(list);
     }finally{
       syncing=false;
     }
@@ -1233,6 +1459,15 @@ PresetRegexUI=(()=>{
   const destroy=()=>{
     observer?.disconnect?.();
     observer=null;
+    const list=document.getElementById(PRESET_REGEX_DOM.LIST_ID);
+    if(list&&dragHandlersBound){
+      list.removeEventListener("dragstart",onDragStart);
+      list.removeEventListener("dragover",onDragOver);
+      list.removeEventListener("drop",onDrop);
+      list.removeEventListener("dragend",onDragEnd);
+    }
+    dragHandlersBound=false;
+    latestState=null;
     clearDom();
   };
 

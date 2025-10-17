@@ -113,24 +113,6 @@
               style="font-size:0.8em;">该预设无更新状态</span>
             <span id="current-preset-status" class="preset-status"></span>
           </div>
-          <div class="section-divider">预设正则绑定区
-          </div>
-          <div class="marginTop"
-            style="border:5px inset var(--SmartThemeBorderColor);padding-bottom:3px;cursor:pointer;justify-content:center;">
-            <div id="prb-header-row" class="flex-container alignItemsCenter"
-              style="justify-content:center;margin-bottom:3px;">
-              <label style="cursor:pointer;">展开预设绑定正则设置</label>
-            </div>
-            <div id="prb-bound-container"
-              style="display:none;align-items:center;border:1px solid var(--SmartThemeBorderColor);padding-bottom:3px;">
-              <div class="marginTopSmall" style="padding:5px;">已绑定正则：</div>
-              <div id="prb-bound-list" class="prb-list" style="line-height:1.5;"></div>
-            </div>
-            <div id="prb-actions" class="prb-actions" style="display:none;">
-              <button id="prb-add" class="menu_button">绑定<br></button>
-              <button id="prb-clear" class="menu_button danger">删除REGEX插件正则</button>
-            </div>
-          </div>
           <br>
           <div class="section-divider">消息日志与拦截
             <hr class="sysHR">
@@ -776,14 +758,7 @@
   }();
 </script>
 
-<!-- 预设绑定正则 -->
-<script>
-  !function () {
-    function go() { if (window.PRB_bindUI) window.PRB_bindUI(); }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go, { once: true });
-    else { if (!window.PRB_bindUI) requestAnimationFrame(go); else go(); }
-  }();
-</script>
+
 
 <!-- 功能与更新公告区块 -->
 <div id="xiaobaix_info_modal" class="xiaobaix-modal" style="display:none;">
