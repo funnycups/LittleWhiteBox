@@ -736,26 +736,12 @@ class TemplateProcessor {
     }
 }
 
-function djb2(str){let h=5381;for(let i=0;i<str.length;i++){h=((h<<5)+h)^str.charCodeAt(i)}return (h>>>0).toString(16)}
-function xbBuildResourceHints(html){
-    const urls = Array.from(new Set((html.match(/https?:\/\/[^"'()\s]+/gi)||[]).map(u=>{try{return new URL(u).origin}catch{return null}}).filter(Boolean)));
-    let hints = ""; const maxHosts = 6;
-    for(let i=0;i<Math.min(urls.length,maxHosts);i++){const origin=urls[i];hints+=`<link rel="dns-prefetch" href="${origin}">`;hints+=`<link rel="preconnect" href="${origin}" crossorigin>`}
-    let preload = "";
-    const font = (html.match(/https?:\/\/[^"'()\s]+\.(?:woff2|woff|ttf|otf)/i)||[])[0];
-    if(font){const type=font.endsWith(".woff2")?"font/woff2":font.endsWith(".woff")?"font/woff":font.endsWith(".ttf")?"font/ttf":"font/otf";preload+=`<link rel="preload" as="font" href="${font}" type="${type}" crossorigin fetchpriority="high">`}
-    const css = (html.match(/https?:\/\/[^"'()\s]+\.css/i)||[])[0];
-    if(css){preload+=`<link rel="preload" as="style" href="${css}" crossorigin fetchpriority="high">`}
-    const img = (html.match(/https?:\/\/[^"'()\s]+\.(?:png|jpg|jpeg|webp|gif|svg)/i)||[])[0];
-    if(img){preload+=`<link rel="preload" as="image" href="${img}" crossorigin fetchpriority="high">`}
-    return hints+preload;
-}
-function xbIframeClientScript(){return `
+function iframeClientScript() { return `
 (function(){
   function measureVisibleHeight(){
     try{
       var doc = document;
-      var target = doc.querySelector('.calendar-wrapper') || doc.body;
+      var target = doc.body;
       if(!target) return 0;
       var minTop = Infinity, maxBottom = 0;
       function addRect(el){
@@ -815,12 +801,12 @@ function xbIframeClientScript(){return `
     document.addEventListener(evt, function(){ send(false) }, {passive:true, capture:true});
   });
   try{
-    var root = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+    var root = document.body || document.documentElement;
     var ro = new ResizeObserver(function(){ send(false) });
     ro.observe(root);
   }catch(e){
     try{
-      var rootMO = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+      var rootMO = document.body || document.documentElement;
       new MutationObserver(function(){ send(false) })
         .observe(rootMO, {childList:true, subtree:true, attributes:true, characterData:true});
     }catch(e){}
@@ -854,80 +840,54 @@ function xbIframeClientScript(){return `
       }catch(e){ reject(e) }
     })
   };
-  try{ if(typeof window['stscript'] !== 'function') window['stscript'] = window.STscript }catch(e){}
-})();`}
-function xbTemplateBridgeScript(){return `
-(function(){
-  window.updateTemplateVariables = function(variables){
-    try{
-      if(!variables) return;
-      Object.entries(variables).forEach(function(pair){
-        var varName = pair[0], value = pair[1];
-        var elements = document.querySelectorAll('[data-xiaobaix-var="'+varName+'"]');
-        var txt = '';
-        if(value === null || value === undefined){ txt = '' }
-        else if(Array.isArray(value)){ txt = value.join(', ') }
-        else if(typeof value === 'object'){ try{ txt = JSON.stringify(value) }catch(e){ txt = String(value) } }
-        else{ txt = String(value) }
-        elements.forEach(function(el){ el.textContent = txt; el.style.display = '' });
-      });
-      try{ if(typeof window.updateAllData === 'function'){ window.updateAllData() } }catch(e){}
-      try{ window.dispatchEvent(new Event('contentUpdated')) }catch(e){}
-    }catch(e){}
-  };
-})();`}
+  if (typeof window.updateTemplateVariables !== 'function') {
+    window.updateTemplateVariables = function(variables) {
+      try{
+        Object.entries(variables || {}).forEach(function([k,v]){
+          document.querySelectorAll('[data-xiaobaix-var="'+k+'"]').forEach(function(el){
+            if (v == null) el.textContent = '';
+            else if (Array.isArray(v)) el.textContent = v.join(', ');
+            else if (typeof v === 'object') el.textContent = JSON.stringify(v);
+            else el.textContent = String(v);
+            el.style.display = '';
+          });
+        });
+      }catch(e){}
+      try{ window.dispatchEvent(new Event('contentUpdated')); }catch(e){}
+      try{ send(true) }catch(e){}
+    };
+  }
+})();` }
 
-const xbHashToBlobUrl = new Map();
-const xbBlobLRU = [];
-const XB_BLOB_CACHE_LIMIT = 32;
-
-function xbSetIframeBlobHTML(iframe, fullHTML, codeHash){
-    const existing = xbHashToBlobUrl.get(codeHash);
-    if (existing) {
-        iframe.src = existing;
-        return;
-    }
-    const blob = new Blob([fullHTML], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    iframe.src = url;
-    xbHashToBlobUrl.set(codeHash, url);
-    xbBlobLRU.push(codeHash);
-    while (xbBlobLRU.length > XB_BLOB_CACHE_LIMIT) {
-        const old = xbBlobLRU.shift();
-        const u = xbHashToBlobUrl.get(old);
-        xbHashToBlobUrl.delete(old);
-        try { URL.revokeObjectURL(u) } catch(e){}
-    }
-}
-
-function xbBuildWrappedHtml(html){
+function buildWrappedHtml(content) {
     const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
     const baseTag = `<base href="${origin}/">`;
     const wrapperToggle = !!(extension_settings && extension_settings[EXT_ID] && extension_settings[EXT_ID].wrapperIframe);
-    const optWrapperUrl = `${origin}/${extensionFolderPath}/Wrapperiframe.js`;
-    const optWrapper = wrapperToggle ? `<script src="${optWrapperUrl}"></script>` : "";
-    const api = `<script>${xbIframeClientScript()}</script><script>${xbTemplateBridgeScript()}</script>`;
-    const headHints = xbBuildResourceHints(html);
-    const vhFix = `<style>html,body{height:auto!important;min-height:0!important;max-height:none!important}.profile-container,[style*="100vh"]{height:auto!important;min-height:600px!important}[style*="height:100%"]{height:auto!important;min-height:100%!important}</style>`;
-    if (html.includes('<html') && html.includes('</html')) {
-        if (html.includes('<head>')) return html.replace('<head>', `<head>${baseTag}${api}${optWrapper}${headHints}${vhFix}`);
-        if (html.includes('</head>')) return html.replace('</head>', `${baseTag}${api}${optWrapper}${headHints}${vhFix}</head>`);
-        return html.replace('<body', `<head>${baseTag}${api}${optWrapper}${headHints}${vhFix}</head><body`);
-    }
-    return `<!DOCTYPE html>
-<html>
-<head>
+    const wrapperScript = wrapperToggle ? `<script src="${origin}/${extensionFolderPath}/Wrapperiframe.js"></script>` : '';
+    const vhFix = `<style>html,body{height:auto!important;min-height:0!important;max-height:none!important}[style*="100vh"]{height:auto!important;min-height:600px!important}[style*="height:100%"]{height:auto!important;min-height:100%!important}</style>`;
+    const reset = `<style>html,body{margin:0;padding:0;background:transparent;font-family:inherit;color:inherit}</style>`;
+    const headBits = `
 <meta charset="UTF-8">
 <meta name="color-scheme" content="dark light">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 ${baseTag}
-${api}
-${optWrapper}
-${headHints}
+<script>${iframeClientScript()}</script>
+${wrapperScript}
 ${vhFix}
-<style>html,body{margin:0;padding:0;background:transparent;font-family:inherit;color:inherit}</style>
+${reset}
+`;
+    if (content.includes('<html') && content.includes('</html')) {
+        if (content.includes('<head>')) return content.replace('<head>', `<head>${headBits}`);
+        if (content.includes('</head>')) return content.replace('</head>', `${headBits}</head>`);
+        return content.replace('<body', `<head>${headBits}</head><body`);
+    }
+    return `<!DOCTYPE html>
+<html>
+<head>
+${headBits}
 </head>
-<body>${html}</body></html>`;
+<body>${content}</body>
+</html>`;
 }
 
 class IframeManager {
@@ -935,20 +895,15 @@ class IframeManager {
         let processed = content;
         try {
             const { substituteParams } = getContext() || {};
-            if (typeof substituteParams === 'function') {
-                processed = substituteParams(content);
-            }
-        } catch (e) {}
+            if (typeof substituteParams === 'function') processed = substituteParams(content);
+        } catch {}
         const iframeId = `xiaobaix-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const sandboxMode = !!(extension_settings && extension_settings[EXT_ID] && extension_settings[EXT_ID].sandboxMode);
-        const sandboxAttr = sandboxMode ? 'allow-scripts' : 'allow-scripts allow-same-origin';
         const wrapperHtml = `
         <div class="xiaobaix-iframe-wrapper" style="margin:0;">
             <iframe id="${iframeId}" class="xiaobaix-iframe"
                 style="width:100%;border:none;background:transparent;overflow:hidden;height:0;margin:0;padding:0;display:block;contain:layout paint style;will-change:height;min-height:50px"
-                frameborder="0" scrolling="no" sandbox="${sandboxAttr}"></iframe>
-        </div>
-    `;
+                frameborder="0" scrolling="no" loading="eager"></iframe>
+        </div>`;
         setTimeout(() => {
             const iframe = document.getElementById(iframeId);
             if (iframe) this.writeContentToIframe(iframe, processed);
@@ -957,19 +912,21 @@ class IframeManager {
     }
     static writeContentToIframe(iframe, content) {
         try {
-            const full = xbBuildWrappedHtml(content);
-            const useBlob = !!(extension_settings && extension_settings[EXT_ID] && extension_settings[EXT_ID].useBlob);
-            if (useBlob) {
-                const hash = djb2(content);
-                xbSetIframeBlobHTML(iframe, full, hash);
+            const html = buildWrappedHtml(content);
+            const sbox = !!(extension_settings && extension_settings[EXT_ID] && extension_settings[EXT_ID].sandboxMode);
+            iframe.setAttribute('sandbox', sbox ? 'allow-scripts' : 'allow-scripts allow-same-origin');
+            iframe.srcdoc = html;
+            const probe = () => {
+                try { iframe.contentWindow?.postMessage({ type: 'probe' }, '*'); } catch {}
+            };
+            if (iframe.complete) {
+                setTimeout(probe, 0);
             } else {
-                iframe.srcdoc = full;
+                iframe.addEventListener('load', () => setTimeout(probe, 0), { once: true });
             }
-            try { iframe.contentWindow?.postMessage({ type: 'probe' }, '*'); } catch(e){}
-        } catch (err) {}
-    }
-    static getInlineScript() {
-        return xbIframeClientScript();
+        } catch (err) {
+            console.error('[Template Editor] 写入 iframe 內容失败:', err);
+        }
     }
     static async sendUpdate(messageId, vars) {
         const iframe = await this.waitForIframe(messageId);
@@ -982,7 +939,9 @@ class IframeManager {
                 variables: vars,
                 source: 'xiaobaix-host'
             }, '*');
-        } catch (error) {}
+        } catch (error) {
+            console.error(`[LittleWhiteBox] Failed to send iframe message:`, error);
+        }
     }
     static async waitForIframe(messageId, maxAttempts = 20, delay = 50) {
         const selector = `#chat .mes[mesid="${messageId}"] iframe.xiaobaix-iframe`;
@@ -1026,7 +985,9 @@ class IframeManager {
                 if (iframe.contentWindow.updateTemplateVariables) {
                     iframe.contentWindow.updateTemplateVariables(vars);
                 }
-            } catch (error) {}
+            } catch (error) {
+                console.error(`[LittleWhiteBox] Failed to update iframe variables:`, error);
+            }
         };
         if (iframe.contentDocument?.readyState === 'complete') {
             update();
@@ -1320,11 +1281,9 @@ function updateStatus() {
     const name = characters[this_chid].name;
     const charSettings = TemplateSettings.getCurrentChar();
     if (charSettings.enabled && charSettings.template) {
-        $status.removeClass('no-character').addClass('has-settings')
-            .text(`${name} - 已启用模板功能`);
+        $status.removeClass('no-character').addClass('has-settings').text(`${name} - 已启用模板功能`);
     } else {
-        $status.removeClass('has-settings').addClass('no-character')
-            .text(`${name} - 未设置模板`);
+        $status.removeClass('has-settings').addClass('no-character').text(`${name} - 未设置模板`);
     }
 }
 
