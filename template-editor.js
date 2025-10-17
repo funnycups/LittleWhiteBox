@@ -87,7 +87,6 @@ class TemplateSettings {
             if (embeddedSettings?.enabled) result = embeddedSettings;
         }
         result = result || (this.get().characterBindings[avatar]?.enabled ? this.get().characterBindings[avatar] : null);
-        // 只緩存有效結果，避免將 null 緩存黏住
         if (result) state.caches.template.set(avatar, result);
         return result;
     }
@@ -737,6 +736,200 @@ class TemplateProcessor {
     }
 }
 
+function djb2(str){let h=5381;for(let i=0;i<str.length;i++){h=((h<<5)+h)^str.charCodeAt(i)}return (h>>>0).toString(16)}
+function xbBuildResourceHints(html){
+    const urls = Array.from(new Set((html.match(/https?:\/\/[^"'()\s]+/gi)||[]).map(u=>{try{return new URL(u).origin}catch{return null}}).filter(Boolean)));
+    let hints = ""; const maxHosts = 6;
+    for(let i=0;i<Math.min(urls.length,maxHosts);i++){const origin=urls[i];hints+=`<link rel="dns-prefetch" href="${origin}">`;hints+=`<link rel="preconnect" href="${origin}" crossorigin>`}
+    let preload = "";
+    const font = (html.match(/https?:\/\/[^"'()\s]+\.(?:woff2|woff|ttf|otf)/i)||[])[0];
+    if(font){const type=font.endsWith(".woff2")?"font/woff2":font.endsWith(".woff")?"font/woff":font.endsWith(".ttf")?"font/ttf":"font/otf";preload+=`<link rel="preload" as="font" href="${font}" type="${type}" crossorigin fetchpriority="high">`}
+    const css = (html.match(/https?:\/\/[^"'()\s]+\.css/i)||[])[0];
+    if(css){preload+=`<link rel="preload" as="style" href="${css}" crossorigin fetchpriority="high">`}
+    const img = (html.match(/https?:\/\/[^"'()\s]+\.(?:png|jpg|jpeg|webp|gif|svg)/i)||[])[0];
+    if(img){preload+=`<link rel="preload" as="image" href="${img}" crossorigin fetchpriority="high">`}
+    return hints+preload;
+}
+function xbIframeClientScript(){return `
+(function(){
+  function measureVisibleHeight(){
+    try{
+      var doc = document;
+      var target = doc.querySelector('.calendar-wrapper') || doc.body;
+      if(!target) return 0;
+      var minTop = Infinity, maxBottom = 0;
+      function addRect(el){
+        try{
+          var r = el.getBoundingClientRect();
+          if(r && r.height > 0){
+            if(minTop > r.top) minTop = r.top;
+            if(maxBottom < r.bottom) maxBottom = r.bottom;
+          }
+        }catch(e){}
+      }
+      addRect(target);
+      var children = target.children || [];
+      for(var i=0;i<children.length;i++){
+        var child = children[i];
+        if(!child) continue;
+        try{
+          var s = window.getComputedStyle(child);
+          if(s.display === 'none' || s.visibility === 'hidden') continue;
+          if(!child.offsetParent && s.position !== 'fixed') continue;
+        }catch(e){}
+        addRect(child);
+      }
+      return maxBottom > 0 ? Math.ceil(maxBottom - Math.min(minTop, 0)) : (target.scrollHeight || 0);
+    }catch(e){
+      return (document.body && document.body.scrollHeight) || 0;
+    }
+  }
+  function post(m){ try{ parent.postMessage(m,'*') }catch(e){} }
+  var rafPending=false, lastH=0;
+  var HYSTERESIS = 2;
+  function send(force){
+    if(rafPending && !force) return;
+    rafPending = true;
+    requestAnimationFrame(function(){
+      rafPending = false;
+      var h = measureVisibleHeight();
+      if(force || Math.abs(h - lastH) >= HYSTERESIS){
+        lastH = h;
+        post({height:h, force:!!force});
+      }
+    });
+  }
+  try{ send(true) }catch(e){}
+  document.addEventListener('DOMContentLoaded', function(){ send(true) }, {once:true});
+  window.addEventListener('load', function(){ send(true) }, {once:true});
+  try{
+    if(document.fonts){
+      document.fonts.ready.then(function(){ send(true) }).catch(function(){});
+      if(document.fonts.addEventListener){
+        document.fonts.addEventListener('loadingdone', function(){ send(true) });
+        document.fonts.addEventListener('loadingerror', function(){ send(true) });
+      }
+    }
+  }catch(e){}
+  ['transitionend','animationend'].forEach(function(evt){
+    document.addEventListener(evt, function(){ send(false) }, {passive:true, capture:true});
+  });
+  try{
+    var root = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+    var ro = new ResizeObserver(function(){ send(false) });
+    ro.observe(root);
+  }catch(e){
+    try{
+      var rootMO = document.querySelector('.calendar-wrapper') || document.body || document.documentElement;
+      new MutationObserver(function(){ send(false) })
+        .observe(rootMO, {childList:true, subtree:true, attributes:true, characterData:true});
+    }catch(e){}
+    window.addEventListener('resize', function(){ send(false) }, {passive:true});
+  }
+  window.addEventListener('message', function(e){
+    var d = e && e.data || {};
+    if(d && d.type === 'probe') setTimeout(function(){ send(true) }, 10);
+  });
+  window.STscript = function(command){
+    return new Promise(function(resolve,reject){
+      try{
+        if(!command){ reject(new Error('empty')); return }
+        if(command[0] !== '/') command = '/' + command;
+        var id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+        function onMessage(e){
+          var d = e && e.data || {};
+          if(d.source !== 'xiaobaix-host') return;
+          if((d.type === 'commandResult' || d.type === 'commandError') && d.id === id){
+            try{ window.removeEventListener('message', onMessage) }catch(e){}
+            if(d.type === 'commandResult') resolve(d.result);
+            else reject(new Error(d.error || 'error'));
+          }
+        }
+        try{ window.addEventListener('message', onMessage) }catch(e){}
+        post({type:'runCommand', id, command});
+        setTimeout(function(){
+          try{ window.removeEventListener('message', onMessage) }catch(e){}
+          reject(new Error('Command timeout'))
+        }, 180000);
+      }catch(e){ reject(e) }
+    })
+  };
+  try{ if(typeof window['stscript'] !== 'function') window['stscript'] = window.STscript }catch(e){}
+})();`}
+function xbTemplateBridgeScript(){return `
+(function(){
+  window.updateTemplateVariables = function(variables){
+    try{
+      if(!variables) return;
+      Object.entries(variables).forEach(function(pair){
+        var varName = pair[0], value = pair[1];
+        var elements = document.querySelectorAll('[data-xiaobaix-var="'+varName+'"]');
+        var txt = '';
+        if(value === null || value === undefined){ txt = '' }
+        else if(Array.isArray(value)){ txt = value.join(', ') }
+        else if(typeof value === 'object'){ try{ txt = JSON.stringify(value) }catch(e){ txt = String(value) } }
+        else{ txt = String(value) }
+        elements.forEach(function(el){ el.textContent = txt; el.style.display = '' });
+      });
+      try{ if(typeof window.updateAllData === 'function'){ window.updateAllData() } }catch(e){}
+      try{ window.dispatchEvent(new Event('contentUpdated')) }catch(e){}
+    }catch(e){}
+  };
+})();`}
+
+const xbHashToBlobUrl = new Map();
+const xbBlobLRU = [];
+const XB_BLOB_CACHE_LIMIT = 32;
+
+function xbSetIframeBlobHTML(iframe, fullHTML, codeHash){
+    const existing = xbHashToBlobUrl.get(codeHash);
+    if (existing) {
+        iframe.src = existing;
+        return;
+    }
+    const blob = new Blob([fullHTML], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    iframe.src = url;
+    xbHashToBlobUrl.set(codeHash, url);
+    xbBlobLRU.push(codeHash);
+    while (xbBlobLRU.length > XB_BLOB_CACHE_LIMIT) {
+        const old = xbBlobLRU.shift();
+        const u = xbHashToBlobUrl.get(old);
+        xbHashToBlobUrl.delete(old);
+        try { URL.revokeObjectURL(u) } catch(e){}
+    }
+}
+
+function xbBuildWrappedHtml(html){
+    const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
+    const baseTag = `<base href="${origin}/">`;
+    const wrapperToggle = !!(extension_settings && extension_settings[EXT_ID] && extension_settings[EXT_ID].wrapperIframe);
+    const optWrapperUrl = `${origin}/${extensionFolderPath}/Wrapperiframe.js`;
+    const optWrapper = wrapperToggle ? `<script src="${optWrapperUrl}"></script>` : "";
+    const api = `<script>${xbIframeClientScript()}</script><script>${xbTemplateBridgeScript()}</script>`;
+    const headHints = xbBuildResourceHints(html);
+    const vhFix = `<style>html,body{height:auto!important;min-height:0!important;max-height:none!important}.profile-container,[style*="100vh"]{height:auto!important;min-height:600px!important}[style*="height:100%"]{height:auto!important;min-height:100%!important}</style>`;
+    if (html.includes('<html') && html.includes('</html')) {
+        if (html.includes('<head>')) return html.replace('<head>', `<head>${baseTag}${api}${optWrapper}${headHints}${vhFix}`);
+        if (html.includes('</head>')) return html.replace('</head>', `${baseTag}${api}${optWrapper}${headHints}${vhFix}</head>`);
+        return html.replace('<body', `<head>${baseTag}${api}${optWrapper}${headHints}${vhFix}</head><body`);
+    }
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="color-scheme" content="dark light">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+${baseTag}
+${api}
+${optWrapper}
+${headHints}
+${vhFix}
+<style>html,body{margin:0;padding:0;background:transparent;font-family:inherit;color:inherit}</style>
+</head>
+<body>${html}</body></html>`;
+}
+
 class IframeManager {
     static createWrapper(content) {
         let processed = content;
@@ -747,11 +940,13 @@ class IframeManager {
             }
         } catch (e) {}
         const iframeId = `xiaobaix-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const sandboxMode = !!(extension_settings && extension_settings[EXT_ID] && extension_settings[EXT_ID].sandboxMode);
+        const sandboxAttr = sandboxMode ? 'allow-scripts' : 'allow-scripts allow-same-origin';
         const wrapperHtml = `
-        <div class="xiaobaix-iframe-wrapper" style="margin: 10px 0;">
+        <div class="xiaobaix-iframe-wrapper" style="margin:0;">
             <iframe id="${iframeId}" class="xiaobaix-iframe"
-                style="width:100%;border:none;background:transparent;overflow:hidden;margin:0;padding:0;display:block"
-                frameborder="0" scrolling="no"></iframe>
+                style="width:100%;border:none;background:transparent;overflow:hidden;height:0;margin:0;padding:0;display:block;contain:layout paint style;will-change:height;min-height:50px"
+                frameborder="0" scrolling="no" sandbox="${sandboxAttr}"></iframe>
         </div>
     `;
         setTimeout(() => {
@@ -762,94 +957,19 @@ class IframeManager {
     }
     static writeContentToIframe(iframe, content) {
         try {
-            const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
-            const baseTag = `<base href="${origin}/">`;
-            const wrapperToggle = !!(extension_settings && extension_settings[EXT_ID] && extension_settings[EXT_ID].wrapperIframe);
-            const wrapperScript = wrapperToggle ? `<script src="${origin}/${extensionFolderPath}/Wrapperiframe.js"></script>` : '';
-            const script = `${wrapperScript}<script type="text/javascript">${this.getInlineScript()}</script>`;
-            let wrapped = content;
-            const insertPoints = [['</body>', script + '</body>'], ['</html>', script + '</html>']];
-            for (const [point, replacement] of insertPoints) {
-                if (content.includes(point)) {
-                    wrapped = content.replace(point, replacement);
-                    break;
-                }
+            const full = xbBuildWrappedHtml(content);
+            const useBlob = !!(extension_settings && extension_settings[EXT_ID] && extension_settings[EXT_ID].useBlob);
+            if (useBlob) {
+                const hash = djb2(content);
+                xbSetIframeBlobHTML(iframe, full, hash);
+            } else {
+                iframe.srcdoc = full;
             }
-            if (wrapped === content) {
-                wrapped = `<!DOCTYPE html><html><head><meta charset="utf-8">${baseTag}</head><body>${content}${script}</body></html>`;
-            }
-            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-            iframeDoc.open();
-            iframeDoc.write(wrapped);
-            iframeDoc.close();
-        } catch (err) {
-            console.error('[Template Editor] 寫入 iframe 內容失敗:', err);
-        }
+            try { iframe.contentWindow?.postMessage({ type: 'probe' }, '*'); } catch(e){}
+        } catch (err) {}
     }
     static getInlineScript() {
-        return `
-        window.STBridge = {
-            sendMessageToST: (type, data = {}) => {
-                try { window.parent.postMessage({ source: 'xiaobaix-iframe', type, ...data }, '*'); } catch(e) {}
-            },
-            updateHeight: function() {
-                const height = document.body.scrollHeight;
-                if (height > 0) this.sendMessageToST('resize', { height });
-            }
-        };
-        window.updateTemplateVariables = function(variables) {
-            Object.entries(variables).forEach(([varName, value]) => {
-                const elements = document.querySelectorAll(\`[data-xiaobaix-var="\${varName}"]\`);
-                elements.forEach(el => {
-                    if (value === null || value === undefined) {
-                        el.textContent = '';
-                    } else if (Array.isArray(value)) {
-                        el.textContent = value.join(', ');
-                    } else if (typeof value === 'object') {
-                        el.textContent = JSON.stringify(value);
-                    } else {
-                        el.textContent = String(value);
-                    }
-                    el.style.display = '';
-                });
-            });
-            if (typeof window.updateAllData === 'function') {
-                window.updateAllData();
-            }
-            window.dispatchEvent(new Event('contentUpdated'));
-            window.STBridge.updateHeight();
-        };
-        window.STscript = function(command){
-            return new Promise(function(resolve, reject){
-                try{
-                    if(!command){ reject(new Error('empty')); return; }
-                    if(command[0] !== '/') command = '/' + command;
-                    var id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-                    function onMessage(e){
-                        var d = e && e.data || {};
-                        if(d.source !== 'xiaobaix-host') return;
-                        if((d.type === 'commandResult' || d.type === 'commandError') && d.id === id){
-                            try{ window.removeEventListener('message', onMessage); }catch(_){}
-                            if(d.type === 'commandResult') resolve(d.result);
-                            else reject(new Error(d.error || 'error'));
-                        }
-                    }
-                    try{ window.addEventListener('message', onMessage); }catch(_){}
-                    try{ window.parent.postMessage({ type: 'runCommand', id: id, command: command }, '*'); }catch(_){}
-                    setTimeout(function(){
-                        try{ window.removeEventListener('message', onMessage); }catch(_){}
-                        reject(new Error('timeout'));
-                    }, 180000);
-                }catch(e){ reject(e); }
-            });
-        };
-        function setup() {
-            window.STBridge.updateHeight();
-            new MutationObserver(() => window.STBridge.updateHeight())
-                .observe(document.body, { attributes: true, childList: true, subtree: true });
-        }
-        document.readyState === 'loading' ?
-            document.addEventListener('DOMContentLoaded', setup) : setup();`;
+        return xbIframeClientScript();
     }
     static async sendUpdate(messageId, vars) {
         const iframe = await this.waitForIframe(messageId);
@@ -862,9 +982,7 @@ class IframeManager {
                 variables: vars,
                 source: 'xiaobaix-host'
             }, '*');
-        } catch (error) {
-            console.error(`[LittleWhiteBox] Failed to send iframe message:`, error);
-        }
+        } catch (error) {}
     }
     static async waitForIframe(messageId, maxAttempts = 20, delay = 50) {
         const selector = `#chat .mes[mesid="${messageId}"] iframe.xiaobaix-iframe`;
@@ -908,9 +1026,7 @@ class IframeManager {
                 if (iframe.contentWindow.updateTemplateVariables) {
                     iframe.contentWindow.updateTemplateVariables(vars);
                 }
-            } catch (error) {
-                console.error(`[LittleWhiteBox] Failed to update iframe variables:`, error);
-            }
+            } catch (error) {}
         };
         if (iframe.contentDocument?.readyState === 'complete') {
             update();
@@ -1276,7 +1392,6 @@ async function openEditor() {
             recentMessageCount: parseInt(String($html.find('#recent_message_count').val())) || 5,
             skipFirstMessage: $html.find('#skip_first_message').prop('checked')
         });
-        // 立即清理本地狀態，避免舊緩存干擾
         state.clear();
         updateStatus();
         setTimeout(() => MessageHandler.reapplyAll(), 300);
@@ -1299,7 +1414,6 @@ function importGlobal(event) {
             Object.assign(TemplateSettings.get(), data);
             saveSettingsDebounced();
             $("#xiaobaix_template_enabled").prop("checked", data.enabled);
-            // 清理狀態，確保新設置生效
             state.clear();
             updateStatus();
             setTimeout(() => MessageHandler.reapplyAll(), 150);
