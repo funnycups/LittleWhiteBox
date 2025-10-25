@@ -2029,8 +2029,7 @@ async function runImmediateVarEvents() {
         }
         const disp=block.querySelector('.lwb-ve-display')?.value??''; const js=block.querySelector('.lwb-ve-js')?.value??'';
         const dispCore=String(disp).replace(/^\n+|\n+$/g,'');
-        if(dispCore && !condStr){ U.toast.err('填写了"将显示世界书内容"时，必须提供执行条件'); return { lines:[] }; }
-        if(!dispCore && !js && !condStr) return { lines:[] };
+        if(!dispCore && !js) return { lines:[] };
         if(condStr) lines.push(`condition: ${condStr}`);
         if(dispCore!==''){ const stored='\n'+dispCore+'\n'; lines.push('display: "'+stored.replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"'); }
         if(js!=='') lines.push(`js_execute: ${JSON.stringify(js)}`);
@@ -2120,20 +2119,32 @@ async function runImmediateVarEvents() {
       });
 
       ui.btnOk.addEventListener('click',()=>{
-        try{ const maybe=pagesWrap._lwbRenderPage; if(typeof maybe==='function'){ const tabEls=U.qa(ui.tabs,'.lwb-ve-tab'); for(let i=0;i<tabEls.length;i++){ try{ maybe(i);}catch{} } } }catch{}
         const pageEls=U.qa(pagesWrap,'.lwb-ve-page'); if(pageEls.length===0){ closeVarEditor(); return; }
         const builtBlocks=[]; const seenIds=new Set();
-        pageEls.forEach((p)=>{ const wrap=p.querySelector(':scope > div'); const blks=wrap?U.qa(wrap,'.lwb-ve-event'):[];
+        pageEls.forEach((p)=>{ 
+          const wrap=p.querySelector(':scope > div'); 
+          const blks=wrap?U.qa(wrap,'.lwb-ve-event'):[];
           const lines=['<varevent>'];
-          blks.forEach((b,j)=>{ const r=UI.processEventBlock(b,j);
-            if(r.lines.length>0){ const idLine=r.lines[0]; const mm=idLine.match(/^\[\s*event\.([^\]]+)\]/i); const id=mm?mm[1]:`evt_${j+1}`;
-              let use=id, k=2; while(seenIds.has(use)) use=`${id}_${k++}`; if(use!==id) r.lines[0]=`[event.${use}]`; seenIds.add(use);
+          let hasEvents = false;
+          blks.forEach((b,j)=>{ 
+            const r=UI.processEventBlock(b,j);
+            if(r.lines.length>0){ 
+              const idLine=r.lines[0]; 
+              const mm=idLine.match(/^\[\s*event\.([^\]]+)\]/i); 
+              const id=mm?mm[1]:`evt_${j+1}`;
+              let use=id, k=2; 
+              while(seenIds.has(use)) use=`${id}_${k++}`; 
+              if(use!==id) r.lines[0]=`[event.${use}]`; 
+              seenIds.add(use);
               lines.push(...r.lines);
+              hasEvents = true;
             }
           });
-          lines.push('</varevent>'); builtBlocks.push(lines.join('\n'));
+          if (hasEvents) {
+            lines.push('</varevent>'); 
+            builtBlocks.push(lines.join('\n'));
+          }
         });
-
         const oldVal=textarea.value||''; const originals=[]; const RE=U.getTagRE().varevent; RE.lastIndex=0; let m;
         while((m=RE.exec(oldVal))!==null){ originals.push({start:m.index,end:RE.lastIndex}); }
         let acc=''; let pos=0; const minLen=Math.min(originals.length,builtBlocks.length);
