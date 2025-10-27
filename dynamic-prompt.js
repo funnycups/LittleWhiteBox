@@ -2861,9 +2861,17 @@ function startAnalysisStreaming(prompt, isAuto = false) {
 function startAnalysisPolling(sessionId = 'xb10') {
     stopAnalysisPolling();
     const sid = String(sessionId);
+
+    // 增加初始延迟，避免过早检查流式状态
+    let checkCount = 0;
+    const initialDelay = 3000; // 3秒初始延迟
+
     dynamicPromptState.analysis.streamTimerId = setInterval(() => {
+        checkCount++;
+
         const gen = (window.parent && window.parent.xiaobaixStreamingGeneration) || window.xiaobaixStreamingGeneration;
         if (!gen || typeof gen.getLastGeneration !== 'function') return;
+
         const text = String(gen.getLastGeneration(sid) || '');
         if (text !== dynamicPromptState.analysis.lastText) {
             dynamicPromptState.analysis.lastText = text;
@@ -2872,6 +2880,12 @@ function startAnalysisPolling(sessionId = 'xb10') {
                 el.innerHTML = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
             }
         }
+
+        // 在3秒初始延迟内不检查流式状态
+        if (checkCount * 80 < initialDelay) {
+            return;
+        }
+
         const st = gen.getStatus?.(sid);
         if (st && st.isStreaming === false) {
             finalizeAnalysisStreaming(sid);
