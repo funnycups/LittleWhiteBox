@@ -3018,12 +3018,12 @@ function checkAutoAnalysis() {
     if (dynamicPromptState.userMessageCount >= settings.autoAnalysis.interval) {
         dynamicPromptState.userMessageCount = 0;
         // 立即提示用户
-        executeSlashCommand('/echo 🕒 自动分析将在5秒后开始...');
+        executeSlashCommand('/echo 🕒 自动分析将在15秒后开始...');
         // 延迟5秒启动自动分析，确保消息已完全发送
         setTimeout(() => {
             analysisQueue.push({ timestamp: Date.now(), type: 'auto' });
             processAnalysisQueue();
-        }, 5000);
+        }, 15000);
     }
 }
 async function processAnalysisQueue() {
