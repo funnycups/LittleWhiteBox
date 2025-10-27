@@ -2864,7 +2864,7 @@ function startAnalysisPolling(sessionId = 'xb10') {
 
     // 增加初始延迟，避免过早检查流式状态
     let checkCount = 0;
-    const initialDelay = 3000; // 3秒初始延迟
+    const initialDelay = 10000; // 3秒初始延迟
 
     dynamicPromptState.analysis.streamTimerId = setInterval(() => {
         checkCount++;
