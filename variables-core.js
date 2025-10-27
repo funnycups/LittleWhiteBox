@@ -1249,13 +1249,14 @@ function registerWIEventSystem() {
     let emitPatched = false;
     try {
       if (eventSource && typeof eventSource.emit === 'function' && !origEmitMap.has(eventSource)) {
-        const origEmit = eventSource.emit.bind(eventSource);
+        const origEmit = eventSource.emit;
         origEmitMap.set(eventSource, origEmit);
-        eventSource.emit = async function (ev, payload) {
-          const result = await origEmit(ev, payload);
+        eventSource.emit = async function (...args) {
+          const [ev, ...rest] = args;
+          const result = await origEmit.apply(this, args);
           try {
             if (ev === event_types.CHAT_COMPLETION_PROMPT_READY) {
-              await lateChatReplacementHandler(payload);
+              await lateChatReplacementHandler(rest[0]);
             }
           } catch {}
           return result;
